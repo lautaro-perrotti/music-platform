@@ -1,0 +1,17 @@
+{
+  "upstream_repository": "https://github.com/jpoindexter/ableton-mcp",
+  "upstream_commit": "unpinned-shallow-2026-09-13",
+  "vendored_commit": "local-prelive-hardening",
+  "local_patches": [
+    "default bind 127.0.0.1",
+    "refuse 0.0.0.0 / :: bind",
+    "protocol_hello handshake",
+    "echo request_id",
+    "LIVE-2 master track_index=-1 + transport/capture capabilities",
+    "LIVE-2.2 input/output routing channels + create_audio_clip + clip warping"
+  ],
+  "protocol_version": "1",
+  "checksum_sha256": "dcba4316546f787346bd637802570434ad95bc2b2128b0dfd1aa611014fa6724",
+  "auto_update": false,
+  "idempotency_decision": "Reconciliation at the Copilot layer. No Remote Script command dedup. Upstream does not advertise idempotency; retries of NON_IDEMPOTENT writes are allowed only after a read proves the postcondition is absent."
+}

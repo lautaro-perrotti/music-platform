@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Listening Booth</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="booth">
+    <header class="rail">
+      <div class="brand">Listening Booth</div>
+      <div class="counter" id="counter">CASE — / —</div>
+      <label class="autoplay">
+        <input type="checkbox" id="autoplay" checked />
+        auto-play next
+      </label>
+    </header>
+
+    <div class="tape" aria-hidden="true">
+      <div class="tape-fill" id="progress"></div>
+    </div>
+    <div class="meta-row">
+      <span id="counts">0 completed</span>
+      <span id="flash"></span>
+      <span id="remaining">0 remaining</span>
+    </div>
+
+    <main class="stage" id="stage">
+      <div class="lamp" id="lamp" aria-hidden="true"></div>
+      <div class="transport">
+        <button type="button" class="ghost" id="replay" title="Replay (R)">↺</button>
+        <button type="button" class="play" id="play" title="Play/Pause (Space)">Play</button>
+        <input type="range" id="seek" min="0" max="1000" value="0" />
+        <span class="time" id="time">0:00 / 0:00</span>
+        <input type="range" id="vol" min="0" max="100" value="90" title="Volume" />
+      </div>
+      <audio id="player" preload="auto"></audio>
+
+      <form id="form" class="sheet" autocomplete="off">
+        <fieldset>
+          <legend>Overall feel <kbd>1–5</kbd></legend>
+          <div class="pills" data-group="overall_feel">
+            <button type="button" data-value="VERY_GOOD">Very good</button>
+            <button type="button" data-value="GOOD">Good</button>
+            <button type="button" data-value="UNSURE">Unsure</button>
+            <button type="button" data-value="BAD">Bad</button>
+            <button type="button" data-value="VERY_BAD">Very bad</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Would you change something? <kbd>Y N U</kbd></legend>
+          <div class="pills" data-group="would_change">
+            <button type="button" data-value="YES">Yes</button>
+            <button type="button" data-value="NO">No</button>
+            <button type="button" data-value="UNSURE">Unsure</button>
+          </div>
+        </fieldset>
+
+        <div id="quick-dims" class="dims hidden">
+          <fieldset>
+            <legend>Groove feels right</legend>
+            <div class="pills" data-group="groove_feels_right">
+              <button type="button" data-value="YES">Yes</button>
+              <button type="button" data-value="NO">No</button>
+              <button type="button" data-value="UNSURE">Unsure</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Low-end feels right</legend>
+            <div class="pills" data-group="low_end_feels_right">
+              <button type="button" data-value="YES">Yes</button>
+              <button type="button" data-value="NO">No</button>
+              <button type="button" data-value="UNSURE">Unsure</button>
+            </div>
+          </fieldset>
+        </div>
+
+        <button type="button" class="text-link" id="more">More detail</button>
+
+        <div id="deep" class="deep hidden">
+          <fieldset>
+            <legend>What is the problem? <span class="hint">multi-select</span></legend>
+            <div class="chips" data-multi="problem_types">
+              <button type="button" data-value="LOW_END">Low-end</button>
+              <button type="button" data-value="KICK_BASS_RELATIONSHIP">Kick / bass</button>
+              <button type="button" data-value="GROOVE">Groove</button>
+              <button type="button" data-value="TIMING">Timing</button>
+              <button type="button" data-value="LEVEL_BALANCE">Level</button>
+              <button type="button" data-value="SPECTRAL_BALANCE">Spectrum</button>
+              <button type="button" data-value="DYNAMICS">Dynamics</button>
+              <button type="button" data-value="SOUND_SELECTION">Sound</button>
+              <button type="button" data-value="ARRANGEMENT">Arrangement</button>
+              <button type="button" data-value="ENERGY">Energy</button>
+              <button type="button" data-value="TRANSITION">Transition</button>
+              <button type="button" data-value="STEREO_IMAGE">Stereo</button>
+              <button type="button" data-value="VOCALS">Vocals</button>
+              <button type="button" data-value="HARMONY">Harmony</button>
+              <button type="button" data-value="MELODY">Melody</button>
+              <button type="button" data-value="RHYTHM">Rhythm</button>
+              <button type="button" data-value="OTHER">Other</button>
+              <button type="button" data-value="UNKNOWN">Unknown</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Likely cause <span class="hint">optional, multi</span></legend>
+            <div class="chips" data-multi="likely_causes">
+              <button type="button" data-value="TEMPORAL">Temporal</button>
+              <button type="button" data-value="SPECTRAL">Spectral</button>
+              <button type="button" data-value="LEVEL">Level</button>
+              <button type="button" data-value="ARRANGEMENT">Arrangement</button>
+              <button type="button" data-value="SOUND_SELECTION">Sound</button>
+              <button type="button" data-value="GROOVE">Groove</button>
+              <button type="button" data-value="DYNAMICS">Dynamics</button>
+              <button type="button" data-value="HARMONIC">Harmonic</button>
+              <button type="button" data-value="PERFORMANCE">Performance</button>
+              <button type="button" data-value="UNKNOWN">Unknown</button>
+              <button type="button" data-value="OTHER">Other</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>What would you try? <span class="hint">intent only</span></legend>
+            <div class="chips" data-multi="desired_actions">
+              <button type="button" data-value="NO_CHANGE">No change</button>
+              <button type="button" data-value="CHANGE_LEVEL">Level</button>
+              <button type="button" data-value="CHANGE_EQ_OR_SPECTRUM">EQ / spectrum</button>
+              <button type="button" data-value="CHANGE_DYNAMICS">Dynamics</button>
+              <button type="button" data-value="CHANGE_SOUND">Sound</button>
+              <button type="button" data-value="CHANGE_MIDI">MIDI</button>
+              <button type="button" data-value="CHANGE_NOTE_LENGTH">Note length</button>
+              <button type="button" data-value="CHANGE_GROOVE">Groove</button>
+              <button type="button" data-value="CHANGE_ARRANGEMENT">Arrangement</button>
+              <button type="button" data-value="CHANGE_AUTOMATION">Automation</button>
+              <button type="button" data-value="CHANGE_EFFECTS">Effects</button>
+              <button type="button" data-value="CHANGE_STEREO">Stereo</button>
+              <button type="button" data-value="REPLACE_ELEMENT">Replace</button>
+              <button type="button" data-value="OTHER">Other</button>
+              <button type="button" data-value="UNKNOWN">Unknown</button>
+            </div>
+          </fieldset>
+          <fieldset id="severity-box" class="hidden">
+            <legend>Severity</legend>
+            <div class="pills" data-group="severity">
+              <button type="button" data-value="MINOR">Minor</button>
+              <button type="button" data-value="MODERATE">Moderate</button>
+              <button type="button" data-value="MAJOR">Major</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Confidence</legend>
+            <div class="pills" data-group="confidence">
+              <button type="button" data-value="LOW">Low</button>
+              <button type="button" data-value="MEDIUM">Medium</button>
+              <button type="button" data-value="HIGH">High</button>
+            </div>
+          </fieldset>
+        </div>
+
+        <label class="notes-label" for="notes">¿Qué escuchás?</label>
+        <textarea id="notes" rows="3" placeholder=""></textarea>
+      </form>
+    </main>
+
+    <footer class="actions">
+      <button type="button" class="ghost" id="prev" title="Previous (←)">← Prev</button>
+      <button type="button" class="ghost" id="skip">Skip</button>
+      <button type="button" class="ghost" id="lock-case">Lock case</button>
+      <button type="button" class="primary" id="next">Next <kbd>Enter</kbd></button>
+    </footer>
+    <p class="shortcuts">Space play/pause · R replay · 1–5 feel · Y/N/U change · Enter save · ← →</p>
+  </div>
+
+  <div class="modal hidden" id="skip-modal">
+    <div class="modal-card">
+      <p>Skip this case?</p>
+      <div class="pills" id="skip-reasons">
+        <button type="button" data-value="CANT_JUDGE">Can't judge</button>
+        <button type="button" data-value="BAD_AUDIO">Bad audio</button>
+        <button type="button" data-value="TOO_SHORT">Too short</button>
+        <button type="button" data-value="WRONG_REGION">Wrong region</button>
+        <button type="button" data-value="FATIGUE">Fatigue</button>
+        <button type="button" data-value="OTHER">Other</button>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="ghost" id="skip-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="fatigue-modal">
+    <div class="modal-card">
+      <p id="fatigue-text">You completed 20 cases.</p>
+      <div class="modal-actions">
+        <button type="button" class="ghost" id="take-break">Take break</button>
+        <button type="button" class="primary" id="keep-going">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="done hidden" id="done">
+    <p>Queue complete.</p>
+    <p class="hint">Lock the batch when the labels should become ground truth.</p>
+    <button type="button" class="primary" id="lock-batch">Lock completed batch</button>
+    <p id="done-status"></p>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
