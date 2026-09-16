@@ -4,6 +4,10 @@ Inventory arrangement-active tracks for a region and capture trusted
 Post Mixer views via existing OFF_MIX_GRAPH host routing.
 
 No musical writes. No Astra. No new analyzers/actions.
+
+STATUS: VERIFIED / FROZEN. Do not retune, extend, or reopen this milestone.
+Primary SOURCE_EVIDENCE_GAP is CLOSED. FIXED_TAP_NOT_REPRESENTATIVE is the
+evidenced reason the Kick 808 Deep pad tap is not a Drums source view.
 """
 
 from __future__ import annotations
@@ -71,6 +75,9 @@ from copilot.schemas.session import SessionState, TrackState
 
 MILESTONE = "ARRANGEMENT_ACTIVE_SOURCE_ISOLATION_V1"
 ARTIFACT = "arrangement_active_source_isolation_v1.json"
+STATUS = "VERIFIED"
+FROZEN = True
+SOURCE_EVIDENCE_GAP = "CLOSED"
 
 ENGINEERING_REGION = {
     "id": "ENGINEERING_320_352",

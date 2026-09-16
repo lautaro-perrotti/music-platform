@@ -202,6 +202,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--autonomous-musical-evaluation-v3",
+        action="store_true",
+        help=(
+            "production-write: AUTONOMOUS_MUSICAL_EVALUATION_V3 "
+            "(new independent holdout + arrangement-active source isolation)."
+        ),
+    )
+    parser.add_argument(
         "--arrangement-active-source-isolation",
         action="store_true",
         help=(
@@ -244,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             audible_effect_v2=bool(args.audible_effect_verification_v2),
             autonomous_improvement=bool(args.first_autonomous_musical_improvement),
             autonomous_evaluation_v2=bool(args.autonomous_musical_evaluation_v2),
+            autonomous_evaluation_v3=bool(args.autonomous_musical_evaluation_v3),
             arrangement_source_isolation=bool(args.arrangement_active_source_isolation),
             delta=float(args.delta),
             target_track=args.target_track,
@@ -1800,6 +1809,7 @@ def _production_write(
     audible_effect_v2: bool = False,
     autonomous_improvement: bool = False,
     autonomous_evaluation_v2: bool = False,
+    autonomous_evaluation_v3: bool = False,
     arrangement_source_isolation: bool = False,
     delta: float = -0.02,
     target_track: str | None = None,
@@ -1838,6 +1848,7 @@ def _production_write(
         and not audible_effect_v2
         and not autonomous_improvement
         and not autonomous_evaluation_v2
+        and not autonomous_evaluation_v3
         and not arrangement_source_isolation
     ):
         payload = {
@@ -1853,6 +1864,7 @@ def _production_write(
                 "--audible-effect-verification-v2, "
                 "--first-autonomous-musical-improvement, "
                 "--autonomous-musical-evaluation-v2, "
+                "--autonomous-musical-evaluation-v3, "
                 "or --arrangement-active-source-isolation."
             ),
         }
@@ -1882,6 +1894,34 @@ def _production_write(
             )
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
             return 0 if status == "VERIFIED" else 2
+
+        if autonomous_evaluation_v3:
+            from copilot.audio.autonomous_musical_evaluation_v3 import (
+                run_autonomous_musical_evaluation_v3,
+            )
+
+            report = run_autonomous_musical_evaluation_v3(
+                adapter,
+                evidence=evidence,
+            )
+            status = report.get("AUTONOMOUS_MUSICAL_EVALUATION_V3")
+            logger.info(
+                "production-write autonomous-eval-v3 status=%s decision=%s writes=%s",
+                status,
+                report.get("final_musical_decision"),
+                report.get("MUSICAL WRITES"),
+            )
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            ok = status in {
+                "AUTONOMOUS_IMPROVEMENT_VERIFIED",
+                "NO_ACTION_REQUIRED",
+                "INSUFFICIENT_EVIDENCE",
+                "ACTION_NOT_AVAILABLE",
+                "AUTONOMOUS_CHANGE_ROLLED_BACK",
+                "DIAGNOSIS_UNSTABLE",
+                "NO_INDEPENDENT_ACTIVE_HOLDOUT",
+            }
+            return 0 if ok else 2
 
         if autonomous_evaluation_v2:
             from copilot.audio.autonomous_musical_evaluation_v2 import (
