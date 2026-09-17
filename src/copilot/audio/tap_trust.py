@@ -24,6 +24,8 @@ from copilot.audio.live_capture import (
     set_tap_enabled,
     set_tap_recording,
     staging_path,
+    wav_lock_owners,
+    wav_shared_read_ok,
 )
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
@@ -342,21 +344,30 @@ def reconcile_stale_taps(
         on_now = float((values.get("device on") or values.get("on") or {}).get("value") or 0.0)
         slot = row.get("slot")
         handle = None
+        shared = None
+        owners: list[dict[str, object]] = []
         staging = SLOT_STAGING.get(int(slot)) if slot is not None else None
         if staging:
-            handle = _exclusive_open_ok(staging_path(staging))
+            staging_file = staging_path(staging)
+            handle = _exclusive_open_ok(staging_file)
+            shared = wav_shared_read_ok(staging_file)
+            owners = wav_lock_owners(staging_file)
         state = {
             **row,
             "rec_after": rec_now,
             "device_on_after": on_now,
             "handle": handle,
+            "shared_read": shared,
+            "handle_owners": owners,
         }
         if rec_now >= 0.5:
             failed.append(state)
             continue
+        # Rec=0 is idle. Max sfrecord~ commonly keeps the default staging WAV
+        # open (winerror=32) after Device Off. That is not TAP_STALE_ARMED.
+        # Exclusive-open is a finalization probe for the ACTIVE recorder only.
         if handle is not None and handle.get("exists") and not handle.get("exclusive"):
-            failed.append(state)
-            continue
+            state["idle_handle_held"] = True
         excluded.append(state)
     if failed:
         raise AudioCaptureError(

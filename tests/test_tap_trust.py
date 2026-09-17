@@ -135,3 +135,73 @@ def test_udp_audit_names_global_port() -> None:
     audit = udp_control_audit()
     assert audit["udp_port"] == 19877
     assert "global" in audit["udp_scope"]
+
+
+def test_idle_locked_staging_is_not_stale_armed(monkeypatch, tmp_path: Path) -> None:
+    from copilot.audio.tap_trust import reconcile_stale_taps
+
+    locked = tmp_path / "_next_kick.wav"
+    locked.write_bytes(b"")
+
+    monkeypatch.setattr("copilot.audio.tap_trust.set_tap_recording", lambda *a, **k: None)
+    monkeypatch.setattr("copilot.audio.tap_trust.set_tap_enabled", lambda *a, **k: None)
+    monkeypatch.setattr("copilot.audio.tap_trust.staging_path", lambda name: locked)
+    monkeypatch.setattr(
+        "copilot.audio.tap_trust._exclusive_open_ok",
+        lambda p: {"exists": True, "exclusive": False, "error": "winerror=32", "size": 0},
+    )
+    monkeypatch.setattr(
+        "copilot.audio.tap_trust.wav_shared_read_ok",
+        lambda p: {"exists": True, "readable": True, "error": None, "size": 0},
+    )
+    monkeypatch.setattr(
+        "copilot.audio.tap_trust.wav_lock_owners",
+        lambda p: [{"pid": 14228, "app": "Ableton Live 12 Trial"}],
+    )
+
+    class Daw:
+        def get_device_parameters(self, *a, **k):
+            return {
+                "parameters": [
+                    {"name": "Rec", "value": 0.0, "index": 1},
+                    {"name": "Device On", "value": 0.0, "index": 0},
+                ]
+            }
+
+    inventory = [_tap(29, 0, 1, "Copilot Capture")]
+    out = reconcile_stale_taps(Daw(), inventory, recorder_ids={"tap:-1:0", "tap:30:0"})
+    assert out["ok"] is True
+    assert out["failed"] == []
+    assert out["excluded"][0]["idle_handle_held"] is True
+    assert out["excluded"][0]["rec_after"] == 0.0
+
+
+def test_armed_rec_still_stale_armed(monkeypatch, tmp_path: Path) -> None:
+    from copilot.audio.tap_trust import reconcile_stale_taps
+
+    locked = tmp_path / "_next_kick.wav"
+    locked.write_bytes(b"")
+    monkeypatch.setattr("copilot.audio.tap_trust.set_tap_recording", lambda *a, **k: None)
+    monkeypatch.setattr("copilot.audio.tap_trust.set_tap_enabled", lambda *a, **k: None)
+    monkeypatch.setattr("copilot.audio.tap_trust.staging_path", lambda name: locked)
+    monkeypatch.setattr(
+        "copilot.audio.tap_trust._exclusive_open_ok",
+        lambda p: {"exists": True, "exclusive": False, "error": "winerror=32", "size": 0},
+    )
+    monkeypatch.setattr(
+        "copilot.audio.tap_trust.wav_shared_read_ok",
+        lambda p: {"exists": True, "readable": True, "error": None, "size": 0},
+    )
+    monkeypatch.setattr("copilot.audio.tap_trust.wav_lock_owners", lambda p: [])
+
+    class Daw:
+        def get_device_parameters(self, *a, **k):
+            return {
+                "parameters": [
+                    {"name": "Rec", "value": 1.0, "index": 1},
+                    {"name": "Device On", "value": 1.0, "index": 0},
+                ]
+            }
+
+    with pytest.raises(AudioCaptureError, match="TAP_STALE_ARMED"):
+        reconcile_stale_taps(Daw(), [_tap(29, 0, 1, "Copilot Capture")], recorder_ids=set())

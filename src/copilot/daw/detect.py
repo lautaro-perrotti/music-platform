@@ -33,7 +33,7 @@ def live_block_status(detection: AbletonDetection) -> str:
     return "BLOCKED_BY_ENVIRONMENT"
 
 
-def detect_ableton(port: int = 9877) -> AbletonDetection:
+def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> AbletonDetection:
     evidence: list[str] = []
     exe_path: str | None = None
     version: str | None = None
@@ -65,8 +65,9 @@ def detect_ableton(port: int = 9877) -> AbletonDetection:
         else:
             evidence.append(f"missing {root}")
 
-    for link in _start_menu_ableton_links():
-        evidence.append(f"start menu {link}")
+    if include_start_menu:
+        for link in _start_menu_ableton_links():
+            evidence.append(f"start menu {link}")
 
     prefs = _latest_prefs_root()
     if prefs is not None:

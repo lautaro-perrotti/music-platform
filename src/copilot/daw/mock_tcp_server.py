@@ -7,6 +7,7 @@ from typing import Any
 
 from copilot.daw.mock import MockAbletonAdapter
 from copilot.daw.protocol import handshake_payload, require_local_host
+from copilot.daw.track_monitoring_v1 import NOT_APPLICABLE, read_monitoring
 from copilot.schemas.session import MidiNote
 
 
@@ -127,6 +128,11 @@ class MockRemoteScriptServer:
                 "track_count": len(snap.tracks),
                 "return_track_count": 0,
             }
+        if command_type == "get_session_path":
+            return {
+                "path": self.backend.session_path,
+                "name": self.backend.session_name,
+            }
         if command_type == "get_playback_position":
             return {
                 "current_song_time": self.backend.transport.position_beats,
@@ -150,7 +156,13 @@ class MockRemoteScriptServer:
                 "arm": track.mixer.arm,
                 "volume": track.mixer.volume,
                 "panning": track.mixer.pan,
-                "monitoring": "in",
+                "monitoring": read_monitoring(
+                    can_be_armed=track.role in {"audio", "midi"},
+                    is_main=track.role == "master",
+                    is_return=track.role == "return",
+                    raw_state=0,
+                ),
+                "can_be_armed": track.role in {"audio", "midi"},
                 "input_routing_type": "",
                 "input_routing_channel": "",
                 "output_routing_type": "Main",
@@ -190,6 +202,8 @@ class MockRemoteScriptServer:
                 "device_count": 0,
                 "taps": [],
                 "sends": [],
+                "monitoring": NOT_APPLICABLE,
+                "can_be_armed": False,
             }
         if command_type == "get_tracks_info":
             snap = self.backend.snapshot()
@@ -207,7 +221,17 @@ class MockRemoteScriptServer:
                 "playback": self._dispatch("get_playback_position", {}),
                 "master": self._dispatch("get_master_info", {}),
                 "tracks": self._dispatch("get_tracks_info", {}).get("tracks") or [],
-                "return_tracks": {"return_tracks": [], "return_track_count": 0},
+                "return_tracks": {
+                    "return_tracks": [
+                        {
+                            "index": 0,
+                            "name": "A",
+                            "monitoring": NOT_APPLICABLE,
+                            "can_be_armed": False,
+                        }
+                    ],
+                    "return_track_count": 1,
+                },
                 "project": {"path": None, "name": "Mock Set"},
             }
         if command_type == "get_device_parameter":

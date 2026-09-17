@@ -34,6 +34,7 @@ from copilot.audio.live_capture import (
     take_staging,
     unique_capture_path,
     validate_wav,
+    wait_until_wav_shared_readable,
     write_analysis_wav,
 )
 from copilot.audio.arrangement_seek import (
@@ -967,10 +968,14 @@ def capture_parallel_pass(
             "mode": stop_post.get("mode"),
         }
         t0 = time.perf_counter()
-        free2 = _wait_staging_free(fail_closed=True)
+        free2 = wait_until_wav_shared_readable(
+            [staging_path(str(rec["staging"])) for rec in recorders],
+            timeout_s=12.0,
+        )
         stop_bd["staging_handle_release"] = {
             "s": time.perf_counter() - t0,
             **{k: free2.get(k) for k in ("ok", "waited_s")},
+            "exclusive_required": False,
         }
         timings["recorder_stop_s"] = time.perf_counter() - t_stop
         timings["stop_command_rtt_s"] = stop_rtt

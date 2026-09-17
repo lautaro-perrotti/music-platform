@@ -38,6 +38,18 @@ DEFAULT_HOST = os.environ.get("ABLETON_MCP_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABLETON_MCP_PORT", "9877"))
 
 
+def _is_transport_failure(exc: BaseException) -> bool:
+    message = str(exc)
+    return any(
+        token in message
+        for token in (
+            "Timeout waiting for Ableton",
+            "socket disconnect",
+            "BLOCKED_BY_ENVIRONMENT",
+        )
+    )
+
+
 class AbletonTcpAdapter(DawAdapter):
     """Typed wrapper around the jpoindexter/ableton-mcp Remote Script protocol."""
 
@@ -107,7 +119,10 @@ class AbletonTcpAdapter(DawAdapter):
             hello = self._command("protocol_hello", side_effect=False)
             self.handshake_info = hello
             self.capabilities = set(hello.get("capabilities") or [])
-        except DawError:
+        except DawError as exc:
+            if isinstance(exc, ProtocolError) or _is_transport_failure(exc):
+                self.disconnect()
+                raise
             self.handshake_info = {
                 **handshake_payload(),
                 "mode": "LEGACY",
@@ -910,9 +925,20 @@ class AbletonTcpAdapter(DawAdapter):
             require_capability(self.capabilities, command_type)
         self.tcp_counts[command_type] += 1
         request_id = f"req_{uuid4().hex[:12]}"
-        timeout = (
-            self.timeouts.simple_mutation if side_effect else self.timeouts.read
-        )
+        heavy_read = command_type in {
+            "get_session_info",
+            "get_capture_topology",
+            "get_tracks_info",
+            "get_track_info",
+            "get_all_track_names",
+            "get_session_path",
+        }
+        if side_effect:
+            timeout = self.timeouts.simple_mutation
+        elif heavy_read:
+            timeout = self.timeouts.large_operation
+        else:
+            timeout = self.timeouts.read
         payload = json.dumps(
             {
                 "type": command_type,

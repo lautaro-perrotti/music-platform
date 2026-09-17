@@ -16,6 +16,11 @@ from copilot.agent.transactions import TransactionManager
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
 from copilot.daw.detect import detect_ableton, live_block_status, write_detection
+from copilot.daw.session_ready_v1 import (
+    SESSION_READY,
+    probe_session_ready,
+    revalidate_project,
+)
 from copilot.audio.live2 import run_live2
 from copilot.audio.live21 import run_live21
 from copilot.audio.live22 import run_live22
@@ -56,10 +61,43 @@ LAB_COMMANDS = frozenset(
         "live3r-align",
     }
 )
+CANONICAL_COMMANDS = (
+    "install",
+    "doctor",
+    "onboard-project",
+    "project-ready",
+    "project-bootstrap",
+    "producer-analyze",
+    "producer-run",
+    "cross-project-validate",
+    "import-project",
+    "regression-v1",
+    "capabilities",
+)
+HELP_EPILOG = """
+Canonical supported envelope:
+  install                  (Windows local runtime; no musical writes)
+  import-project "<folder>"
+  doctor
+  onboard-project          (alias of project-ready)
+  project-bootstrap
+  producer-analyze
+  producer-run --mode analyze|autonomous
+  cross-project-validate
+  regression-v1
+  capabilities
+
+Lab runners require --lab and are not the supported envelope.
+Live is ready only after SESSION_READY (not a listening port).
+""".strip()
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="AI Music Production Copilot")
+    parser = argparse.ArgumentParser(
+        description="AI Music Production Copilot — supported envelope CLI",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "command",
         choices=[
@@ -99,6 +137,18 @@ def main(argv: list[str] | None = None) -> int:
             "human-eval",
             "capture-journal-recover",
             "production-write",
+            "project-bootstrap",
+            "project-ready",
+            "onboard-project",
+            "producer-analyze",
+            "producer-run",
+            "cross-project-validate",
+            "import-project",
+            "install",
+            "uninstall-copilot",
+            "doctor",
+            "regression-v1",
+            "capabilities",
         ],
     )
     parser.add_argument("eval_argv", nargs="*", default=[])
@@ -144,6 +194,39 @@ def main(argv: list[str] | None = None) -> int:
         "--target-track",
         default=None,
         help="controlled plan target track name (default: first non-capture audio/midi track).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["analyze", "autonomous"],
+        default=None,
+        help="producer-run: analyze (read-only) or autonomous.",
+    )
+    parser.add_argument(
+        "--region",
+        default=None,
+        help="producer-analyze / producer-run: optional region id.",
+    )
+    parser.add_argument(
+        "--start-qn",
+        type=float,
+        default=None,
+        help="producer-analyze / producer-run: explicit region start.",
+    )
+    parser.add_argument(
+        "--end-qn",
+        type=float,
+        default=None,
+        help="producer-analyze / producer-run: explicit region end.",
+    )
+    parser.add_argument(
+        "--remove-venv",
+        action="store_true",
+        help="uninstall-copilot: also delete repo .venv",
+    )
+    parser.add_argument(
+        "--remove-config",
+        action="store_true",
+        help="uninstall-copilot: also delete repo .env",
     )
     parser.add_argument(
         "--execute-controlled-write",
@@ -261,6 +344,54 @@ def main(argv: list[str] | None = None) -> int:
             expected_before=float(args.expected_before),
         )
 
+    if args.command == "project-bootstrap":
+        return _project_bootstrap(evidence, logger)
+    if args.command in {"project-ready", "onboard-project"}:
+        return _project_ready(evidence, logger)
+    if args.command == "producer-analyze":
+        return _producer_analyze(
+            evidence,
+            logger,
+            region_id=args.region,
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+        )
+    if args.command == "producer-run":
+        return _producer_run(
+            evidence,
+            logger,
+            mode=args.mode,
+            region_id=args.region,
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+        )
+    if args.command == "cross-project-validate":
+        return _cross_project_validate(evidence, logger)
+    if args.command == "import-project":
+        return _import_project(evidence, logger, args.eval_argv)
+    if args.command == "install":
+        from copilot.installing.second_machine_installer_v1 import run_installer
+
+        report = run_installer(evidence=evidence)
+        print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        logger.info("install status=%s remote=%s m4l=%s", report.get("status"), report.get("REMOTE_SCRIPT"), report.get("M4L RUNTIME"))
+        return 0 if report.get("status") == "VERIFIED" else 2
+    if args.command == "uninstall-copilot":
+        from copilot.installing.second_machine_installer_v1 import uninstall_copilot_owned
+
+        report = uninstall_copilot_owned(
+            remove_venv=bool(args.remove_venv),
+            remove_config=bool(args.remove_config),
+        )
+        print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        return 0 if report.get("status") == "VERIFIED" else 2
+    if args.command == "doctor":
+        return _doctor(evidence, logger)
+    if args.command == "regression-v1":
+        return _regression_v1(evidence, logger)
+    if args.command == "capabilities":
+        return _capabilities()
+
     if args.command == "capture-journal-recover":
         return _capture_journal_recover(evidence, logger)
 
@@ -276,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(result, indent=2), encoding="utf-8"
         )
         print(json.dumps(result, indent=2))
-        return 0 if result["status"] == "INSTALLED" else 2
+        return 0 if result["status"] in {"INSTALLED", "ALREADY_CURRENT", "UPDATED"} else 2
 
     if args.command == "probe":
         return _probe(evidence, logger)
@@ -2171,6 +2302,291 @@ def _capture_journal_recover(evidence: Path, logger) -> int:
     )
     print(json.dumps(report, indent=2, default=str))
     return 0 if report.get("ok") else 2
+
+
+def _connect_live_or_block(evidence: Path, artifact: str) -> AbletonTcpAdapter | dict:
+    detection = detect_ableton()
+    probe = probe_session_ready()
+    if probe.status != SESSION_READY:
+        payload = {
+            "status": "BLOCKED",
+            "verification_class": probe.status,
+            "reason": probe.status,
+            "session": probe.to_dict(),
+            "detection": detection.to_dict(),
+            "NO MOCK SUCCESS": True,
+            "NO WRITE": True,
+            "writes_permitted": False,
+        }
+        (evidence / artifact).write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+        return payload
+    adapter = AbletonTcpAdapter()
+    try:
+        adapter.connect()
+        live = adapter.snapshot(include_notes=False)
+        from copilot.audio.cross_project_bootstrap_v1 import retain_tokens
+
+        retain_tokens(live)
+        current_identity = live.project_identity or live.project_token or ""
+        check = revalidate_project(probe.project_identity, probe)
+        if current_identity and probe.project_identity and current_identity != probe.project_identity:
+            adapter.disconnect()
+            payload = {
+                "status": "BLOCKED",
+                "verification_class": "STALE_PLAN",
+                "reason": "PROJECT_CHANGED",
+                "session": probe.to_dict(),
+                "revalidate": check,
+                "current_identity": current_identity,
+                "detection": detection.to_dict(),
+                "NO MOCK SUCCESS": True,
+                "NO WRITE": True,
+                "writes_permitted": False,
+                "PROJECT_REVALIDATED": False,
+            }
+            (evidence / artifact).write_text(
+                json.dumps(payload, indent=2, default=str), encoding="utf-8"
+            )
+            return payload
+        if not check.get("PROJECT_REVALIDATED"):
+            adapter.disconnect()
+            payload = {
+                "status": "BLOCKED",
+                "verification_class": str(check.get("status") or "SESSION_NOT_READY"),
+                "reason": str(check.get("reason") or "PROJECT_NOT_REVALIDATED"),
+                "session": probe.to_dict(),
+                "revalidate": check,
+                "detection": detection.to_dict(),
+                "NO MOCK SUCCESS": True,
+                "NO WRITE": True,
+                "writes_permitted": False,
+            }
+            (evidence / artifact).write_text(
+                json.dumps(payload, indent=2, default=str), encoding="utf-8"
+            )
+            return payload
+    except Exception as exc:
+        try:
+            adapter.disconnect()
+        except Exception:
+            pass
+        payload = {
+            "status": "BLOCKED",
+            "reason": str(exc),
+            "verification_class": "SESSION_NOT_READY",
+            "session": probe.to_dict(),
+            "detection": detection.to_dict(),
+            "NO MOCK SUCCESS": True,
+            "NO WRITE": True,
+            "writes_permitted": False,
+        }
+        (evidence / artifact).write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+        return payload
+    return adapter
+
+
+def _project_bootstrap(evidence: Path, logger) -> int:
+    from copilot.audio.cross_project_bootstrap_v1 import bootstrap_project, write_blocker
+
+    connected = _connect_live_or_block(evidence, "cross_project_bootstrap_v1.json")
+    if isinstance(connected, dict):
+        write_blocker(evidence, str(connected.get("reason") or "LIVE_UNAVAILABLE"), **connected)
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = bootstrap_project(connected, evidence=evidence)
+    finally:
+        connected.disconnect()
+    logger.info(
+        "project-bootstrap status=%s milestone=%s",
+        report.get("status"),
+        report.get("CROSS_PROJECT_BOOTSTRAP_V1"),
+    )
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("CROSS_PROJECT_BOOTSTRAP_V1") == "VERIFIED" else 2
+
+
+def _project_ready(evidence: Path, logger) -> int:
+    from copilot.audio.project_ready_v1 import project_ready
+
+    connected = _connect_live_or_block(evidence, "project_ready_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = project_ready(connected, evidence=evidence)
+    finally:
+        connected.disconnect()
+    logger.info("project-ready status=%s", report.get("PROJECT_READY"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("PROJECT_READY") == "VERIFIED" else 2
+
+
+def _cross_project_validate(evidence: Path, logger) -> int:
+    from copilot.audio.cross_project_musical_validation_v1 import (
+        NEXT_READ_ONLY_VERIFIED,
+        NEXT_VOLUME_LOOP,
+        run_cross_project_musical_validation,
+    )
+
+    connected = _connect_live_or_block(
+        evidence, "cross_project_musical_validation_v1.json"
+    )
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = run_cross_project_musical_validation(connected, evidence=evidence)
+    finally:
+        connected.disconnect()
+    logger.info("cross-project-validate status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    status = str(report.get("status") or "")
+    return 0 if status in {NEXT_READ_ONLY_VERIFIED, NEXT_VOLUME_LOOP} else 2
+
+
+def _import_project(evidence: Path, logger, argv: list[str]) -> int:
+    from copilot.importing.project_folder_import_v1 import import_project_folder
+
+    folder = " ".join(argv).strip()
+    if not folder:
+        payload = {
+            "status": "BLOCKED",
+            "reason": "FOLDER_REQUIRED",
+            "detail": 'Usage: python -m copilot.cli import-project "<folder>"',
+            "MUSICAL WRITES": 0,
+            "NO WRITE": True,
+        }
+        print(json.dumps(payload, indent=2))
+        return 2
+    report = import_project_folder(folder, evidence=evidence)
+    logger.info("import-project status=%s", report.get("PROJECT_FOLDER_IMPORT_V1"))
+    print(json.dumps(report, indent=2, default=str))
+    return 0 if report.get("PROJECT_FOLDER_IMPORT_V1") == "READY" else 2
+
+
+def _capabilities() -> int:
+    from copilot.audio.capability_matrix_v1 import capability_matrix
+    from copilot.audio.m4l_control_contract_v1 import control_contract
+
+    payload = {
+        **capability_matrix(),
+        "m4l_control_contract": control_contract(),
+        "canonical_commands": list(CANONICAL_COMMANDS),
+        "lab_commands_require_flag": sorted(LAB_COMMANDS),
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    return 0
+
+
+def _producer_analyze(
+    evidence: Path,
+    logger,
+    *,
+    region_id: str | None,
+    start_qn: float | None,
+    end_qn: float | None,
+) -> int:
+    from copilot.audio.producer_analyze_v1 import PRESERVED_STATUSES, producer_analyze
+
+    connected = _connect_live_or_block(evidence, "producer_analyze_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = producer_analyze(
+            connected,
+            evidence=evidence,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("producer-analyze status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    status = str(report.get("status") or "BLOCKED")
+    return 0 if status in PRESERVED_STATUSES else 2
+
+
+def _producer_run(
+    evidence: Path,
+    logger,
+    *,
+    mode: str | None,
+    region_id: str | None,
+    start_qn: float | None,
+    end_qn: float | None,
+) -> int:
+    from copilot.audio.producer_analyze_v1 import PRESERVED_STATUSES
+    from copilot.audio.producer_run_v1 import producer_run
+
+    if mode is None:
+        payload = {
+            "status": "BLOCKED",
+            "reason": "MODE_REQUIRED",
+            "detail": "producer-run requires --mode analyze or --mode autonomous",
+        }
+        print(json.dumps(payload, indent=2))
+        return 2
+    connected = _connect_live_or_block(evidence, "producer_run_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = producer_run(
+            connected,
+            evidence=evidence,
+            mode=mode,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("producer-run mode=%s status=%s", mode, report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    status = str(report.get("status") or "BLOCKED")
+    return 0 if status in PRESERVED_STATUSES else 2
+
+
+def _doctor(evidence: Path, logger) -> int:
+    from copilot.audio.doctor_v1 import doctor
+    from copilot.daw.ableton_tcp import AbletonTcpAdapter
+    from copilot.daw.session_ready_v1 import probe_session_ready
+
+    probe = probe_session_ready()
+    adapter = None
+    if probe.status == SESSION_READY:
+        adapter = AbletonTcpAdapter()
+        try:
+            adapter.connect()
+        except Exception:
+            adapter = None
+    try:
+        report = doctor(evidence=evidence, daw=adapter, session_probe=probe)
+    finally:
+        if adapter is not None:
+            try:
+                adapter.disconnect()
+            except Exception:
+                pass
+    logger.info("doctor status=%s session=%s", report.get("status"), probe.status)
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("status") == "READY" else 2
+
+
+def _regression_v1(evidence: Path, logger) -> int:
+    from copilot.audio.regression_v1 import run_regression_v1
+
+    report = run_regression_v1(evidence=evidence)
+    logger.info("regression-v1 overall=%s", report.get("overall"))
+    print(json.dumps(report, indent=2, default=str))
+    return 0 if report.get("overall") == "PASS" else 2
 
 
 def _manual_control_surface_action() -> str:

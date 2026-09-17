@@ -4,6 +4,15 @@ Reuse-first Ableton copilot: SessionState, typed DAW tools, agent transactions, 
 
 PRE-LIVE hardening is `VERIFIED`. LIVE-1 MIDI (connection/read/write/read-back/transaction/rollback) is `VERIFIED` on Ableton Live 12.4.5 Trial. Audio capture is `NOT_STARTED`.
 
+Windows machine with Ableton Live already installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-copilot.ps1
+.\.venv\Scripts\python.exe -m copilot.cli doctor
+```
+
+See `docs/installation/WINDOWS_INSTALL.md`.
+
 ```bash
 python -m copilot.cli detect
 python -m copilot.cli install-script

@@ -1632,7 +1632,9 @@ class AbletonMCP(ControlSurface):
                 "volume": master.mixer_device.volume.value,
                 "panning": master.mixer_device.panning.value,
                 "device_count": len(master.devices),
-                "devices": devices
+                "devices": devices,
+                "monitoring": "NOT_APPLICABLE",
+                "can_be_armed": False,
             }
         except Exception as e:
             self.log_message("Error getting master info: " + str(e))
@@ -1953,11 +1955,15 @@ class AbletonMCP(ControlSurface):
                     "parameters": self._compact_device_parameters(device),
                 })
             
-            monitoring = None
-            if hasattr(track, "current_monitoring_state"):
+            can_be_armed = bool(getattr(track, "can_be_armed", False))
+            if can_be_armed:
                 monitoring = {0: "in", 1: "auto", 2: "off"}.get(
                     int(track.current_monitoring_state), "unknown"
                 )
+                armed = bool(track.arm)
+            else:
+                monitoring = "NOT_APPLICABLE"
+                armed = False
             result = {
                 "index": track_index,
                 "name": track.name,
@@ -1965,7 +1971,8 @@ class AbletonMCP(ControlSurface):
                 "is_midi_track": track.has_midi_input,
                 "mute": track.mute,
                 "solo": track.solo,
-                "arm": track.arm,
+                "arm": armed,
+                "can_be_armed": can_be_armed,
                 "volume": track.mixer_device.volume.value,
                 "panning": track.mixer_device.panning.value,
                 "monitoring": monitoring,
@@ -3303,7 +3310,9 @@ class AbletonMCP(ControlSurface):
                     "solo": track.solo,
                     "volume": track.mixer_device.volume.value,
                     "panning": track.mixer_device.panning.value,
-                    "device_count": len(track.devices)
+                    "device_count": len(track.devices),
+                    "monitoring": "NOT_APPLICABLE",
+                    "can_be_armed": False,
                 }
                 return_tracks.append(track_info)
 
@@ -5145,7 +5154,8 @@ class AbletonMCP(ControlSurface):
             
             # Check if this is a browser with root categories
             if hasattr(browser_or_item, 'instruments'):
-                # Check all main categories
+                # Check all main categories, including User Library.
+                # Factory-only walk cannot resolve query:UserLibrary# URIs.
                 categories = [
                     browser_or_item.instruments,
                     browser_or_item.sounds,
@@ -5153,6 +5163,9 @@ class AbletonMCP(ControlSurface):
                     browser_or_item.audio_effects,
                     browser_or_item.midi_effects
                 ]
+                for extra in ("user_library", "current_project", "plugins", "maxforlive", "packs"):
+                    if hasattr(browser_or_item, extra):
+                        categories.append(getattr(browser_or_item, extra))
                 
                 for category in categories:
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)

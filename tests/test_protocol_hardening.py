@@ -54,12 +54,12 @@ def test_missing_capability_fails_before_write() -> None:
 
 def test_timeout_on_write_is_in_doubt() -> None:
     server = _server()
-    server.drop_response = True
     adapter = AbletonTcpAdapter(
         server.host, server.port, timeouts=TimeoutPolicy(read=0.2, simple_mutation=0.2)
     )
     try:
         adapter.connect()
+        server.drop_response = True
         try:
             adapter.create_midi_track("X")
             raise AssertionError("expected in doubt")
@@ -75,10 +75,10 @@ def test_timeout_on_write_is_in_doubt() -> None:
 
 def test_wrong_request_id_is_not_verified() -> None:
     server = _server()
-    server.wrong_request_id = True
     adapter = AbletonTcpAdapter(server.host, server.port)
     try:
         adapter.connect()
+        server.wrong_request_id = True
         try:
             adapter.health()
             raise AssertionError("wrong id must not succeed")
@@ -109,6 +109,24 @@ def test_invalid_and_truncated_json() -> None:
             raise AssertionError("truncated json must fail")
         except (DawError, ProtocolError):
             pass
+    finally:
+        adapter.disconnect()
+        server.stop()
+
+
+def test_hello_timeout_is_not_legacy_ready() -> None:
+    server = _server()
+    server.drop_response = True
+    adapter = AbletonTcpAdapter(
+        server.host, server.port, timeouts=TimeoutPolicy(read=0.2, connect=0.4)
+    )
+    try:
+        try:
+            adapter.connect()
+            raise AssertionError("dead hello must not become LEGACY")
+        except DawError as exc:
+            assert "Timeout" in str(exc)
+        assert adapter.handshake_info.get("mode") != "LEGACY"
     finally:
         adapter.disconnect()
         server.stop()

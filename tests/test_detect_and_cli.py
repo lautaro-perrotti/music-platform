@@ -28,7 +28,7 @@ def test_install_script_status_matches_detection() -> None:
     if not detection.found:
         assert result["status"] == "BLOCKED_BY_ENVIRONMENT"
         return
-    assert result["status"] == "INSTALLED"
+    assert result["status"] in {"INSTALLED", "ALREADY_CURRENT", "UPDATED"}
     assert result["sha256"]
 
 
