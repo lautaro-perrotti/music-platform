@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from copilot.daw.detect import detect_ableton
+from copilot.daw.detect import detect_ableton, prefs_search_roots
 from copilot.daw.install_remote_script import (
     SCRIPT_FOLDER,
     SCRIPT_HOST,
@@ -43,6 +43,13 @@ MODEL_KEYS = (
     "COPILOT_REASONING_MODEL",
     "COPILOT_REASONING_EFFORT",
 )
+CONTROL_SURFACE_STEPS_UNIX = [
+    "Start Ableton Live.",
+    "If Live was already open during install, quit and reopen it so the Remote Script is scanned.",
+    "Settings → Link, Tempo & MIDI → Control Surface = AbletonMCP.",
+    "Input = None, Output = None.",
+    ".venv/bin/python -m copilot.cli doctor",
+]
 CONTROL_SURFACE_STEPS = [
     "Start Ableton Live.",
     "If Live was already open during install, quit and reopen it so the Remote Script is scanned.",
@@ -50,6 +57,10 @@ CONTROL_SURFACE_STEPS = [
     "Input = None, Output = None.",
     r".venv\Scripts\python.exe -m copilot.cli doctor",
 ]
+
+
+def control_surface_steps() -> list[str]:
+    return list(CONTROL_SURFACE_STEPS if os.name == "nt" else CONTROL_SURFACE_STEPS_UNIX)
 
 
 def repo_root() -> Path:
@@ -67,10 +78,12 @@ def discover_environment(*, repo: Path | None = None) -> dict[str, Any]:
     detection = _detect()
     library = discover_user_library(detection.prefs_root)
     documents = Path.home() / "Documents"
+    music = Path.home() / "Music"
     prefs_versions = _prefs_versions()
     writable = {
         "repository": os.access(root, os.W_OK),
         "documents": os.access(documents, os.W_OK) if documents.exists() else False,
+        "music": os.access(music, os.W_OK) if music.exists() else False,
     }
     library_path = library.get("user_library")
     if library_path:
@@ -95,6 +108,7 @@ def discover_environment(*, repo: Path | None = None) -> dict[str, Any]:
             "build": None if win is None else win.build,
         },
         "architecture": platform.machine(),
+        "system": platform.system(),
         "python": {
             "executable": sys.executable,
             "version": platform.python_version(),
@@ -107,6 +121,7 @@ def discover_environment(*, repo: Path | None = None) -> dict[str, Any]:
         "ableton_prefs_root": detection.prefs_root,
         "ableton_prefs_versions": prefs_versions,
         "documents_path": str(documents),
+        "music_path": str(music),
         "user_library": library,
         "repository_path": str(root.resolve()),
         "permissions": writable,
@@ -144,7 +159,7 @@ def inspect_control_surface(*, detection: Any | None = None) -> dict[str, Any]:
         "prefs_mention_abletonmcp": mentioned,
         "port_open": found.port_open,
         "process_running": found.process_running,
-        "steps": list(CONTROL_SURFACE_STEPS),
+        "steps": control_surface_steps(),
     }
 
 
@@ -345,8 +360,8 @@ def run_installer(
         "NO STATE TRUST CHANGE": True,
         "NO CAPTURE CHANGE": True,
         "NO REASONING CHANGE": True,
-        "next": CONTROL_SURFACE_STEPS if control["ABLETON_CONTROL_SURFACE_CONFIGURATION_REQUIRED"] or control["ABLETON_RESTART_REQUIRED"] else [
-            r".venv\Scripts\python.exe -m copilot.cli doctor",
+        "next": control_surface_steps() if control["ABLETON_CONTROL_SURFACE_CONFIGURATION_REQUIRED"] or control["ABLETON_RESTART_REQUIRED"] else [
+            control_surface_steps()[-1],
         ],
         "SECOND_MACHINE_PORTABILITY_V1": "PENDING_FRIEND_MACHINE",
     }
@@ -436,14 +451,14 @@ def _python_env_from_process(env: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prefs_versions() -> list[str]:
-    roaming = Path.home() / "AppData" / "Roaming" / "Ableton"
-    if not roaming.is_dir():
-        return []
-    names = []
-    for child in roaming.iterdir():
-        if child.is_dir() and child.name.startswith("Live ") and child.name != "Live Reports":
-            names.append(child.name)
-    return sorted(names)
+    names: list[str] = []
+    for roaming in prefs_search_roots():
+        if not roaming.is_dir():
+            continue
+        for child in roaming.iterdir():
+            if child.is_dir() and child.name.startswith("Live ") and child.name != "Live Reports":
+                names.append(child.name)
+    return sorted(set(names))
 
 
 def _prefs_mention_abletonmcp(prefs_root: str | None) -> bool:

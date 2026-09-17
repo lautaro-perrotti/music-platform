@@ -43,8 +43,12 @@ def test_installer_sources_have_no_developer_hardcodes() -> None:
         Path("src/copilot/daw/install_remote_script.py"),
         Path("scripts/install-copilot.ps1"),
         Path("scripts/uninstall-copilot.ps1"),
+        Path("scripts/install-copilot.sh"),
+        Path("scripts/uninstall-copilot.sh"),
         Path("install.bat"),
         Path("docs/installation/WINDOWS_INSTALL.md"),
+        Path("docs/installation/MAC_INSTALL.md"),
+        Path("docs/installation/MAC_INSTALL.md"),
         Path("config/copilot.env.example"),
     ]
     for path in files:

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
-from copilot.daw.detect import detect_ableton
+from copilot.daw.detect import detect_ableton, default_user_library_candidates
 from copilot.human_eval.store import now_iso
 
 MILESTONE = "M4L_RUNTIME_PROVISIONING_V1"
@@ -78,13 +78,13 @@ def discover_user_library(prefs_root: str | Path | None = None) -> dict[str, Any
                         "rule": rule,
                         "config": str(cfg),
                     }
-    default = Path.home() / "Documents" / "Ableton" / "User Library"
-    if _looks_like_user_library(default):
-        return {
-            "status": "VERIFIED",
-            "user_library": str(default.resolve()),
-            "rule": "documented_default",
-        }
+    for default in default_user_library_candidates():
+        if _looks_like_user_library(default):
+            return {
+                "status": "VERIFIED",
+                "user_library": str(default.resolve()),
+                "rule": "documented_default",
+            }
     return {
         "status": "USER_LIBRARY_UNRESOLVED",
         "user_library": None,

@@ -76,7 +76,7 @@ CANONICAL_COMMANDS = (
 )
 HELP_EPILOG = """
 Canonical supported envelope:
-  install                  (Windows local runtime; no musical writes)
+  install                  (Windows or macOS local runtime; no musical writes)
   import-project "<folder>"
   doctor
   onboard-project          (alias of project-ready)

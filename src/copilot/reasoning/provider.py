@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import os
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -197,18 +198,42 @@ def configured_http_provider() -> OpenAICompatibleProvider | None:
     if not key:
         key = _windows_user_env("COPILOT_REASONING_API_KEY") or _windows_user_env("OPENAI_API_KEY")
     if not key:
+        key = _dotenv_value("COPILOT_REASONING_API_KEY") or _dotenv_value("OPENAI_API_KEY")
+    if not key:
         return None
     base = (
         os.environ.get("COPILOT_REASONING_BASE_URL")
         or _windows_user_env("COPILOT_REASONING_BASE_URL")
+        or _dotenv_value("COPILOT_REASONING_BASE_URL")
         or "https://api.openai.com/v1"
     )
     model = (
         os.environ.get("COPILOT_REASONING_MODEL")
         or _windows_user_env("COPILOT_REASONING_MODEL")
+        or _dotenv_value("COPILOT_REASONING_MODEL")
         or "gpt-4o-mini"
     )
     return OpenAICompatibleProvider(base_url=base, model=model, api_key=key)
+
+
+def _dotenv_value(name: str) -> str | None:
+    path = Path(__file__).resolve().parents[3] / ".env"
+    if not path.is_file():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip() != name:
+            continue
+        text = value.strip().strip('"').strip("'")
+        return text or None
+    return None
 
 
 def _windows_user_env(name: str) -> str | None:

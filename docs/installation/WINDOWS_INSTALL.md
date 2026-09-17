@@ -1,6 +1,6 @@
 # Windows install — SECOND_MACHINE_INSTALLER_V1
 
-Windows only. No MSI and no GUI installer in V1.
+Windows only. macOS: `docs/installation/MAC_INSTALL.md`. No MSI and no GUI installer in V1.
 
 A fresh machine with Ableton Live already installed:
 

@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 import os
 import socket
-import winreg
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 
 @dataclass
@@ -47,14 +52,15 @@ def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> Able
                 exe_path = str(candidate)
                 version = ver or version
 
-    for key_path in (
-        r"SOFTWARE\Ableton",
-        r"SOFTWARE\WOW6432Node\Ableton",
-    ):
-        hits = _registry_key_values(winreg.HKEY_LOCAL_MACHINE, key_path)
-        hits += _registry_key_values(winreg.HKEY_CURRENT_USER, key_path)
-        for item in hits:
-            evidence.append(f"registry {item}")
+    if winreg is not None:
+        for key_path in (
+            r"SOFTWARE\Ableton",
+            r"SOFTWARE\WOW6432Node\Ableton",
+        ):
+            hits = _registry_key_values(winreg.HKEY_LOCAL_MACHINE, key_path)
+            hits += _registry_key_values(winreg.HKEY_CURRENT_USER, key_path)
+            for item in hits:
+                evidence.append(f"registry {item}")
 
     for root in _candidate_install_roots():
         if root.exists():
@@ -65,7 +71,7 @@ def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> Able
         else:
             evidence.append(f"missing {root}")
 
-    if include_start_menu:
+    if include_start_menu and os.name == "nt":
         for link in _start_menu_ableton_links():
             evidence.append(f"start menu {link}")
 
@@ -112,19 +118,53 @@ def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> Able
     )
 
 
-def _candidate_install_roots() -> list[Path]:
+def default_user_library_candidates() -> list[Path]:
     home = Path.home()
     return [
-        Path(r"C:\Program Files\Ableton"),
-        Path(r"C:\Program Files (x86)\Ableton"),
-        Path(r"C:\ProgramData\Ableton"),
-        home / "AppData" / "Local" / "Programs" / "Ableton",
-        Path(r"D:\Ableton"),
-        Path(r"D:\Program Files\Ableton"),
+        home / "Documents" / "Ableton" / "User Library",
+        home / "Music" / "Ableton" / "User Library",
     ]
 
 
+def prefs_search_roots() -> list[Path]:
+    home = Path.home()
+    return [
+        home / "AppData" / "Roaming" / "Ableton",
+        home / "Library" / "Preferences" / "Ableton",
+    ]
+
+
+def _candidate_install_roots() -> list[Path]:
+    home = Path.home()
+    if os.name == "nt":
+        return [
+            Path(r"C:\Program Files\Ableton"),
+            Path(r"C:\Program Files (x86)\Ableton"),
+            Path(r"C:\ProgramData\Ableton"),
+            home / "AppData" / "Local" / "Programs" / "Ableton",
+            Path(r"D:\Ableton"),
+            Path(r"D:\Program Files\Ableton"),
+        ]
+    return [
+        Path("/Applications"),
+        home / "Applications",
+    ]
+
+
+def _first_live_bundle(root: Path) -> Path | None:
+    if not root.exists():
+        return None
+    for app in sorted(root.glob("Ableton Live *.app")):
+        exe = app / "Contents" / "MacOS" / "Live"
+        if exe.is_file():
+            return exe
+    return None
+
+
 def _first_live_exe(root: Path) -> Path | None:
+    bundle = _first_live_bundle(root)
+    if bundle is not None:
+        return bundle
     if not root.exists():
         return None
     matches = list(root.glob("**/Ableton Live *.exe"))
@@ -132,14 +172,15 @@ def _first_live_exe(root: Path) -> Path | None:
 
 
 def _latest_prefs_root() -> Path | None:
-    roaming = Path.home() / "AppData" / "Roaming" / "Ableton"
-    if not roaming.exists():
-        return None
-    candidates = [
-        item
-        for item in roaming.iterdir()
-        if item.is_dir() and _is_live_prefs_folder(item)
-    ]
+    candidates: list[Path] = []
+    for roaming in prefs_search_roots():
+        if not roaming.exists():
+            continue
+        candidates.extend(
+            item
+            for item in roaming.iterdir()
+            if item.is_dir() and _is_live_prefs_folder(item)
+        )
     if not candidates:
         return None
     return max(candidates, key=_prefs_version_key)
@@ -156,6 +197,8 @@ def _is_live_prefs_folder(path: Path) -> bool:
         or (path / "Preferences" / "Preferences.cfg").exists()
         or (path / "User Remote Scripts").exists()
         or (path / "Preferences" / "User Remote Scripts").exists()
+        or (path / "Library.cfg").exists()
+        or (path / "Preferences" / "Library.cfg").exists()
     )
 
 
@@ -181,9 +224,9 @@ def _prefs_version_key(path: Path) -> tuple[int, ...]:
 
 def _user_library_remote_scripts() -> Path | None:
     """Live 10.1.13+ loads third-party Python Control Surfaces from User Library."""
-    library = Path.home() / "Documents" / "Ableton" / "User Library"
-    if library.exists():
-        return library / "Remote Scripts"
+    for library in default_user_library_candidates():
+        if library.exists():
+            return library / "Remote Scripts"
     return None
 
 
@@ -200,6 +243,8 @@ def _user_remote_scripts_dir(prefs: Path) -> Path:
 
 
 def _start_menu_ableton_links() -> list[str]:
+    if os.name != "nt":
+        return []
     roots = [
         Path(os.environ.get("ProgramData", r"C:\ProgramData"))
         / "Microsoft"
@@ -220,6 +265,8 @@ def _start_menu_ableton_links() -> list[str]:
 
 
 def _registry_uninstall() -> list[tuple[str, str | None, str | None]]:
+    if winreg is None:
+        return []
     found: list[tuple[str, str | None, str | None]] = []
     roots = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -248,6 +295,8 @@ def _registry_uninstall() -> list[tuple[str, str | None, str | None]]:
 
 
 def _registry_key_values(hive: int, path: str) -> list[str]:
+    if winreg is None:
+        return []
     hits: list[str] = []
     try:
         with winreg.OpenKey(hive, path) as key:
@@ -260,6 +309,8 @@ def _registry_key_values(hive: int, path: str) -> list[str]:
 
 
 def _reg_str(key, name: str) -> str | None:
+    if winreg is None:
+        return None
     try:
         value, _ = winreg.QueryValueEx(key, name)
     except OSError:
@@ -269,14 +320,19 @@ def _reg_str(key, name: str) -> str | None:
 
 def _live_process_running() -> bool:
     try:
-        import subprocess
-
+        if os.name == "nt":
+            out = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq Ableton Live*"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            return "Ableton Live" in out
         out = subprocess.check_output(
-            ["tasklist", "/FI", "IMAGENAME eq Ableton Live*"],
+            ["pgrep", "-fl", "Ableton Live"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
-    except OSError:
+    except (OSError, subprocess.CalledProcessError):
         return False
     return "Ableton Live" in out
 
