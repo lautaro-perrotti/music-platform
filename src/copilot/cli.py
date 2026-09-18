@@ -2888,6 +2888,8 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
 
     plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
 
+    astra_arrangement = meta.get("arrangement")
+    plan._astra_arrangement = astra_arrangement
     from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
     plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
     if leave:
@@ -2922,7 +2924,8 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
         from copilot.musicplan.mix_tweaks import apply_mix
 
         final_session = daw.snapshot()
-        arr = build_arrangement(daw, session=final_session)
+        arrangement = getattr(plan, "_astra_arrangement", None) or None
+        arr = build_arrangement(daw, session=final_session, arrangement=arrangement)
         print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")
         for e in arr["errors"][:6]:
             print(f"  ! {e}")
