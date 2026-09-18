@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +93,7 @@ def recover_stale_capture_journal(
 
     roots = search_roots or [
         Path("logs"),
-        Path("D:/MusicCopilot/captures"),
+        (Path(r"D:\MusicCopilot\captures") if os.name == "nt" else Path.home() / "Music" / "MusicCopilot" / "captures"),
         Path("captures"),
     ]
     assets = _asset_candidates(pass_id, roots)
