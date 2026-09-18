@@ -204,13 +204,9 @@ def build_tech_house_plan(
         )
     )
 
-    # MIX_GROUPS_V1: buses (drums/synth/fx/vocals) + routing + bus processing.
-    from copilot.musicplan.groups import build_group_actions
-
-    ga = build_group_actions(project_identity=session.project_identity)
-    actions.extend(ga["groups"])
-    actions.extend(ga["routes"])
-    actions.extend(ga["bus"])
+    # NO BUSES: every element goes DIRECT to Main on its own channel (user
+    # decided group/bus routing was not being applied correctly). The leftover
+    # build_group_actions is intentionally not invoked here.
 
     return MusicPlan(
         plan_id=plan_id,

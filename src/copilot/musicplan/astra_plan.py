@@ -41,17 +41,25 @@ def build_candidate_context(
 def build_astra_prompt(
     *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
 ) -> str:
+    from copilot.musicplan.decision_context import build_decision_context
     from copilot.musicplan.fx import FX_PHILOSOPHY
     from copilot.musicplan.synth import SYNTH_PHILOSOPHY
 
+    astra_context = build_decision_context()
     lines = [
-        "You are a groovy/latin tech house producer (underground, percussive, hypnotic, dark/warm).",
+        astra_context,
+        "",
+        "You are the PRODUCER of a groovy/latin tech house track (underground, percussive,",
+        "hypnotic, dark/warm). You DECIDE samples AND the arrangement, like a real producer.",
         f"Tempo {bpm} BPM. Percussion-first; fewer elements, more identity.",
         "Musical elements are rhythmic instruments, not melody: short stabs/plucks/guitar chops/sax hits/vocal chops.",
         f"Musical principles: {'; '.join(SYNTH_PHILOSOPHY[:4])}",
         "FX: felt more than noticed; short/rhythmic/dark (no EDM risers). Impacts/downlifters/textures support the groove.",
         f"FX principles: {'; '.join(FX_PHILOSOPHY[:4])}",
         "Call-and-response: guitar <-> conga, vocal <-> sax; don't stack every hook at once.",
+        "",
+        "Available elements (roles): " + ", ".join(candidates.keys()) + ".",
+        "Every active element goes DIRECT to Main on its own channel (no buses).",
         "",
         "Sample candidates per role (pick one number per role, or omit a role):",
     ]
@@ -62,8 +70,20 @@ def build_astra_prompt(
         "",
         f"User intent: {intent}",
         "",
-        "Choose ONE sample per role that best serves the groove. Return ONLY a JSON object:",
-        '{"selections": {"TrackName": <1-based index>, ...}, "reasoning": "short"}',
+        "Decide ONE sample per role AND the arrangement (sections). Return ONLY a JSON object:",
+        """{
+  "selections": {"TrackName": <1-based index>, ...},
+  "arrangement": [
+    {"name": "<section name>", "bars": <int>, "active": ["TrackName", ...]},
+    ...
+  ],
+  "reasoning": "short producer reasoning"
+}""",
+        "",
+        "Arrangement rules: 5-8 sections; Kick must be active in at least the backbone sections;",
+        "build up (drums/percussion first), reach a DROP, and return subdued at the end (DJ exit);",
+        "subtract by omission across sections, never stack everything.",
+        "If you omit 'arrangement', the deterministic structure is used.",
     ]
     return "\n".join(lines)
 
@@ -75,6 +95,36 @@ def parse_astra_selection(raw: str) -> dict:
     if m:
         raw = m.group(0)
     return json.loads(raw)
+
+
+def validate_arrangement(raw_sections: list) -> list | None:
+    """Structurally validate Astra's proposed sections. Returns cleaned list or None.
+
+    Requires: int `bars` 4-64; `active` subset of known roles; at least one section
+    with Kick; not everything active in the final section. On any violation returns
+    None and the caller falls back to the deterministic structure.
+    """
+    from copilot.musicplan.arrangement import Section, ALL_TRACKS
+
+    if not raw_sections or not isinstance(raw_sections, list):
+        return None
+    cleaned: list[Section] = []
+    for item in raw_sections:
+        try:
+            name = str(item.get("name", "")).upper() or "SECTION"
+            bars = int(item.get("bars", 0))
+            active = [str(t) for t in item.get("active") or []]
+        except Exception:  # noqa: BLE001
+            return None
+        if not (4 <= bars <= 64):
+            return None
+        active = [t for t in active if t in ALL_TRACKS]
+        if not active:
+            return None
+        cleaned.append(Section(name=name, bars=bars, active=active))
+    if not any("Kick" in s.active for s in cleaned):
+        return None
+    return cleaned
 
 
 def build_plan_from_prompt(
@@ -110,6 +160,8 @@ def build_plan_from_prompt(
         raw = fn(prompt, timeout_s=timeout_s)
         data = parse_astra_selection(raw)
         selections = data.get("selections", {})
+        arrangement_raw = data.get("arrangement")
+        arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
         sample_map: dict[str, str] = {}
         for track_name, num in selections.items():
             cands = candidates.get(track_name, [])
@@ -124,6 +176,7 @@ def build_plan_from_prompt(
             "reasoning": data.get("reasoning", ""),
             "selections": selections,
             "sample_map": sample_map,
+            "arrangement": arrangement,
         }
     except Exception as exc:  # noqa: BLE001
         plan = build_tech_house_plan(index=index, session=session, plan_id=plan_id)
