@@ -35,6 +35,8 @@ MIXING_CHAINS: dict[str, list[str]] = {
     "Bass": ["EQ Eight", "Compressor", "Saturator"],
     "Vocal": ["EQ Eight", "Compressor", "Echo"],
     "Stab": ["EQ Eight", "Auto Filter", "Echo"],
+    "Guitar": ["EQ Eight", "Saturator", "Auto Filter", "Echo"],
+    "Sax": ["EQ Eight", "Compressor", "Saturator", "Auto Filter", "Echo"],
     "FX": ["EQ Eight", "Saturator"],
     "Impact": ["EQ Eight", "Saturator"],
     "Downlifter": ["EQ Eight", "Auto Filter"],

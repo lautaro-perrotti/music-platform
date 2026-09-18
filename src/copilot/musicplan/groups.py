@@ -12,7 +12,7 @@ from copilot.schemas.session import MixerState, RoutingState, TrackState
 GROUP_DEFS: dict[str, list[str]] = {
     "DRUMS": ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop"],
     "BASS BUS": ["Bass"],
-    "SYNTHS": ["Stab"],
+    "SYNTHS": ["Stab", "Guitar", "Sax"],
     "FX BUS": ["FX", "Impact", "Downlifter", "Texture"],
     "VOCALS": ["Vocal"],
 }

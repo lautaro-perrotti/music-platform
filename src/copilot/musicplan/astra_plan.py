@@ -42,12 +42,16 @@ def build_astra_prompt(
     *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
 ) -> str:
     from copilot.musicplan.fx import FX_PHILOSOPHY
+    from copilot.musicplan.synth import SYNTH_PHILOSOPHY
 
     lines = [
         "You are a groovy/latin tech house producer (underground, percussive, hypnotic, dark/warm).",
         f"Tempo {bpm} BPM. Percussion-first; fewer elements, more identity.",
+        "Musical elements are rhythmic instruments, not melody: short stabs/plucks/guitar chops/sax hits/vocal chops.",
+        f"Musical principles: {'; '.join(SYNTH_PHILOSOPHY[:4])}",
         "FX: felt more than noticed; short/rhythmic/dark (no EDM risers). Impacts/downlifters/textures support the groove.",
         f"FX principles: {'; '.join(FX_PHILOSOPHY[:4])}",
+        "Call-and-response: guitar <-> conga, vocal <-> sax; don't stack every hook at once.",
         "",
         "Sample candidates per role (pick one number per role, or omit a role):",
     ]

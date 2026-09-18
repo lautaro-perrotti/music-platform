@@ -36,6 +36,9 @@ def _synthetic_index():
         ("bass", SampleRole.BASS, SampleType.LOOP, 127.0, "bass"),
         ("vocal", SampleRole.VOCAL, SampleType.ONE_SHOT, None, "vocal"),
         ("stab", SampleRole.SYNTH, SampleType.ONE_SHOT, None, "stab"),
+        ("stab", SampleRole.SYNTH, SampleType.ONE_SHOT, None, "stab"),
+        ("guitar", SampleRole.UNKNOWN, SampleType.ONE_SHOT, None, "guitar"),
+        ("sax", SampleRole.UNKNOWN, SampleType.ONE_SHOT, None, "sax"),
         ("fx", SampleRole.FX, SampleType.ONE_SHOT, None, "fx"),
         ("impact", SampleRole.IMPACT, SampleType.ONE_SHOT, None, "impact"),
         ("downlifter", SampleRole.DOWNLIFTER, SampleType.LOOP, None, "downlifter"),
@@ -63,15 +66,15 @@ def test_build_tech_house_plan():
     _, session = _session()
     plan = build_tech_house_plan(index=_synthetic_index(), session=session)
     # 11 roles x (CREATE_TRACK + SAMPLE_LOAD) + mixing + groups (routing + bus)
-    assert len(plan.actions) == 90
+    assert len(plan.actions) == 105
     kinds = [a.action_type.value for a in plan.actions]
-    assert kinds.count("CREATE_TRACK") == 19
-    assert kinds.count("SAMPLE_LOAD") == 14
-    assert kinds.count("DEVICE_LOAD") == 43
-    assert kinds.count("SET_TRACK_ROUTING") == 14
+    assert kinds.count("CREATE_TRACK") == 21
+    assert kinds.count("SAMPLE_LOAD") == 16
+    assert kinds.count("DEVICE_LOAD") == 52
+    assert kinds.count("SET_TRACK_ROUTING") == 16
     names = [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"]
     assert names == ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
-                     "Perc Loop", "Bass", "Vocal", "Stab", "FX", "Impact", "Downlifter", "Texture",
+                     "Perc Loop", "Bass", "Vocal", "Stab", "Guitar", "Sax", "FX", "Impact", "Downlifter", "Texture",
                      "DRUMS", "BASS BUS", "SYNTHS", "FX BUS", "VOCALS"]
     # Bass gets the sidechain/saturation chain: EQ Eight + Compressor + Saturator
     bass_devices = [a.params.device_name for a in plan.actions
@@ -95,9 +98,9 @@ def test_execute_tech_house_plan_full_loop(tmp_path):
 
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTED"] is True
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 90
-    assert report["after_track_count"] == 19
-    assert report["after_clip_count"] == 14
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 105
+    assert report["after_track_count"] == 21
+    assert report["after_clip_count"] == 16
     # rollback reversed the whole plan -> empty set restored
     assert report["restored_track_count"] == 0
     assert report["restored_clip_count"] == 0
