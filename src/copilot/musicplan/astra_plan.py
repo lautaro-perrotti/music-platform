@@ -1,0 +1,121 @@
+"""ASTRA_IN_THE_LOOP: prompt -> Astra reasons -> MusicPlan.
+
+Replaces the deterministic top-1 recipe: Astra sees the top-K sample candidates
+per role plus the style context and the user's intent, and selects one sample
+per role (or omits a role). Falls back to the deterministic recipe if Astra is
+unavailable or returns an invalid plan.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+
+from copilot.sample_library.schemas import LibraryIndex
+from copilot.schemas.session import SessionState
+
+ASTRA_TIMEOUT_S = 180.0
+
+
+def build_candidate_context(
+    index: LibraryIndex, top_k: int = 3
+) -> dict[str, list[dict]]:
+    """Retrieve top-K candidates per role (keyed by track_name)."""
+    from copilot.musicplan.tech_house import GROOVY_LATIN_GROOVE
+    from copilot.sample_library.retrieval import SampleRetriever
+
+    retriever = SampleRetriever(index)
+    candidates: dict[str, list[dict]] = {}
+    for role, track_name, sample_type, bpm, text_query in GROOVY_LATIN_GROOVE:
+        results = retriever.search_samples(
+            role=role, one_shot_or_loop=sample_type, bpm=bpm,
+            text_query=text_query, top_k=top_k,
+        )
+        candidates[track_name] = [
+            {"sha256": r.asset.sha256, "filename": r.asset.filename, "bpm": r.asset.bpm.value}
+            for r in results
+        ]
+    return candidates
+
+
+def build_astra_prompt(
+    *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
+) -> str:
+    lines = [
+        "You are a groovy/latin tech house producer (underground, percussive, hypnotic, dark/warm).",
+        f"Tempo {bpm} BPM. Percussion-first; fewer elements, more identity.",
+        "",
+        "Sample candidates per role (pick one number per role, or omit a role):",
+    ]
+    for track_name, cands in candidates.items():
+        opts = "  ".join(f"{i + 1}. {c['filename']}" for i, c in enumerate(cands))
+        lines.append(f"{track_name}: {opts}")
+    lines += [
+        "",
+        f"User intent: {intent}",
+        "",
+        "Choose ONE sample per role that best serves the groove. Return ONLY a JSON object:",
+        '{"selections": {"TrackName": <1-based index>, ...}, "reasoning": "short"}',
+    ]
+    return "\n".join(lines)
+
+
+def parse_astra_selection(raw: str) -> dict:
+    """Parse Astra's JSON response; tolerant of markdown fences."""
+    raw = raw.strip()
+    m = re.search(r"\{.*\}", raw, re.S)
+    if m:
+        raw = m.group(0)
+    return json.loads(raw)
+
+
+def build_plan_from_prompt(
+    *,
+    index: LibraryIndex,
+    session: SessionState,
+    intent: str,
+    provider=None,
+    top_k: int = 3,
+    plan_id: str = "astra_groove",
+    timeout_s: float = ASTRA_TIMEOUT_S,
+):
+    """prompt -> Astra -> MusicPlan. Falls back to the deterministic recipe on error."""
+    from copilot.musicplan.tech_house import build_tech_house_plan
+
+    if provider is None:
+        from copilot.reasoning.provider import configured_http_provider
+
+        provider = configured_http_provider()
+
+    if provider is None:
+        # No Astra configured -> deterministic fallback.
+        return build_tech_house_plan(index=index, session=session, plan_id=plan_id), {
+            "astra_used": False,
+            "reasoning": "no provider configured; deterministic fallback",
+        }
+
+    candidates = build_candidate_context(index, top_k=top_k)
+    prompt = build_astra_prompt(candidates=candidates, intent=intent)
+
+    try:
+        raw = provider.reason(prompt, timeout_s=timeout_s)
+        data = parse_astra_selection(raw)
+        selections = data.get("selections", {})
+        sample_map: dict[str, str] = {}
+        for track_name, num in selections.items():
+            cands = candidates.get(track_name, [])
+            idx = int(num) - 1
+            if 0 <= idx < len(cands):
+                sample_map[track_name] = cands[idx]["sha256"]
+        plan = build_tech_house_plan(
+            index=index, session=session, plan_id=plan_id, sample_map=sample_map or None
+        )
+        return plan, {
+            "astra_used": True,
+            "reasoning": data.get("reasoning", ""),
+            "selections": selections,
+            "sample_map": sample_map,
+        }
+    except Exception as exc:  # noqa: BLE001
+        plan = build_tech_house_plan(index=index, session=session, plan_id=plan_id)
+        return plan, {"astra_used": False, "reasoning": f"astra error -> fallback: {exc}"}

@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             "import-project",
             "sample-library",
             "track-build",
+            "vibe",
             "install",
             "uninstall-copilot",
             "doctor",
@@ -395,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
         return _sample_library(evidence, logger, args.eval_argv)
     if args.command == "track-build":
         return _track_build(evidence, logger, args.eval_argv)
+    if args.command == "vibe":
+        return _vibe(evidence, logger, args.eval_argv)
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2916,6 +2919,47 @@ def _track_build(evidence: Path, logger, argv: list[str]) -> int:
         "restore_verified": build_report["RESTORE_VERIFIED"],
     }
     return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
+
+
+def _vibe(evidence: Path, logger, argv: list[str]) -> int:
+    """prompt -> Astra -> MusicPlan (vibe coding). Falls back to deterministic if no Astra."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.astra_plan import build_plan_from_prompt
+
+    intent = " ".join(argv) if argv else "dark percussive groovy tech house"
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    from copilot.daw.mock import MockAbletonAdapter
+    from copilot.daw.state_tokens import attach_tokens
+    daw = MockAbletonAdapter(); daw.connect()
+    daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
+    session = daw.snapshot(); attach_tokens(session)
+
+    plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
+
+    print(f'\n=== VIBE: "{intent}" ===\n')
+    print(f"astra_used: {meta['astra_used']}")
+    print(f"reasoning: {meta.get('reasoning', '')}")
+    print("\nSELECCIÓN (sample por pista):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {Path(a.params.sample_uri).name}")
+
+    import logging
+    for _n in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_n).setLevel(logging.WARNING)
+
+    import tempfile
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp)
+    print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
+    return 0 if report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
 
 
 if __name__ == "__main__":

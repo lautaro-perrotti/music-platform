@@ -69,25 +69,33 @@ def build_tech_house_plan(
     session: SessionState,
     plan_id: str = "groovy_latin_tech_house",
     top_k: int = 1,
+    sample_map: dict[str, str] | None = None,
 ) -> MusicPlan:
     """Retrieve a sample per groove role from the library and build a MusicPlan.
 
     Each role -> CREATE_TRACK (audio) + SAMPLE_LOAD (retrieved sample into slot 0).
+    If `sample_map` (track_name -> asset sha256) is given, use those samples
+    instead of top-1 (Astra-selected).
     """
     retriever = SampleRetriever(index)
     actions = []
     evidence_refs: list[str] = []
     for role, track_name, sample_type, bpm, text_query in GROOVY_LATIN_GROOVE:
-        results = retriever.search_samples(
-            role=role,
-            one_shot_or_loop=sample_type,
-            bpm=bpm,
-            text_query=text_query,
-            top_k=top_k,
-        )
-        if not results:
-            continue
-        asset = results[0].asset
+        if sample_map and track_name in sample_map:
+            asset = index.assets.get(sample_map[track_name])
+            if asset is None:
+                continue
+        else:
+            results = retriever.search_samples(
+                role=role,
+                one_shot_or_loop=sample_type,
+                bpm=bpm,
+                text_query=text_query,
+                top_k=top_k,
+            )
+            if not results:
+                continue
+            asset = results[0].asset
         sample_uri = asset.path
         actions.append(
             build_create_track_action(
