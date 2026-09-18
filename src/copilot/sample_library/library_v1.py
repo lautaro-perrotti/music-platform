@@ -76,6 +76,8 @@ def discover(root: Path) -> list[Path]:
     out: list[Path] = []
     for p in root.rglob("*"):
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if p.name.startswith("._"):  # macOS AppleDouble resource-fork metadata
+                continue
             out.append(p)
     return sorted(out)
 
