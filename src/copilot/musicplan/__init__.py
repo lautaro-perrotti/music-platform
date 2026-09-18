@@ -24,6 +24,8 @@ from copilot.schemas.musicplan import (
     ActionTarget,
     ActionType,
     CompiledExecutionEnvelope,
+    DeviceLoadActionParams,
+    DeviceTweakActionParams,
     DiagnosisBinding,
     DryRunResult,
     ExecutionVerificationSpec,
@@ -34,6 +36,7 @@ from copilot.schemas.musicplan import (
     PlanIntentClass,
     PlanStatus,
     RollbackSpec,
+    SampleSwapActionParams,
     VerificationSpec,
     VolumeActionParams,
     VolumeOperation,
@@ -168,6 +171,86 @@ def build_set_track_volume_action(
                 detail="intended_after within [0,1]",
                 expected={"min": 0.0, "max": 1.0},
             ),
+        ],
+    )
+
+
+def build_device_tweak_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_index: int,
+    parameter_name: str,
+    expected_before: float,
+    intended_after: float,
+    unit: str = "",
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+    allowed_min: float | None = None,
+    allowed_max: float | None = None,
+) -> PlanAction:
+    """Build a DEVICE_TWEAK action (adjust a native device parameter)."""
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = DeviceTweakActionParams(
+        device_index=int(device_index),
+        parameter_name=parameter_name,
+        unit=unit,
+        expected_before=float(expected_before),
+        intended_after=float(intended_after),
+        allowed_min=allowed_min,
+        allowed_max=allowed_max,
+    )
+    rollback = RollbackSpec(
+        parameter=f"device[{device_index}].{parameter_name}",
+        unit=unit or "normalized",
+        restore_value=float(expected_before),
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"device[{device_index}].{parameter_name}",
+            expected_after=float(intended_after),
+            unit=unit or "normalized",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.{parameter_name}",
+        direction="increase" if intended_after > expected_before else (
+            "decrease" if intended_after < expected_before else "none"
+        ),
+        description=f"adjust {parameter_name} on device[{device_index}] of {track.name}",
+        measurement_to_compare_after=f"device[{device_index}].{parameter_name} readback",
+        limitations=["Normalized parameter value unless a real unit is supplied."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.DEVICE_TWEAK,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="DEVICE_EXISTS", detail="device_index must exist on the track"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="rollback value prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
         ],
     )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,9 @@ class PlanStatus(StrEnum):
 
 class ActionType(StrEnum):
     SET_TRACK_VOLUME = "SET_TRACK_VOLUME"
+    DEVICE_TWEAK = "DEVICE_TWEAK"
+    DEVICE_LOAD = "DEVICE_LOAD"
+    SAMPLE_SWAP = "SAMPLE_SWAP"
 
 
 class VolumeOperation(StrEnum):
@@ -104,6 +107,7 @@ class RollbackSpec(BaseModel):
 
 
 class VolumeActionParams(BaseModel):
+    kind: Literal["volume"] = "volume"
     operation: VolumeOperation
     unit: Literal["ableton_volume"] = "ableton_volume"
     target_value: float | None = None
@@ -115,11 +119,47 @@ class VolumeActionParams(BaseModel):
     readback_tolerance: float = 0.02
 
 
+class DeviceTweakActionParams(BaseModel):
+    kind: Literal["device_tweak"] = "device_tweak"
+    device_index: int
+    parameter_name: str
+    unit: str = ""
+    expected_before: float
+    intended_after: float
+    allowed_min: float | None = None
+    allowed_max: float | None = None
+    readback_tolerance: float = 0.001
+
+
+class DeviceLoadActionParams(BaseModel):
+    kind: Literal["device_load"] = "device_load"
+    device_name: str
+    device_uri: str | None = None
+    device_index_hint: int = -1
+
+
+class SampleSwapActionParams(BaseModel):
+    kind: Literal["sample_swap"] = "sample_swap"
+    sample_path: str
+    device_index: int
+
+
+ActionParams = Annotated[
+    Union[
+        VolumeActionParams,
+        DeviceTweakActionParams,
+        DeviceLoadActionParams,
+        SampleSwapActionParams,
+    ],
+    Field(discriminator="kind"),
+]
+
+
 class PlanAction(BaseModel):
     action_id: str
     action_type: ActionType
     target: ActionTarget
-    params: VolumeActionParams
+    params: ActionParams
     reason: str
     evidence_refs: list[str] = Field(default_factory=list)
     preconditions: list[ActionPrecondition] = Field(default_factory=list)
