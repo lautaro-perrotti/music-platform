@@ -489,6 +489,53 @@ class AgentTools:
             )
             return result
 
+    def create_pattern(
+        self,
+        track_index: int,
+        clip_index: int,
+        length_beats: float,
+        notes: list[MidiNote],
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("create_pattern")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"clip_exists": False, "clip_index": clip_index}
+            expected_after = {"clip_exists": True, "note_count": len(notes)}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="create_pattern",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+
+            def _do() -> dict[str, Any]:
+                self.daw.create_midi_clip(track_index, clip_index, length_beats)
+                self.daw.replace_clip_notes(track_index, clip_index, notes)
+                return {"clip_index": clip_index, "note_count": len(notes)}
+
+            result = self._execute_write("create_pattern", command_id, before, expected_after, _do)
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, clip_index=clip_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="create_pattern",
+                before=before,
+                after={"note_count": len(notes)},
+                expected_after=expected_after,
+                inverse_operation="delete_clip",
+                inverse_params={},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def _pre_write(
         self, operation: str, expected_revision: int | None = None
     ) -> SessionState:
@@ -504,6 +551,7 @@ class AgentTools:
             "load_sample": "load_browser_item",
             "load_instrument_or_effect": "load_instrument_or_effect",
             "load_browser_item": "load_browser_item",
+            "create_pattern": "create_clip",
             "delete_track": "delete_track",
             "delete_clip": "delete_clip",
             "set_track_name": "set_track_name",

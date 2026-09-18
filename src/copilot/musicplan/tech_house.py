@@ -14,7 +14,12 @@ retrieval (the "build a track from 0" path of TRACK_BUILDER_V1).
 from __future__ import annotations
 
 from copilot.human_eval.store import now_iso
-from copilot.musicplan import build_create_track_action, build_sample_load_action
+from copilot.musicplan import (
+    build_create_track_action,
+    build_pattern_action,
+    build_sample_load_action,
+)
+from copilot.musicplan.groove import full_groove
 from copilot.sample_library.retrieval import SampleRetriever
 from copilot.sample_library.schemas import LibraryIndex, SampleRole, SampleType
 from copilot.schemas.musicplan import DiagnosisBinding, MusicPlan, PlanIntentClass
@@ -47,17 +52,21 @@ MIXING_HINTS = [
 ]
 
 
-def _virtual_audio_track(name: str) -> TrackState:
+def _virtual_track(name: str, role: str = "audio") -> TrackState:
     return TrackState(
         stable_id="",
         index=-1,
         name=name,
-        role="audio",
+        role=role,
         mixer=MixerState(),
         routing=RoutingState(output_type="Main", monitoring="in"),
         devices=[],
         clips=[],
     )
+
+
+def _virtual_audio_track(name: str) -> TrackState:
+    return _virtual_track(name, role="audio")
 
 
 def build_tech_house_plan(
@@ -106,6 +115,29 @@ def build_tech_house_plan(
             )
         )
         evidence_refs.append(asset.id)
+
+    # Groove layer: one MIDI "Groove" track carrying the drum pattern (timing + velocity).
+    groove_notes = full_groove(bars=1)
+    actions.append(
+        build_create_track_action(
+            project_identity=session.project_identity,
+            track_name="Groove",
+            track_kind="midi",
+            reason="groove MIDI track (drum pattern)",
+            evidence_refs=[],
+        )
+    )
+    actions.append(
+        build_pattern_action(
+            track=_virtual_track("Groove", role="midi"),
+            project_identity=session.project_identity,
+            clip_index=0,
+            length_beats=4.0,
+            notes=groove_notes,
+            reason="groovy/latin drum pattern (kick/clap/hats/shaker/conga/clave/bass)",
+            evidence_refs=[],
+        )
+    )
 
     return MusicPlan(
         plan_id=plan_id,

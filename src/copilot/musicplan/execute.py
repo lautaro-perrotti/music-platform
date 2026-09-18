@@ -1376,6 +1376,38 @@ def execute_track_build_plan(
             step["sample_uri"] = params.sample_uri
             report["MUSICAL_WRITE_COUNT"]["forward"] += 1
 
+        elif action.action_type is ActionType.CREATE_PATTERN:
+            params = action.params
+            track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
+            track = _resolve_track_by_name(current, track_name)
+            if track is None:
+                step["status"] = "FAILED"
+                step["error"] = f"track {track_name!r} not resolvable"
+                report["per_action"].append(step)
+                tools.transactions.abort(step["error"])
+                report["status"] = "FAILED"
+                report["error"] = step["error"]
+                return report
+            try:
+                tools.create_pattern(
+                    track.index,
+                    int(params.clip_index),
+                    float(params.length_beats),
+                    list(params.notes),
+                )
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"CREATE_PATTERN {track_name}: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = track_name
+            step["note_count"] = len(params.notes)
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
         else:
             step["status"] = "UNSUPPORTED"
             step["error"] = f"{action.action_type.value} not supported in multi-action yet"

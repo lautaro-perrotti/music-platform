@@ -33,6 +33,7 @@ from copilot.schemas.musicplan import (
     ExpectedEffect,
     MusicPlan,
     MusicalVerificationSpec,
+    PatternActionParams,
     PlanAction,
     PlanIntentClass,
     PlanStatus,
@@ -43,7 +44,7 @@ from copilot.schemas.musicplan import (
     VolumeActionParams,
     VolumeOperation,
 )
-from copilot.schemas.session import SessionState, TrackState
+from copilot.schemas.session import MidiNote, SessionState, TrackState
 
 VOLUME_TOLERANCE = 0.02
 PLANS_DIR = Path("logs") / "musicplans"
@@ -1199,6 +1200,64 @@ def validate_sample_load_plan(
     plan.status = PlanStatus.READY_FOR_EXECUTION
     plan.rejection_reason = None
     return plan
+
+
+def build_pattern_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    length_beats: float,
+    notes: list[MidiNote],
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = PatternActionParams(
+        clip_index=clip_index, length_beats=length_beats, notes=list(notes)
+    )
+    rollback = RollbackSpec(parameter="pattern", unit="clip", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"clip[{clip_index}].notes", expected_after=1.0, unit="patterned"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.clip[{clip_index}].notes",
+        direction="add",
+        description=f"create {len(notes)}-note drum pattern on clip {clip_index}",
+        measurement_to_compare_after=f"note count of clip {clip_index}",
+        limitations=["Pattern is MIDI trigger data; sample mapping via Drum Rack later."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.CREATE_PATTERN,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_clip inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
 
 
 def compile_execution_envelope(

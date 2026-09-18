@@ -7,6 +7,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
+from copilot.schemas.session import MidiNote
+
 SCHEMA_VERSION = "musicplan-v1"
 
 
@@ -30,6 +32,7 @@ class ActionType(StrEnum):
     SAMPLE_SWAP = "SAMPLE_SWAP"
     CREATE_TRACK = "CREATE_TRACK"
     SAMPLE_LOAD = "SAMPLE_LOAD"
+    CREATE_PATTERN = "CREATE_PATTERN"
 
 
 class VolumeOperation(StrEnum):
@@ -160,6 +163,13 @@ class SampleLoadActionParams(BaseModel):
     sample_uri: str
 
 
+class PatternActionParams(BaseModel):
+    kind: Literal["create_pattern"] = "create_pattern"
+    clip_index: int
+    length_beats: float
+    notes: list[MidiNote] = Field(default_factory=list)
+
+
 ActionParams = Annotated[
     Union[
         VolumeActionParams,
@@ -168,6 +178,7 @@ ActionParams = Annotated[
         SampleSwapActionParams,
         CreateTrackActionParams,
         SampleLoadActionParams,
+        PatternActionParams,
     ],
     Field(discriminator="kind"),
 ]

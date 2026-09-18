@@ -58,14 +58,15 @@ def test_build_tech_house_plan():
     from copilot.musicplan.tech_house import build_tech_house_plan
     _, session = _session()
     plan = build_tech_house_plan(index=_synthetic_index(), session=session)
-    # 10 roles x (CREATE_TRACK + SAMPLE_LOAD)
-    assert len(plan.actions) == 20
+    # 10 roles x (CREATE_TRACK + SAMPLE_LOAD) + Groove track + pattern
+    assert len(plan.actions) == 22
     kinds = [a.action_type.value for a in plan.actions]
-    assert kinds.count("CREATE_TRACK") == 10
+    assert kinds.count("CREATE_TRACK") == 11
     assert kinds.count("SAMPLE_LOAD") == 10
+    assert kinds.count("CREATE_PATTERN") == 1
     names = [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"]
     assert names == ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
-                     "Perc Loop", "Bass", "Vocal", "Stab"]
+                     "Perc Loop", "Bass", "Vocal", "Stab", "Groove"]
 
 
 def test_execute_tech_house_plan_full_loop(tmp_path):
@@ -84,11 +85,42 @@ def test_execute_tech_house_plan_full_loop(tmp_path):
 
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTED"] is True
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 20
-    assert report["after_track_count"] == 10
-    assert report["after_clip_count"] == 10
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 22
+    assert report["after_track_count"] == 11
+    assert report["after_clip_count"] == 11
     # rollback reversed the whole plan -> empty set restored
     assert report["restored_track_count"] == 0
     assert report["restored_clip_count"] == 0
     assert report["RESTORE_VERIFIED"] is True
     assert report["open_transaction"] is False
+
+
+def test_groove_patterns():
+    from copilot.musicplan.groove import (
+        DRUM_MAP,
+        bass_pattern,
+        clap_pattern,
+        clave_pattern,
+        closed_hat_pattern,
+        conga_pattern,
+        full_groove,
+        kick_pattern,
+        shaker_pattern,
+    )
+    kick = kick_pattern()
+    assert [n.start_time for n in kick] == [0.0, 1.0, 2.0, 3.0]
+    assert [n.velocity for n in kick] == [100, 98, 102, 96]  # velocity variation = groove
+    clap = clap_pattern()
+    assert [n.start_time for n in clap if n.velocity > 60] == [1.0, 3.0]
+    assert len(closed_hat_pattern()) == 6  # 4 offbeats + 2 ghosts
+    assert len(shaker_pattern()) == 16  # 16ths
+    assert len(conca_pattern := conga_pattern()) == 6  # syncopated latin
+    assert [n.start_time for n in clave_pattern()] == [0.0, 0.75, 1.5, 2.5, 3.0]  # son 3-2
+    assert len(bass_pattern()) == 5  # funky syncopated
+    full = full_groove()
+    assert len(full) == 45  # kick4 + clap3 + hat6 + shaker16 + conga6 + clave5 + bass5
+    # every note has a mapped pitch
+    assert all(n.pitch in DRUM_MAP.values() for n in full)
+    # sorted by time
+    times = [n.start_time for n in full]
+    assert times == sorted(times)
