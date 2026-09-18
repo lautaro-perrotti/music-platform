@@ -459,7 +459,9 @@ class TransactionManager:
             self.daw.delete_device(locator.track_index, locator.device_index)
             return
         if op == "load_browser_item":
-            self.daw.load_browser_item(locator.track_index, str(params["item_uri"]))
+            self.daw.load_browser_item(
+                locator.track_index, str(params["item_uri"]), clip_index=locator.clip_index
+            )
             return
         raise DawError(f"Unsupported inverse: {op}")
 

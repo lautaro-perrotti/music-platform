@@ -323,6 +323,7 @@ class AbletonTcpAdapter(DawAdapter):
                         length_beats=float(clip.get("length", 0.0)),
                         is_midi=bool(info.get("is_midi_track")),
                         notes=notes,
+                        sample_uri=clip.get("sample_uri") or clip.get("sample_path") or None,
                     )
                 )
             devices[index] = [
@@ -885,12 +886,13 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
-    def load_browser_item(self, track_index: int, item_uri: str) -> dict[str, Any]:
-        return self._command(
-            "load_browser_item",
-            {"track_index": track_index, "item_uri": item_uri},
-            side_effect=True,
-        )
+    def load_browser_item(
+        self, track_index: int, item_uri: str, clip_index: int | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"track_index": track_index, "item_uri": item_uri}
+        if clip_index is not None:
+            params["clip_index"] = clip_index
+        return self._command("load_browser_item", params, side_effect=True)
 
     def delete_device(self, track_index: int, device_index: int) -> dict[str, Any]:
         return self._command(

@@ -6,11 +6,12 @@ from copilot.daw.mock import MockAbletonAdapter
 from copilot.daw.state_tokens import attach_tokens, target_token
 
 
-def _session_with_clip():
+def _session_with_audio_clip():
     daw = MockAbletonAdapter()
     daw.connect()
     daw.create_midi_track("Pad")
-    daw.create_midi_clip(0, 0, 4.0)  # clip at slot 0
+    # pre-populate an audio clip at slot 0 with an "old" sample
+    daw.load_browser_item(0, "samples/hihat_old.wav", clip_index=0)
     session = daw.snapshot()
     attach_tokens(session)
     return daw, session
@@ -49,15 +50,17 @@ def _sample_swap_plan(session):
 def test_validate_sample_swap_ready():
     from copilot.musicplan import validate_sample_swap_plan
     from copilot.schemas.musicplan import PlanStatus
-    _, session = _session_with_clip()
+    _, session = _session_with_audio_clip()
     result = validate_sample_swap_plan(_sample_swap_plan(session), session=session)
     assert result.status is PlanStatus.READY_FOR_EXECUTION
+    # previous sample captured from live clip
+    assert result.actions[0].params.previous_sample_uri == "samples/hihat_old.wav"
 
 
 def test_validate_sample_swap_clip_not_found():
     from copilot.musicplan import validate_sample_swap_plan
     from copilot.schemas.musicplan import PlanStatus
-    _, session = _session_with_clip()
+    _, session = _session_with_audio_clip()
     plan = _sample_swap_plan(session)
     plan.actions[0].params.clip_index = 99
     result = validate_sample_swap_plan(plan, session=session)
@@ -65,12 +68,27 @@ def test_validate_sample_swap_clip_not_found():
     assert "CLIP_NOT_FOUND" in (result.rejection_reason or "")
 
 
+def test_validate_sample_swap_rejects_midi_clip():
+    from copilot.musicplan import validate_sample_swap_plan
+    from copilot.schemas.musicplan import PlanStatus
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_midi_track("Pad")
+    daw.create_midi_clip(0, 0, 4.0)  # MIDI clip (no sample)
+    session = daw.snapshot()
+    attach_tokens(session)
+    plan = _sample_swap_plan(session)
+    result = validate_sample_swap_plan(plan, session=session)
+    assert result.status is PlanStatus.REJECTED
+    assert "CLIP_NOT_AUDIO" in (result.rejection_reason or "")
+
+
 def test_execute_sample_swap_write_loop(tmp_path):
     from copilot.musicplan.execute import (
         build_agent_tools,
         execute_sample_swap_write_loop,
     )
-    daw, session = _session_with_clip()
+    daw, session = _session_with_audio_clip()
     plan = _sample_swap_plan(session)
     tools = build_agent_tools(daw, journal_path=tmp_path / "journal.jsonl")
     report = execute_sample_swap_write_loop(
@@ -78,7 +96,8 @@ def test_execute_sample_swap_write_loop(tmp_path):
     )
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTION_VERIFICATION"] == "PASS"
-    assert report["reported_item_uri"] == "samples/hihat_new.wav"
+    assert report["after_sample_uri"] == "samples/hihat_new.wav"
+    assert report["restored_sample_uri"] == "samples/hihat_old.wav"
     assert report["MUSICAL_WRITE_COUNT"] == {"forward": 1, "rollback": 1}
     assert report["RESTORE_VERIFIED"] is True
     assert report["open_transaction"] is False

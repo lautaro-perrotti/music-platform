@@ -76,7 +76,7 @@ class DawAdapter(ABC):
 
     @abstractmethod
     def load_browser_item(
-        self, track_index: int, item_uri: str
+        self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]: ...
 
     @abstractmethod

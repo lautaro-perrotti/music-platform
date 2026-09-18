@@ -951,6 +951,12 @@ def validate_sample_swap_plan(
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = f"CLIP_NOT_FOUND slot={params.clip_index} slots={[c.slot_index for c in track.clips]}"
         return plan
+    if clip.is_midi:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"CLIP_NOT_AUDIO slot={params.clip_index}"
+        return plan
+    if params.previous_sample_uri is None:
+        params.previous_sample_uri = clip.sample_uri
     if not action.rollback or not action.rollback.prepared:
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = "missing_rollback"

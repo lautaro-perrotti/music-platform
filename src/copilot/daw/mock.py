@@ -81,14 +81,16 @@ class MockAbletonAdapter(DawAdapter):
             for slot_index, clip in enumerate(raw["clips"]):
                 if clip is None:
                     continue
+                is_audio = bool(clip.get("is_audio", False))
                 clips[index].append(
                     ClipState(
                         stable_id="",
                         slot_index=slot_index,
                         name=clip["name"],
                         length_beats=clip["length"],
-                        is_midi=True,
-                        notes=[MidiNote(**note) for note in clip["notes"]],
+                        is_midi=not is_audio,
+                        notes=[] if is_audio else [MidiNote(**note) for note in clip["notes"]],
+                        sample_uri=clip.get("sample_uri"),
                     )
                 )
             devices[index] = [
@@ -318,14 +320,33 @@ class MockAbletonAdapter(DawAdapter):
             {"deleted": True, "device_index": device_index, "device_name": name},
         )
 
-    def load_browser_item(self, track_index: int, item_uri: str) -> dict[str, Any]:
-        # SAMPLE_SWAP primitive. Mock records the loaded sample uri on the clip slot.
+    def load_browser_item(
+        self, track_index: int, item_uri: str, clip_index: int | None = None
+    ) -> dict[str, Any]:
+        # SAMPLE_SWAP primitive. Loads a sample into a clip slot (audio clip).
         self._before_write("load_browser_item")
         track = self._track(track_index)
-        track.setdefault("loaded_browser_items", []).append(item_uri)
+        if clip_index is None:
+            clip_index = next(
+                (i for i, c in enumerate(track["clips"]) if c is None), 0
+            )
+        self._slot(track, clip_index)
+        clip = track["clips"][clip_index]
+        if clip is None:
+            clip = {
+                "name": item_uri.rsplit("/", 1)[-1],
+                "length": 4.0,
+                "notes": [],
+                "is_audio": True,
+                "sample_uri": item_uri,
+            }
+        else:
+            clip["is_audio"] = True
+            clip["sample_uri"] = item_uri
+        track["clips"][clip_index] = clip
         return self._after_write(
             "load_browser_item",
-            {"track_index": track_index, "item_uri": item_uri},
+            {"track_index": track_index, "clip_index": clip_index, "item_uri": item_uri},
         )
 
     def _before_write(self, operation: str) -> None:

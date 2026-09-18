@@ -356,6 +356,7 @@ class AgentTools:
         track_index: int,
         item_uri: str,
         previous_item_uri: str | None = None,
+        clip_index: int | None = None,
     ) -> dict[str, Any]:
         with self.lock.write():
             before_state = self._pre_write("load_browser_item")
@@ -376,12 +377,16 @@ class AgentTools:
                 command_id,
                 before,
                 expected_after,
-                lambda: self.daw.load_browser_item(track_index, item_uri),
+                lambda: self.daw.load_browser_item(
+                    track_index, item_uri, clip_index=clip_index
+                ),
             )
             track = self._track_at(track_index)
             self.transactions.record(
                 target_stable_id=track.stable_id,
-                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, clip_index=clip_index
+                ),
                 target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
                 target_name_at_apply=track.name,
                 operation="load_browser_item",

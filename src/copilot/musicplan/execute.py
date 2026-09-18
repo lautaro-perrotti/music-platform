@@ -922,7 +922,7 @@ def execute_sample_swap_write_loop(
     session: SessionState,
     persist_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """SAMPLE_SWAP lifecycle: validate -> load sample -> verify (best-effort) -> rollback (reload previous)."""
+    """SAMPLE_SWAP lifecycle: validate -> load sample -> readback clip.sample_uri -> rollback (reload previous)."""
     from copilot.musicplan import _as_ref, validate_sample_swap_plan
     from copilot.daw.object_ref import require_resolved
 
@@ -965,7 +965,7 @@ def execute_sample_swap_write_loop(
 
     try:
         write_result = tools.load_browser_item(
-            track.index, sample_uri, previous_item_uri=previous
+            track.index, sample_uri, previous_item_uri=previous, clip_index=clip_index
         )
     except Exception as exc:  # noqa: BLE001
         if tools.transactions._open is not None:
@@ -979,11 +979,17 @@ def execute_sample_swap_write_loop(
     report["EXECUTED"] = True
     lifecycle.append("EXECUTED")
 
-    reported_uri = write_result.get("item_uri") if isinstance(write_result, dict) else None
-    report["reported_item_uri"] = reported_uri
-    if reported_uri != sample_uri:
+    after = tools.get_session_snapshot()
+    after_track = _find_track_by_stable_id(after, track.stable_id)
+    after_clip = next(
+        (c for c in (after_track.clips if after_track else []) if c.slot_index == clip_index),
+        None,
+    )
+    after_sample_uri = after_clip.sample_uri if after_clip else None
+    report["after_sample_uri"] = after_sample_uri
+    if after_sample_uri != sample_uri:
         if tools.transactions._open is not None:
-            tools.transactions.mark_in_doubt(f"reported {reported_uri} != {sample_uri}")
+            tools.transactions.mark_in_doubt(f"readback {after_sample_uri} != {sample_uri}")
         lifecycle.append("IN_DOUBT")
         report["status"] = "IN_DOUBT"
         report["error"] = "sample swap readback mismatch"
@@ -993,8 +999,7 @@ def execute_sample_swap_write_loop(
     lifecycle.append("VERIFIED")
 
     tools.transactions.commit(
-        {"EXECUTION_VERIFICATION": "PASS", "sample_uri": sample_uri},
-        session=tools.get_session_snapshot(),
+        {"EXECUTION_VERIFICATION": "PASS", "sample_uri": sample_uri}, session=after
     )
     validated.status = PlanStatus.VERIFIED
 
@@ -1009,12 +1014,22 @@ def execute_sample_swap_write_loop(
     lifecycle.append("ROLLED_BACK")
     validated.status = PlanStatus.ROLLED_BACK
 
+    restored = tools.get_session_snapshot()
+    restored_track = _find_track_by_stable_id(restored, track.stable_id)
+    restored_clip = next(
+        (c for c in (restored_track.clips if restored_track else []) if c.slot_index == clip_index),
+        None,
+    )
+    restored_sample_uri = restored_clip.sample_uri if restored_clip else None
+    report["restored_sample_uri"] = restored_sample_uri
+    if previous and restored_sample_uri != previous:
+        report["status"] = "RESTORE_READBACK_FAILED"
+        report["error"] = f"restored {restored_sample_uri} != previous {previous}"
+        report["RESTORE_VERIFIED"] = False
+        return report
+
     lifecycle.append("RESTORE_VERIFIED")
     report["RESTORE_VERIFIED"] = True
-    report["restore_note"] = (
-        "previous sample reloaded via inverse; precise audio-clip readback "
-        "pending clip sample-reference model."
-    )
     report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
     report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
     report["open_transaction"] = tools.transactions._open is not None
