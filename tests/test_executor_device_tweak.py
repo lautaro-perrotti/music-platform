@@ -160,3 +160,100 @@ def test_validate_device_tweak_param_not_found():
     result = validate_device_tweak_plan(plan, session=session)
     assert result.status is PlanStatus.REJECTED
     assert result.rejection_reason == "PARAMETER_NOT_FOUND"
+
+
+def test_execute_device_tweak_write_loop(tmp_path):
+    from copilot.human_eval.store import now_iso
+    from copilot.musicplan import build_device_tweak_action
+    from copilot.musicplan.execute import (
+        build_agent_tools,
+        execute_device_tweak_write_loop,
+    )
+    from copilot.schemas.musicplan import DiagnosisBinding, MusicPlan, PlanIntentClass
+
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_midi_track("Pad")  # EQ Eight device, "1 Gain A" = 0.5
+    session = daw.snapshot()
+    attach_tokens(session)
+    track = session.tracks[0]
+
+    action = build_device_tweak_action(
+        track=track,
+        project_identity=session.project_identity,
+        device_index=0,
+        parameter_name="1 Gain A",
+        expected_before=0.5,
+        intended_after=0.7,
+        reason="test",
+        evidence_refs=["ev.1"],
+    )
+    plan = MusicPlan(
+        plan_id="plan_tweak",
+        diagnosis=DiagnosisBinding(
+            diagnosis_id="d1", diagnosis_status="SUPPORTED",
+            diagnosis_accepted=True, cause_status="CAUSE_SUPPORTED",
+        ),
+        intent_class=PlanIntentClass.CONTROLLED_ENGINEERING_VALIDATION,
+        project_state_token=session.project_token or session.project_identity,
+        audible_state_token=session.audible_token or "",
+        target_state_tokens={track.name: target_token(track)},
+        evidence_refs=["ev.1"],
+        actions=[action],
+        created_at=now_iso(),
+    )
+
+    tools = build_agent_tools(daw, journal_path=tmp_path / "journal.jsonl")
+    report = execute_device_tweak_write_loop(
+        tools, plan=plan, session=session, persist_dir=tmp_path
+    )
+
+    assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
+    assert report["EXECUTION_VERIFICATION"] == "PASS"
+    assert report["after_readback"] == 0.7
+    assert report["rollback_readback"] == 0.5
+    assert report["RESTORE_VERIFIED"] is True
+    assert report["MUSICAL_WRITE_COUNT"] == {"forward": 1, "rollback": 1}
+    assert report["open_transaction"] is False
+
+
+def test_execute_device_tweak_rejects_bad_expected_before(tmp_path):
+    from copilot.human_eval.store import now_iso
+    from copilot.musicplan import build_device_tweak_action
+    from copilot.musicplan.execute import (
+        build_agent_tools,
+        execute_device_tweak_write_loop,
+    )
+    from copilot.schemas.musicplan import DiagnosisBinding, MusicPlan, PlanIntentClass
+
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_midi_track("Pad")
+    session = daw.snapshot()
+    attach_tokens(session)
+    track = session.tracks[0]
+
+    action = build_device_tweak_action(
+        track=track, project_identity=session.project_identity,
+        device_index=0, parameter_name="1 Gain A",
+        expected_before=0.9,  # live is 0.5 -> must reject
+        intended_after=0.7, reason="test", evidence_refs=["ev.1"],
+    )
+    plan = MusicPlan(
+        plan_id="plan_bad",
+        diagnosis=DiagnosisBinding(
+            diagnosis_id="d1", diagnosis_status="SUPPORTED",
+            diagnosis_accepted=True, cause_status="CAUSE_SUPPORTED",
+        ),
+        intent_class=PlanIntentClass.CONTROLLED_ENGINEERING_VALIDATION,
+        project_state_token=session.project_token or session.project_identity,
+        audible_state_token=session.audible_token or "",
+        target_state_tokens={track.name: target_token(track)},
+        evidence_refs=["ev.1"], actions=[action], created_at=now_iso(),
+    )
+    tools = build_agent_tools(daw, journal_path=tmp_path / "journal.jsonl")
+    report = execute_device_tweak_write_loop(
+        tools, plan=plan, session=session, persist_dir=tmp_path
+    )
+    assert report["status"] == "NOT_EXECUTABLE"
+    assert "EXPECTED_PARAM_MISMATCH" in (report.get("error") or "")

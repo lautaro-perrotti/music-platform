@@ -649,3 +649,145 @@ def build_agent_tools(daw, *, journal_path: Path) -> AgentTools:
     journal = DurableJournal(journal_path)
     txns = TransactionManager(daw, journal=journal)
     return AgentTools(daw, txns)
+
+
+def _read_param_value(
+    session: SessionState, track_index: int, device_index: int, parameter_name: str
+) -> float | None:
+    track = next((t for t in session.tracks if int(t.index) == int(track_index)), None)
+    if track is None:
+        return None
+    device = next((d for d in track.devices if int(d.index) == int(device_index)), None)
+    if device is None:
+        return None
+    param = next((pp for pp in device.parameters if pp.name.lower() == parameter_name.lower()), None)
+    return None if param is None else float(param.value)
+
+
+def execute_device_tweak_write_loop(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """DEVICE_TWEAK lifecycle: validate -> write -> readback -> rollback -> restore verify."""
+    from copilot.musicplan import _as_ref, validate_device_tweak_plan
+    from copilot.daw.object_ref import require_resolved
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "DEVICE_TWEAK",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+    }
+
+    validated = validate_device_tweak_plan(plan, session=session)
+    report["plan_id"] = validated.plan_id
+    report["plan_status"] = validated.status.value
+    if validated.status is not PlanStatus.READY_FOR_EXECUTION:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = validated.rejection_reason or validated.status.value
+        return report
+
+    action = validated.actions[0]
+    params = action.params  # DeviceTweakActionParams
+    track = require_resolved(session, _as_ref(action.target.ref))
+    device_index = int(params.device_index)
+    parameter_name = params.parameter_name
+    param = next(
+        (pp for pp in next(d for d in track.devices if int(d.index) == device_index).parameters
+         if pp.name.lower() == parameter_name.lower()),
+        None,
+    )
+    if param is None:
+        report["status"] = "PARAMETER_NOT_FOUND"
+        report["error"] = parameter_name
+        return report
+    parameter_index = int(param.index)
+    before_value = float(param.value)
+    intended = float(params.intended_after)
+
+    report["before_value"] = before_value
+    report["intended_after"] = intended
+    report["rollback_value"] = before_value
+    lifecycle.append("PREPARED")
+
+    txn = tools.transactions.begin(
+        user_intent=f"DEVICE_TWEAK {track.name}.{parameter_name} {before_value}->{intended}",
+        session=session,
+    )
+    report["transaction_id"] = txn.transaction_id
+    lifecycle.append("EXECUTING")
+
+    try:
+        write_result = tools.set_device_parameter(
+            track.index, device_index, parameter_index, intended, previous=before_value
+        )
+    except Exception as exc:  # noqa: BLE001
+        if tools.transactions._open is not None:
+            tools.transactions.abort(str(exc))
+        lifecycle.append("FAILED")
+        report["status"] = "WRITE_FAILED"
+        report["error"] = str(exc)
+        return report
+
+    report["MUSICAL_WRITE_COUNT"]["forward"] = 1
+    report["EXECUTED"] = True
+    lifecycle.append("EXECUTED")
+
+    after = tools.get_session_snapshot()
+    after_value = _read_param_value(after, track.index, device_index, parameter_name)
+    report["after_readback"] = after_value
+    if after_value is None or abs(after_value - intended) > params.readback_tolerance:
+        if tools.transactions._open is not None:
+            tools.transactions.mark_in_doubt(
+                f"readback {after_value} != intended {intended}"
+            )
+        lifecycle.append("IN_DOUBT")
+        report["status"] = "IN_DOUBT"
+        report["error"] = "readback mismatch"
+        report["EXECUTION_VERIFICATION"] = "FAIL"
+        return report
+    report["EXECUTION_VERIFICATION"] = "PASS"
+    lifecycle.append("VERIFIED")
+
+    tools.transactions.commit({"EXECUTION_VERIFICATION": "PASS", "after_readback": after_value}, session=after)
+    validated.status = PlanStatus.VERIFIED
+
+    # Unconditional rollback for engineering validation.
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        lifecycle.append(rollback_txn.status.value)
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+    validated.status = PlanStatus.ROLLED_BACK
+
+    restored = tools.get_session_snapshot()
+    restore_value = _read_param_value(restored, track.index, device_index, parameter_name)
+    report["rollback_readback"] = restore_value
+    if restore_value is None or abs(restore_value - before_value) > params.readback_tolerance:
+        report["status"] = "RESTORE_READBACK_FAILED"
+        report["error"] = f"rollback readback {restore_value} != {before_value}"
+        report["RESTORE_VERIFIED"] = False
+        return report
+
+    lifecycle.append("RESTORE_VERIFIED")
+    report["RESTORE_VERIFIED"] = True
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{validated.plan_id}_device_tweak_loop.json", report)
+    report["artifact"] = artifact
+    return report
+
