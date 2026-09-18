@@ -793,6 +793,15 @@ def execute_device_tweak_write_loop(
     return report
 
 
+def _same_sample_uri(a: str | None, b: str | None) -> bool:
+    """Compare sample URIs by basename (plan carries full path; live clip carries file name)."""
+    if not a or not b:
+        return False
+    fa = a.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    fb = b.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return fa == fb
+
+
 def _find_track_by_stable_id(session: SessionState, stable_id: str) -> TrackState | None:
     return next((t for t in session.tracks if t.stable_id == stable_id), None)
 
@@ -988,7 +997,7 @@ def execute_sample_swap_write_loop(
     )
     after_sample_uri = after_clip.sample_uri if after_clip else None
     report["after_sample_uri"] = after_sample_uri
-    if after_sample_uri != sample_uri:
+    if not _same_sample_uri(after_sample_uri, sample_uri):
         if tools.transactions._open is not None:
             tools.transactions.mark_in_doubt(f"readback {after_sample_uri} != {sample_uri}")
         lifecycle.append("IN_DOUBT")
@@ -1023,7 +1032,7 @@ def execute_sample_swap_write_loop(
     )
     restored_sample_uri = restored_clip.sample_uri if restored_clip else None
     report["restored_sample_uri"] = restored_sample_uri
-    if previous and restored_sample_uri != previous:
+    if previous and not _same_sample_uri(restored_sample_uri, previous):
         report["status"] = "RESTORE_READBACK_FAILED"
         report["error"] = f"restored {restored_sample_uri} != previous {previous}"
         report["RESTORE_VERIFIED"] = False
@@ -1223,7 +1232,7 @@ def execute_sample_load_write_loop(
     )
     after_sample_uri = after_clip.sample_uri if after_clip else None
     report["after_sample_uri"] = after_sample_uri
-    if after_sample_uri != sample_uri:
+    if not _same_sample_uri(after_sample_uri, sample_uri):
         if tools.transactions._open is not None:
             tools.transactions.mark_in_doubt(f"readback {after_sample_uri} != {sample_uri}")
         lifecycle.append("IN_DOUBT")
