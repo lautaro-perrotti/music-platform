@@ -101,6 +101,11 @@ class OpenAICompatibleProvider(ReasoningProvider):
             return self._reason_responses(prompt, timeout_s=timeout_s)
         return self._reason_chat_json_object(prompt, timeout_s=timeout_s)
 
+    def reason_json_object(self, prompt: str, *, timeout_s: float = 180.0) -> str:
+        """Free-form JSON reasoning via chat completions (json_object), bypassing
+        the strict Finding schema used by the responses API."""
+        return self._reason_chat_json_object(prompt, timeout_s=timeout_s)
+
     def _reason_responses(self, prompt: str, *, timeout_s: float) -> str:
         schema = reasoning_json_schema()
         payload: dict[str, Any] = {

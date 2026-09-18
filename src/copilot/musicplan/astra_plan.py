@@ -102,7 +102,8 @@ def build_plan_from_prompt(
     prompt = build_astra_prompt(candidates=candidates, intent=intent)
 
     try:
-        raw = provider.reason(prompt, timeout_s=timeout_s)
+        fn = getattr(provider, "reason_json_object", None) or provider.reason
+        raw = fn(prompt, timeout_s=timeout_s)
         data = parse_astra_selection(raw)
         selections = data.get("selections", {})
         sample_map: dict[str, str] = {}
