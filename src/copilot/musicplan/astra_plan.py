@@ -41,7 +41,7 @@ def build_candidate_context(
 def build_astra_prompt(
     *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
 ) -> str:
-    from copilot.musicplan.decision_context import build_decision_context
+    from copilot.musicplan.decision_system import build_decision_context
     from copilot.musicplan.fx import FX_PHILOSOPHY
     from copilot.musicplan.synth import SYNTH_PHILOSOPHY
 
