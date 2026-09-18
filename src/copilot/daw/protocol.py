@@ -88,6 +88,7 @@ COMMAND_CAPABILITY = {
     "set_track_input_routing": "track.mute",
     "set_track_output_routing": "track.mute",
     "set_device_input_routing": "device.set_parameter",
+    "save": "session.transport",
     "set_track_monitoring": "track.mute",
     "get_track_monitoring": "session.read",
     "get_track_delay": "session.read",

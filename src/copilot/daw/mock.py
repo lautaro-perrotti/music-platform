@@ -240,6 +240,10 @@ class MockAbletonAdapter(DawAdapter):
             {"output_type": routing_type, "output_channel": routing_channel},
         )
 
+    def save_session(self) -> dict[str, Any]:
+        self._before_write("save_session")
+        return self._after_write("save_session", {"saved": True, "path": self.session_path})
+
     def set_device_input_routing(
         self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
     ) -> dict[str, Any]:

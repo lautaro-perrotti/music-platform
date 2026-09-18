@@ -695,6 +695,9 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
+    def save_session(self) -> dict[str, Any]:
+        return self._command("save", {}, side_effect=True)
+
     def set_device_input_routing(
         self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
     ) -> dict[str, Any]:

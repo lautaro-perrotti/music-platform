@@ -635,7 +635,7 @@ class AbletonMCP(ControlSurface):
                                  "start_recording", "stop_recording", "toggle_session_record",
                                  "toggle_arrangement_record", "set_overdub", "capture_midi",
                                  "set_arrangement_loop", "jump_to_time", "create_locator", "delete_locator",
-                                 "set_track_input_routing", "set_track_output_routing", "set_device_input_routing",
+                                 "set_track_input_routing", "set_track_output_routing", "set_device_input_routing", "save",
                                  "set_metronome",
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
                                  "generate_drum_pattern", "generate_bassline",
@@ -1018,6 +1018,8 @@ class AbletonMCP(ControlSurface):
                             routing_type = params.get("routing_type", "")
                             routing_channel = params.get("routing_channel", "")
                             result = self._set_device_input_routing(track_index, device_index, routing_type, routing_channel)
+                        elif command_type == "save":
+                            result = self._save_session()
                         # Metronome control
                         elif command_type == "set_metronome":
                             enabled = params.get("enabled", True)
@@ -4001,6 +4003,23 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting session path: " + str(e))
+            raise
+
+    def _save_session(self):
+        """Save the current Live Set to disk (persists the built track)."""
+        try:
+            app = self.application()
+            doc = app.get_document() if hasattr(app, "get_document") else None
+            song = doc or self._song
+            saved = False
+            path = None
+            if song is not None and hasattr(song, "save"):
+                song.save()
+                saved = True
+                path = song.file_path if hasattr(song, "file_path") else None
+            return {"saved": saved, "path": path}
+        except Exception as e:
+            self.log_message("Error saving session: " + str(e))
             raise
 
     def _is_session_modified(self):

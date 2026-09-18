@@ -2993,8 +2993,14 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     else:
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
     ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
-    # Post-build structured critique (the critic in the producer operating system).
+    # Post-build: persist the set, then run the structured critique.
     if ok and leave:
+        try:
+            saved = daw.save_session()
+            print(f"\nGUARDADO: {saved.get('path') or 'Sin título'}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nGUARDADO: error ({exc})")
+
         from copilot.musicplan.critique import critique_track
 
         after = daw.snapshot()
