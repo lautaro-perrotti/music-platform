@@ -129,3 +129,10 @@ class SampleSetContext(BaseModel):
     roles: dict[str, list[dict]] = Field(default_factory=dict)  # role -> candidate summaries
     candidates: list[dict] = Field(default_factory=list)
     selection_reasons: dict[str, str] = Field(default_factory=dict)
+
+
+class RetrievalResult(BaseModel):
+    asset: SampleAsset
+    score: float
+    reasons: list[str] = Field(default_factory=list)
+    descriptor_distance: float | None = None

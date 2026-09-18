@@ -2542,7 +2542,7 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
     index_path = evidence / "sample_library_index.json"
 
     if not argv:
-        print("uso: sample-library add|index|status|search|embed")
+        print("uso: sample-library add|index|status|search|embed|retrieve")
         return 2
 
     sub = argv[0]
@@ -2610,6 +2610,35 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
             "results": [
                 {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
                  "path": h.asset.relative_path, "score": h.score, "reasons": h.reasons}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "retrieve":
+        if len(argv) < 2:
+            print("uso: sample-library retrieve <ROLE> [BPM]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.retrieval import SampleRetriever
+        try:
+            role = SampleRole(argv[1].upper())
+        except ValueError:
+            print(json.dumps({"status": "BLOCKED", "error": f"unknown role {argv[1]}"}, ensure_ascii=False))
+            return 2
+        bpm = float(argv[2]) if len(argv) >= 3 else None
+        hits = SampleRetriever(idx).search_samples(role=role, bpm=bpm, top_k=5)
+        print(json.dumps({
+            "status": "OK", "role": role.value, "bpm": bpm,
+            "results": [
+                {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
+                 "path": h.asset.relative_path, "bpm": h.asset.bpm.value,
+                 "dur_s": round(h.asset.descriptors.duration_s, 2) if h.asset.descriptors.duration_s else None,
+                 "centroid_hz": h.asset.descriptors.spectral_centroid_hz,
+                 "score": round(h.score, 2), "reasons": h.reasons}
                 for h in hits
             ],
         }, ensure_ascii=False, indent=2))
