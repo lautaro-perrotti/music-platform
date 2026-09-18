@@ -28,6 +28,8 @@ class ActionType(StrEnum):
     DEVICE_TWEAK = "DEVICE_TWEAK"
     DEVICE_LOAD = "DEVICE_LOAD"
     SAMPLE_SWAP = "SAMPLE_SWAP"
+    CREATE_TRACK = "CREATE_TRACK"
+    SAMPLE_LOAD = "SAMPLE_LOAD"
 
 
 class VolumeOperation(StrEnum):
@@ -145,12 +147,27 @@ class SampleSwapActionParams(BaseModel):
     previous_sample_uri: str | None = None
 
 
+class CreateTrackActionParams(BaseModel):
+    kind: Literal["create_track"] = "create_track"
+    track_name: str
+    track_kind: Literal["audio", "midi"] = "audio"
+    index_hint: int = -1
+
+
+class SampleLoadActionParams(BaseModel):
+    kind: Literal["sample_load"] = "sample_load"
+    clip_index: int
+    sample_uri: str
+
+
 ActionParams = Annotated[
     Union[
         VolumeActionParams,
         DeviceTweakActionParams,
         DeviceLoadActionParams,
         SampleSwapActionParams,
+        CreateTrackActionParams,
+        SampleLoadActionParams,
     ],
     Field(discriminator="kind"),
 ]

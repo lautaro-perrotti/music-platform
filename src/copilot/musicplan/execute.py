@@ -1039,3 +1039,237 @@ def execute_sample_swap_write_loop(
     report["artifact"] = artifact
     return report
 
+
+def execute_create_track_write_loop(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """CREATE_TRACK lifecycle: validate -> create track -> verify presence -> rollback (delete) -> verify gone."""
+    from copilot.musicplan import validate_create_track_plan
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "CREATE_TRACK",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+    }
+
+    validated = validate_create_track_plan(plan, session=session)
+    report["plan_id"] = validated.plan_id
+    report["plan_status"] = validated.status.value
+    if validated.status is not PlanStatus.READY_FOR_EXECUTION:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = validated.rejection_reason or validated.status.value
+        return report
+
+    action = validated.actions[0]
+    params = action.params  # CreateTrackActionParams
+    track_name = params.track_name
+    track_kind = params.track_kind
+    report["track_name"] = track_name
+    report["track_kind"] = track_kind
+    report["before_track_count"] = len(session.tracks)
+    lifecycle.append("PREPARED")
+
+    txn = tools.transactions.begin(
+        user_intent=f"CREATE_TRACK {track_kind} {track_name}", session=session
+    )
+    report["transaction_id"] = txn.transaction_id
+    lifecycle.append("EXECUTING")
+
+    try:
+        if track_kind == "audio":
+            result = tools.create_audio_track(track_name, params.index_hint)
+        else:
+            result = tools.create_midi_track(track_name, params.index_hint)
+    except Exception as exc:  # noqa: BLE001
+        if tools.transactions._open is not None:
+            tools.transactions.abort(str(exc))
+        lifecycle.append("FAILED")
+        report["status"] = "WRITE_FAILED"
+        report["error"] = str(exc)
+        return report
+
+    report["MUSICAL_WRITE_COUNT"]["forward"] = 1
+    report["EXECUTED"] = True
+    lifecycle.append("EXECUTED")
+
+    after = tools.get_session_snapshot()
+    created = next((t for t in after.tracks if t.name == track_name), None)
+    report["track_present_after_write"] = created is not None
+    report["after_track_count"] = len(after.tracks)
+    if created is None:
+        if tools.transactions._open is not None:
+            tools.transactions.mark_in_doubt("track not present after create")
+        lifecycle.append("IN_DOUBT")
+        report["status"] = "IN_DOUBT"
+        report["error"] = "track not present after create"
+        report["EXECUTION_VERIFICATION"] = "FAIL"
+        return report
+    report["EXECUTION_VERIFICATION"] = "PASS"
+    lifecycle.append("VERIFIED")
+
+    tools.transactions.commit(
+        {"EXECUTION_VERIFICATION": "PASS", "track_name": track_name}, session=after
+    )
+    validated.status = PlanStatus.VERIFIED
+
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        lifecycle.append(rollback_txn.status.value)
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+    validated.status = PlanStatus.ROLLED_BACK
+
+    restored = tools.get_session_snapshot()
+    still_present = any(t.name == track_name for t in restored.tracks)
+    report["track_present_after_rollback"] = still_present
+    report["after_rollback_track_count"] = len(restored.tracks)
+    if still_present:
+        report["status"] = "RESTORE_READBACK_FAILED"
+        report["error"] = "track still present after rollback"
+        report["RESTORE_VERIFIED"] = False
+        return report
+
+    lifecycle.append("RESTORE_VERIFIED")
+    report["RESTORE_VERIFIED"] = True
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{validated.plan_id}_create_track_loop.json", report)
+    report["artifact"] = artifact
+    return report
+
+
+def execute_sample_load_write_loop(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """SAMPLE_LOAD lifecycle: validate -> load sample -> readback clip.sample_uri -> rollback (delete clip) -> verify gone."""
+    from copilot.musicplan import _as_ref, validate_sample_load_plan
+    from copilot.daw.object_ref import require_resolved
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "SAMPLE_LOAD",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+    }
+
+    validated = validate_sample_load_plan(plan, session=session)
+    report["plan_id"] = validated.plan_id
+    report["plan_status"] = validated.status.value
+    if validated.status is not PlanStatus.READY_FOR_EXECUTION:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = validated.rejection_reason or validated.status.value
+        return report
+
+    action = validated.actions[0]
+    params = action.params  # SampleLoadActionParams
+    track = require_resolved(session, _as_ref(action.target.ref))
+    clip_index = int(params.clip_index)
+    sample_uri = params.sample_uri
+    report["clip_index"] = clip_index
+    report["sample_uri"] = sample_uri
+    lifecycle.append("PREPARED")
+
+    txn = tools.transactions.begin(
+        user_intent=f"SAMPLE_LOAD {track.name}.clip[{clip_index}] -> {sample_uri}",
+        session=session,
+    )
+    report["transaction_id"] = txn.transaction_id
+    lifecycle.append("EXECUTING")
+
+    try:
+        tools.load_sample(track.index, clip_index, sample_uri)
+    except Exception as exc:  # noqa: BLE001
+        if tools.transactions._open is not None:
+            tools.transactions.abort(str(exc))
+        lifecycle.append("FAILED")
+        report["status"] = "WRITE_FAILED"
+        report["error"] = str(exc)
+        return report
+
+    report["MUSICAL_WRITE_COUNT"]["forward"] = 1
+    report["EXECUTED"] = True
+    lifecycle.append("EXECUTED")
+
+    after = tools.get_session_snapshot()
+    after_track = _find_track_by_stable_id(after, track.stable_id)
+    after_clip = next(
+        (c for c in (after_track.clips if after_track else []) if c.slot_index == clip_index),
+        None,
+    )
+    after_sample_uri = after_clip.sample_uri if after_clip else None
+    report["after_sample_uri"] = after_sample_uri
+    if after_sample_uri != sample_uri:
+        if tools.transactions._open is not None:
+            tools.transactions.mark_in_doubt(f"readback {after_sample_uri} != {sample_uri}")
+        lifecycle.append("IN_DOUBT")
+        report["status"] = "IN_DOUBT"
+        report["error"] = "sample load readback mismatch"
+        report["EXECUTION_VERIFICATION"] = "FAIL"
+        return report
+    report["EXECUTION_VERIFICATION"] = "PASS"
+    lifecycle.append("VERIFIED")
+
+    tools.transactions.commit(
+        {"EXECUTION_VERIFICATION": "PASS", "sample_uri": sample_uri}, session=after
+    )
+    validated.status = PlanStatus.VERIFIED
+
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        lifecycle.append(rollback_txn.status.value)
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+    validated.status = PlanStatus.ROLLED_BACK
+
+    restored = tools.get_session_snapshot()
+    restored_track = _find_track_by_stable_id(restored, track.stable_id)
+    restored_clip = next(
+        (c for c in (restored_track.clips if restored_track else []) if c.slot_index == clip_index),
+        None,
+    )
+    report["clip_present_after_rollback"] = restored_clip is not None
+    if restored_clip is not None:
+        report["status"] = "RESTORE_READBACK_FAILED"
+        report["error"] = "clip still present after rollback"
+        report["RESTORE_VERIFIED"] = False
+        return report
+
+    lifecycle.append("RESTORE_VERIFIED")
+    report["RESTORE_VERIFIED"] = True
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{validated.plan_id}_sample_load_loop.json", report)
+    report["artifact"] = artifact
+    return report
+

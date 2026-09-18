@@ -29,6 +29,9 @@ class DawAdapter(ABC):
     def create_midi_track(self, name: str, index: int = -1) -> dict[str, Any]: ...
 
     @abstractmethod
+    def create_audio_track(self, name: str, index: int = -1) -> dict[str, Any]: ...
+
+    @abstractmethod
     def delete_track(self, track_index: int) -> dict[str, Any]: ...
 
     @abstractmethod

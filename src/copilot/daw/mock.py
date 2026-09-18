@@ -159,6 +159,40 @@ class MockAbletonAdapter(DawAdapter):
             {"index": new_index, "name": self.tracks[new_index]["name"]},
         )
 
+    def create_audio_track(self, name: str, index: int = -1) -> dict[str, Any]:
+        self._require()
+        track = {
+            "name": name or f"Audio {len(self.tracks) + 1}",
+            "is_midi": False,
+            "mixer": MixerState().model_dump(),
+            "routing": RoutingState(output_type="Main", monitoring="in").model_dump(),
+            "sends": [],
+            "clips": [None] * self.slot_count,
+            "devices": [],
+        }
+        if self._ensure_eq_device:
+            track["devices"].append(
+                {
+                    "name": "EQ Eight",
+                    "class_name": "Eq8",
+                    "enabled": True,
+                    "parameters": [
+                        {"index": 0, "name": "1 Gain A", "value": 0.5, "min": 0.0, "max": 1.0}
+                    ],
+                }
+            )
+        self._before_write("create_audio_track")
+        if index < 0 or index >= len(self.tracks):
+            self.tracks.append(track)
+            new_index = len(self.tracks) - 1
+        else:
+            self.tracks.insert(index, track)
+            new_index = index
+        return self._after_write(
+            "create_audio_track",
+            {"index": new_index, "name": self.tracks[new_index]["name"]},
+        )
+
     def delete_track(self, track_index: int) -> dict[str, Any]:
         self._before_write("delete_track")
         snap = self.snapshot()

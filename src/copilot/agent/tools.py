@@ -121,6 +121,52 @@ class AgentTools:
             )
             return created
 
+    def create_audio_track(
+        self, name: str, index: int = -1, expected_revision: int | None = None
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write(
+                "create_audio_track", expected_revision=expected_revision
+            )
+            command_id = self._command_id()
+            before = {"exists": False, "name": name, "track_count": len(before_state.tracks)}
+            expected_after = {"exists": True, "name": name, "track_count": len(before_state.tracks) + 1}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="create_audio_track",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_name_at_apply=name,
+            )
+            created = self._execute_write(
+                "create_audio_track",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.create_audio_track(name, index),
+            )
+            track = self._track_at(int(created["index"]))
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="create_audio_track",
+                before=before,
+                after=created,
+                expected_after=expected_after,
+                inverse_operation="delete_track",
+                inverse_params={},
+                asset_id=track.stable_id,
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            self._log_write(
+                "create_audio_track", command_id, track, before_state.revision, "APPLIED"
+            )
+            return created
+
     def create_midi_clip(
         self, track_index: int, clip_index: int, length_beats: float, name: str = ""
     ) -> dict[str, Any]:
@@ -400,6 +446,49 @@ class AgentTools:
             )
             return result
 
+    def load_sample(
+        self, track_index: int, clip_index: int, sample_uri: str
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_sample")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"clip_exists": False, "clip_index": clip_index}
+            expected_after = {"clip_exists": True, "sample_uri": sample_uri}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_sample",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_sample",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_browser_item(track_index, sample_uri, clip_index=clip_index),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, clip_index=clip_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="load_sample",
+                before=before,
+                after={"sample_uri": sample_uri},
+                expected_after=expected_after,
+                inverse_operation="delete_clip",
+                inverse_params={},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def _pre_write(
         self, operation: str, expected_revision: int | None = None
     ) -> SessionState:
@@ -412,6 +501,9 @@ class AgentTools:
             "replace_clip_notes": "add_notes_to_clip",
             "set_mixer_volume": "set_track_volume",
             "set_device_parameter": "set_device_parameter",
+            "load_sample": "load_browser_item",
+            "load_instrument_or_effect": "load_instrument_or_effect",
+            "load_browser_item": "load_browser_item",
             "delete_track": "delete_track",
             "delete_clip": "delete_clip",
             "set_track_name": "set_track_name",
