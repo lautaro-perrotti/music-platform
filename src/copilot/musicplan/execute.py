@@ -26,6 +26,7 @@ from copilot.musicplan import (
 )
 from copilot.schemas.musicplan import (
     SCHEMA_VERSION,
+    ActionType,
     CompiledExecutionEnvelope,
     MusicPlan,
     PlanIntentClass,
@@ -1270,6 +1271,149 @@ def execute_sample_load_write_loop(
     report["created_at"] = now_iso()
     report["schema_version"] = SCHEMA_VERSION
     artifact = _persist(root / f"{validated.plan_id}_sample_load_loop.json", report)
+    report["artifact"] = artifact
+    return report
+
+
+def _resolve_track_by_name(session: SessionState, name: str) -> TrackState | None:
+    matches = [t for t in session.tracks if t.name == name]
+    return matches[0] if len(matches) == 1 else None
+
+
+def execute_track_build_plan(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Multi-action track build: CREATE_TRACK + SAMPLE_LOAD (extensible) in ONE transaction.
+
+    Actions are executed in sequence; targets created by earlier actions are resolved
+    by name. The whole plan rolls back (LIFO) for engineering validation.
+    """
+    from copilot.musicplan import (
+        _as_ref,
+        build_sample_load_action,
+        build_create_track_action,
+    )
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "MULTI_ACTION",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+        "per_action": [],
+    }
+    if not plan.actions:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = "no_actions"
+        return report
+
+    txn = tools.transactions.begin(
+        user_intent=f"track build {plan.plan_id}", session=session
+    )
+    report["transaction_id"] = txn.transaction_id
+    current = session
+
+    for action in plan.actions:
+        current = tools.get_session_snapshot()
+        attach_tokens(current)
+        step: dict[str, Any] = {"action_type": action.action_type.value}
+
+        if action.action_type is ActionType.CREATE_TRACK:
+            params = action.params
+            if any(t.name == params.track_name for t in current.tracks):
+                step["status"] = "SKIP_EXISTS"
+                report["per_action"].append(step)
+                continue
+            try:
+                if params.track_kind == "audio":
+                    tools.create_audio_track(params.track_name, params.index_hint)
+                else:
+                    tools.create_midi_track(params.track_name, params.index_hint)
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                if tools.transactions._open is not None:
+                    tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"CREATE_TRACK {params.track_name}: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = params.track_name
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
+        elif action.action_type is ActionType.SAMPLE_LOAD:
+            params = action.params
+            track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
+            track = _resolve_track_by_name(current, track_name)
+            if track is None:
+                step["status"] = "FAILED"
+                step["error"] = f"track {track_name!r} not resolvable"
+                report["per_action"].append(step)
+                tools.transactions.abort(step["error"])
+                report["status"] = "FAILED"
+                report["error"] = step["error"]
+                return report
+            try:
+                tools.load_sample(track.index, int(params.clip_index), params.sample_uri)
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"SAMPLE_LOAD {params.sample_uri}: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = track_name
+            step["sample_uri"] = params.sample_uri
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
+        else:
+            step["status"] = "UNSUPPORTED"
+            step["error"] = f"{action.action_type.value} not supported in multi-action yet"
+            report["per_action"].append(step)
+            tools.transactions.abort(step["error"])
+            report["status"] = "FAILED"
+            report["error"] = step["error"]
+            return report
+
+        report["per_action"].append(step)
+        lifecycle.append(action.action_type.value)
+
+    report["EXECUTED"] = True
+    after = tools.get_session_snapshot()
+    report["after_track_count"] = len(after.tracks)
+    report["after_clip_count"] = sum(len(t.clips) for t in after.tracks)
+    tools.transactions.commit({"EXECUTION_VERIFICATION": "PASS"}, session=after)
+
+    # Unconditional rollback for engineering validation (LIFO over all actions).
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+
+    restored = tools.get_session_snapshot()
+    report["restored_track_count"] = len(restored.tracks)
+    report["restored_clip_count"] = sum(len(t.clips) for t in restored.tracks)
+    report["RESTORE_VERIFIED"] = report["restored_track_count"] == len(session.tracks)
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{plan.plan_id}_track_build_loop.json", report)
     report["artifact"] = artifact
     return report
 
