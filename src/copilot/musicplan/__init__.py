@@ -858,6 +858,113 @@ def validate_device_load_plan(
     return plan
 
 
+def build_sample_swap_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    sample_uri: str,
+    reason: str,
+    evidence_refs: list[str],
+    previous_sample_uri: str | None = None,
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SampleSwapActionParams(
+        clip_index=clip_index,
+        sample_uri=sample_uri,
+        previous_sample_uri=previous_sample_uri,
+    )
+    rollback = RollbackSpec(
+        parameter="clip_sample",
+        unit="uri",
+        restore_value=-1.0,
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"clip[{clip_index}].sample",
+            expected_after=1.0,
+            unit="swapped",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.clip[{clip_index}].sample",
+        direction="swap",
+        description=f"swap sample on clip slot {clip_index} to {sample_uri}",
+        measurement_to_compare_after=f"sample reference of clip {clip_index}",
+        limitations=["Sample reference readback requires audio clip model."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SAMPLE_SWAP,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="CLIP_EXISTS", detail="clip_index must resolve on track"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="previous sample captured for restore"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_sample_swap_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a SAMPLE_SWAP plan (tokens, target, clip slot, sample uri). No writes."""
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.SAMPLE_SWAP)
+    if action is None:
+        return plan
+
+    params = action.params
+    if not isinstance(params, SampleSwapActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_sample_swap_params"
+        return plan
+    if not params.sample_uri:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "sample_uri_required"
+        return plan
+    clip = next((c for c in track.clips if c.slot_index == params.clip_index), None)
+    if clip is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"CLIP_NOT_FOUND slot={params.clip_index} slots={[c.slot_index for c in track.clips]}"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
 def compile_execution_envelope(
     plan: MusicPlan,
     *,

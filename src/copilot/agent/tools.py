@@ -351,6 +351,50 @@ class AgentTools:
             )
             return result
 
+    def load_browser_item(
+        self,
+        track_index: int,
+        item_uri: str,
+        previous_item_uri: str | None = None,
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_browser_item")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"sample": previous_item_uri or ""}
+            expected_after = {"sample": item_uri}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_browser_item",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_browser_item",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_browser_item(track_index, item_uri),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="load_browser_item",
+                before=before,
+                after={"sample": item_uri},
+                expected_after=expected_after,
+                inverse_operation="load_browser_item",
+                inverse_params={"item_uri": previous_item_uri or ""},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def _pre_write(
         self, operation: str, expected_revision: int | None = None
     ) -> SessionState:

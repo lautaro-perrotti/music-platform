@@ -140,8 +140,9 @@ class DeviceLoadActionParams(BaseModel):
 
 class SampleSwapActionParams(BaseModel):
     kind: Literal["sample_swap"] = "sample_swap"
-    sample_path: str
-    device_index: int
+    clip_index: int
+    sample_uri: str
+    previous_sample_uri: str | None = None
 
 
 ActionParams = Annotated[

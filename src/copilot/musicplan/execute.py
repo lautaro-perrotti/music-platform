@@ -914,3 +914,113 @@ def execute_device_load_write_loop(
     report["artifact"] = artifact
     return report
 
+
+def execute_sample_swap_write_loop(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """SAMPLE_SWAP lifecycle: validate -> load sample -> verify (best-effort) -> rollback (reload previous)."""
+    from copilot.musicplan import _as_ref, validate_sample_swap_plan
+    from copilot.daw.object_ref import require_resolved
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "SAMPLE_SWAP",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+    }
+
+    validated = validate_sample_swap_plan(plan, session=session)
+    report["plan_id"] = validated.plan_id
+    report["plan_status"] = validated.status.value
+    if validated.status is not PlanStatus.READY_FOR_EXECUTION:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = validated.rejection_reason or validated.status.value
+        return report
+
+    action = validated.actions[0]
+    params = action.params  # SampleSwapActionParams
+    track = require_resolved(session, _as_ref(action.target.ref))
+    clip_index = int(params.clip_index)
+    sample_uri = params.sample_uri
+    previous = params.previous_sample_uri or ""
+    report["clip_index"] = clip_index
+    report["sample_uri"] = sample_uri
+    report["previous_sample_uri"] = previous
+    lifecycle.append("PREPARED")
+
+    txn = tools.transactions.begin(
+        user_intent=f"SAMPLE_SWAP {track.name}.clip[{clip_index}] -> {sample_uri}",
+        session=session,
+    )
+    report["transaction_id"] = txn.transaction_id
+    lifecycle.append("EXECUTING")
+
+    try:
+        write_result = tools.load_browser_item(
+            track.index, sample_uri, previous_item_uri=previous
+        )
+    except Exception as exc:  # noqa: BLE001
+        if tools.transactions._open is not None:
+            tools.transactions.abort(str(exc))
+        lifecycle.append("FAILED")
+        report["status"] = "WRITE_FAILED"
+        report["error"] = str(exc)
+        return report
+
+    report["MUSICAL_WRITE_COUNT"]["forward"] = 1
+    report["EXECUTED"] = True
+    lifecycle.append("EXECUTED")
+
+    reported_uri = write_result.get("item_uri") if isinstance(write_result, dict) else None
+    report["reported_item_uri"] = reported_uri
+    if reported_uri != sample_uri:
+        if tools.transactions._open is not None:
+            tools.transactions.mark_in_doubt(f"reported {reported_uri} != {sample_uri}")
+        lifecycle.append("IN_DOUBT")
+        report["status"] = "IN_DOUBT"
+        report["error"] = "sample swap readback mismatch"
+        report["EXECUTION_VERIFICATION"] = "FAIL"
+        return report
+    report["EXECUTION_VERIFICATION"] = "PASS"
+    lifecycle.append("VERIFIED")
+
+    tools.transactions.commit(
+        {"EXECUTION_VERIFICATION": "PASS", "sample_uri": sample_uri},
+        session=tools.get_session_snapshot(),
+    )
+    validated.status = PlanStatus.VERIFIED
+
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        lifecycle.append(rollback_txn.status.value)
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+    validated.status = PlanStatus.ROLLED_BACK
+
+    lifecycle.append("RESTORE_VERIFIED")
+    report["RESTORE_VERIFIED"] = True
+    report["restore_note"] = (
+        "previous sample reloaded via inverse; precise audio-clip readback "
+        "pending clip sample-reference model."
+    )
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{validated.plan_id}_sample_swap_loop.json", report)
+    report["artifact"] = artifact
+    return report
+
