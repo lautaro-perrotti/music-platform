@@ -63,6 +63,7 @@ COMMAND_CAPABILITY = {
     "set_device_parameters": "device.set_parameter",
     "load_instrument_or_effect": "device.load",
     "load_browser_item": "device.load",
+    "load_browser_item_by_path": "browser.load",
     "delete_device": "device.load",
     "move_device": "device.load",
     "move_device_right": "device.load",
