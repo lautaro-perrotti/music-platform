@@ -1785,12 +1785,8 @@ class AbletonMCP(ControlSurface):
                     ("sounds", browser.sounds),
                     ("drums", browser.drums),
                     ("audio_effects", browser.audio_effects),
-                    ("midi_effects", browser.midi_effects),
-                    ("user_library", getattr(browser, "user_library", None)),
+                    ("midi_effects", browser.midi_effects)
                 ]
-                if hasattr(browser, "user_folders"):
-                    for i, folder in enumerate(browser.user_folders):
-                        categories_to_search.append(("places_{0}".format(i), folder))
             elif category == "instruments":
                 categories_to_search = [("instruments", browser.instruments)]
             elif category == "sounds":
@@ -1801,10 +1797,6 @@ class AbletonMCP(ControlSurface):
                 categories_to_search = [("audio_effects", browser.audio_effects)]
             elif category == "midi_effects":
                 categories_to_search = [("midi_effects", browser.midi_effects)]
-            elif category == "user_library":
-                categories_to_search = [("user_library", browser.user_library)]
-            elif category == "places":
-                categories_to_search = [("places_{0}".format(i), folder) for i, folder in enumerate(browser.user_folders)]
             else:
                 return {"error": "Unknown category: {0}".format(category)}
 

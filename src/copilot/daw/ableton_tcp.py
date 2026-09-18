@@ -881,16 +881,18 @@ class AbletonTcpAdapter(DawAdapter):
     def load_instrument_or_effect(
         self, track_index: int, uri: str
     ) -> dict[str, Any]:
-        # The live bridge needs a browser query URI (e.g. "query:AudioFx#EQ%20Eight"),
-        # not a bare device name. Resolve bare names via search_browser, CACHED so a
-        # 52-device build does not re-search the browser for every load.
-        if ":" not in uri and "/" not in uri:
-            if uri not in self._device_uri_cache:
-                sr = self.search_browser(uri, "all")
+        # The live bridge needs a browser query URI (e.g. "query:AudioFx#EQ%20Eight").
+        # Accept a bare name ("EQ Eight") OR a mock-style path ("devices/audio-effects/EQ Eight"):
+        # extract the device name and resolve via search_browser, CACHED so a 52-device
+        # build does not re-search the browser for every load.
+        if not uri.startswith("query:"):
+            name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+            if name not in self._device_uri_cache:
+                sr = self.search_browser(name, "all")
                 results = sr.get("results", []) if isinstance(sr, dict) else []
                 device = next((r for r in results if r.get("is_device")), None)
-                self._device_uri_cache[uri] = device.get("uri", uri) if device else uri
-            uri = self._device_uri_cache[uri]
+                self._device_uri_cache[name] = device.get("uri", uri) if device else uri
+            uri = self._device_uri_cache[name]
         return self._command(
             "load_instrument_or_effect",
             {"track_index": track_index, "uri": uri},
