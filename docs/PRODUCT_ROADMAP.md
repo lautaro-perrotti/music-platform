@@ -37,10 +37,11 @@ con la librería → executor aplica → escuchar → KEEP/ADJUST/REPLACE.
    - ARRANGEMENT_V1: estructura 8/16/32 por substracción/variación (SET_TRACK_MUTE).
    - MIXING_V1: cadenas nativas por pista + master (EQ/Comp/Saturator/DrumBuss/Echo).
    - CLI `track-build "groovy latin tech house"` → arma todo y muestra set+estructura.
-4. **MIX_GROUPS_V1** — mezcla en grupos de drums/buses (Drum Buss group) con nativos.
-5. **MASTERING_V1** — bus master real (EQ+Glue+Saturator+Limiter→LUFS target) + stems.
-6. **ASTRA_IN_THE_LOOP** — prompt → Astra razona (receta + librería) → MusicPlan,
-   reemplazando la receta estática (hoy determinista).
+4. ✅ MIX_GROUPS_V1 — buses (DRUMS/BASS BUS/SYNTHS/FX BUS/VOCALS) + routing
+   (SET_TRACK_ROUTING) + procesamiento de bus (Drum Buss/Glue/Comp/Reverb nativos).
+5. ✅ ASTRA_IN_THE_LOOP — prompt → Astra razona (candidatos + estilo + intent) →
+   MusicPlan via `sample_map`; CLI `vibe "<prompt>"`; fallback determinista.
+6. **MASTERING_V1** — bus master real (EQ+Glue+Saturator+Limiter→LUFS target) + stems.
 7. **ABLETON_REAL_V1** — validación contra Ableton real (bridge TCP), incl. sidechain
    DEVICE_TWEAK con params reales (el mock usa params genéricos).
 8. **M4L_FRONT_V1** — control surface fino (referencia, chat, librería, candidatos,
