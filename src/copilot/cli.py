@@ -176,6 +176,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Required for legacy/lab capture runners (live3r*, mock-slice1, live2*).",
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help="track-build/vibe: run against the real Ableton TCP bridge instead of the mock.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="production-write: validate/compile only; ZERO musical mutations.",
@@ -395,9 +400,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sample-library":
         return _sample_library(evidence, logger, args.eval_argv)
     if args.command == "track-build":
-        return _track_build(evidence, logger, args.eval_argv)
+        return _track_build(evidence, logger, args.eval_argv, live=bool(args.live))
     if args.command == "vibe":
-        return _vibe(evidence, logger, args.eval_argv)
+        return _vibe(evidence, logger, args.eval_argv, live=bool(args.live))
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2848,7 +2853,7 @@ def _manual_control_surface_action() -> str:
     )
 
 
-def _track_build(evidence: Path, logger, argv: list[str]) -> int:
+def _track_build(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
     """Build a groovy/latin tech house track from 0 (library + recipe + groove + mixing + arrangement)."""
     from copilot.sample_library.library_v1 import load_index
     from copilot.musicplan.tech_house import build_tech_house_plan, TECH_HOUSE_BPM
@@ -2864,13 +2869,16 @@ def _track_build(evidence: Path, logger, argv: list[str]) -> int:
         print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
         return 2
 
-    # build the plan against a blank template (mock session).
-    from copilot.daw.mock import MockAbletonAdapter
+    # build the plan against a blank template (mock) or the real live bridge.
     from copilot.daw.state_tokens import attach_tokens
-    daw = MockAbletonAdapter()
-    daw.connect()
-    daw.session_path = r"D:\sets\trackbuild_lab.als"
-    daw.session_name = "trackbuild_lab"
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\trackbuild_lab.als"
+        daw.session_name = "trackbuild_lab"
     session = daw.snapshot()
     attach_tokens(session)
 
@@ -2921,7 +2929,7 @@ def _track_build(evidence: Path, logger, argv: list[str]) -> int:
     return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
 
 
-def _vibe(evidence: Path, logger, argv: list[str]) -> int:
+def _vibe(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
     """prompt -> Astra -> MusicPlan (vibe coding). Falls back to deterministic if no Astra."""
     from copilot.sample_library.library_v1 import load_index
     from copilot.musicplan.astra_plan import build_plan_from_prompt
@@ -2933,10 +2941,14 @@ def _vibe(evidence: Path, logger, argv: list[str]) -> int:
         print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
         return 2
 
-    from copilot.daw.mock import MockAbletonAdapter
     from copilot.daw.state_tokens import attach_tokens
-    daw = MockAbletonAdapter(); daw.connect()
-    daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
     session = daw.snapshot(); attach_tokens(session)
 
     plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
