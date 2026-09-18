@@ -1408,6 +1408,35 @@ def execute_track_build_plan(
             step["note_count"] = len(params.notes)
             report["MUSICAL_WRITE_COUNT"]["forward"] += 1
 
+        elif action.action_type is ActionType.DEVICE_LOAD:
+            params = action.params
+            track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
+            track = _resolve_track_by_name(current, track_name)
+            if track is None:
+                step["status"] = "FAILED"
+                step["error"] = f"track {track_name!r} not resolvable"
+                report["per_action"].append(step)
+                tools.transactions.abort(step["error"])
+                report["status"] = "FAILED"
+                report["error"] = step["error"]
+                return report
+            try:
+                tools.load_instrument_or_effect(
+                    track.index, params.device_uri or params.device_name
+                )
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"DEVICE_LOAD {params.device_name} on {track_name}: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = track_name
+            step["device_name"] = params.device_name
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
         else:
             step["status"] = "UNSUPPORTED"
             step["error"] = f"{action.action_type.value} not supported in multi-action yet"

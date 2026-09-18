@@ -16,10 +16,9 @@ from __future__ import annotations
 from copilot.human_eval.store import now_iso
 from copilot.musicplan import (
     build_create_track_action,
-    build_pattern_action,
+    build_device_load_action,
     build_sample_load_action,
 )
-from copilot.musicplan.groove import full_groove
 from copilot.sample_library.retrieval import SampleRetriever
 from copilot.sample_library.schemas import LibraryIndex, SampleRole, SampleType
 from copilot.schemas.musicplan import DiagnosisBinding, MusicPlan, PlanIntentClass
@@ -116,28 +115,23 @@ def build_tech_house_plan(
         )
         evidence_refs.append(asset.id)
 
-    # Groove layer: one MIDI "Groove" track carrying the drum pattern (timing + velocity).
-    groove_notes = full_groove(bars=1)
-    actions.append(
-        build_create_track_action(
-            project_identity=session.project_identity,
-            track_name="Groove",
-            track_kind="midi",
-            reason="groove MIDI track (drum pattern)",
-            evidence_refs=[],
+    # MIXING_V1: native devices on Bass (mid-bass saturation + sidechain compressor).
+    # Each drum element stays on its own track (no Drum Rack); the groove pattern
+    # lives per-element in copilot.musicplan.groove for the arrangement layer.
+    for device_name, device_uri in [
+        ("Saturator", "devices/audio-effects/Saturator"),
+        ("Compressor", "devices/audio-effects/Compressor"),
+    ]:
+        actions.append(
+            build_device_load_action(
+                track=_virtual_track("Bass", role="audio"),
+                project_identity=session.project_identity,
+                device_name=device_name,
+                device_uri=device_uri,
+                reason=f"mixing: {device_name} on Bass ({'sidechain to Kick' if device_name == 'Compressor' else 'mid-bass saturation'})",
+                evidence_refs=[],
+            )
         )
-    )
-    actions.append(
-        build_pattern_action(
-            track=_virtual_track("Groove", role="midi"),
-            project_identity=session.project_identity,
-            clip_index=0,
-            length_beats=4.0,
-            notes=groove_notes,
-            reason="groovy/latin drum pattern (kick/clap/hats/shaker/conga/clave/bass)",
-            evidence_refs=[],
-        )
-    )
 
     return MusicPlan(
         plan_id=plan_id,
