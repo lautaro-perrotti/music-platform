@@ -6,7 +6,7 @@ from copilot.daw.mock import MockAbletonAdapter
 from copilot.daw.state_tokens import attach_tokens
 
 TRACKS = ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
-          "Perc Loop", "Bass", "Vocal", "Stab", "FX"]
+          "Perc Loop", "Bass", "Vocal", "Stab", "FX", "Impact", "Downlifter", "Texture"]
 
 
 def test_arrangement_structure():
@@ -26,7 +26,7 @@ def test_arrangement_structure():
 def test_arrangement_mute_actions():
     from copilot.musicplan.arrangement import build_arrangement_mute_actions
     actions = build_arrangement_mute_actions(project_identity="x")
-    assert len(actions) == 77  # 7 sections x 11 tracks
+    assert len(actions) == 98  # 7 sections x 14 tracks
     intro = actions[:10]
     by_name = {a.target.ref["name"]: a.params.mute for a in intro}
     assert by_name["Kick"] is True
@@ -69,6 +69,6 @@ def test_execute_arrangement_mute_plan(tmp_path):
         tools, plan=plan, session=session, persist_dir=tmp_path
     )
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 77
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 98
     assert report["MUSICAL_WRITE_COUNT"]["rollback"] == 1
     assert report["RESTORE_VERIFIED"] is True

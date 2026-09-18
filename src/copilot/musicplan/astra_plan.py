@@ -41,9 +41,13 @@ def build_candidate_context(
 def build_astra_prompt(
     *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
 ) -> str:
+    from copilot.musicplan.fx import FX_PHILOSOPHY
+
     lines = [
         "You are a groovy/latin tech house producer (underground, percussive, hypnotic, dark/warm).",
         f"Tempo {bpm} BPM. Percussion-first; fewer elements, more identity.",
+        "FX: felt more than noticed; short/rhythmic/dark (no EDM risers). Impacts/downlifters/textures support the groove.",
+        f"FX principles: {'; '.join(FX_PHILOSOPHY[:4])}",
         "",
         "Sample candidates per role (pick one number per role, or omit a role):",
     ]

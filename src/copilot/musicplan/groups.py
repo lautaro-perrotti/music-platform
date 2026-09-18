@@ -13,7 +13,7 @@ GROUP_DEFS: dict[str, list[str]] = {
     "DRUMS": ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop"],
     "BASS BUS": ["Bass"],
     "SYNTHS": ["Stab"],
-    "FX BUS": ["FX"],
+    "FX BUS": ["FX", "Impact", "Downlifter", "Texture"],
     "VOCALS": ["Vocal"],
 }
 
@@ -22,7 +22,7 @@ BUS_CHAINS: dict[str, list[str]] = {
     "DRUMS": ["EQ Eight", "Glue Compressor", "Drum Buss"],
     "BASS BUS": ["EQ Eight", "Compressor"],
     "SYNTHS": ["EQ Eight", "Glue Compressor"],
-    "FX BUS": ["EQ Eight", "Hybrid Reverb"],
+    "FX BUS": ["EQ Eight", "Glue Compressor", "Saturator", "Utility"],
     "VOCALS": ["EQ Eight", "Compressor"],
 }
 

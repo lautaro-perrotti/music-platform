@@ -27,6 +27,9 @@ def _synthetic_index():
         ("vocal", SampleRole.VOCAL, SampleType.ONE_SHOT, None, "vocal"),
         ("stab", SampleRole.SYNTH, SampleType.ONE_SHOT, None, "stab"),
         ("fx", SampleRole.FX, SampleType.ONE_SHOT, None, "fx"),
+        ("impact", SampleRole.IMPACT, SampleType.ONE_SHOT, None, "impact"),
+        ("downlifter", SampleRole.DOWNLIFTER, SampleType.LOOP, None, "downlifter"),
+        ("texture", SampleRole.TEXTURE, SampleType.LOOP, None, "texture"),
     ]
     for aid, role, stype, bpm, fn in specs:
         assets[aid] = SampleAsset(

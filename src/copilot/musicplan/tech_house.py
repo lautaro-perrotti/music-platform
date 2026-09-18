@@ -41,6 +41,9 @@ GROOVY_LATIN_GROOVE: list[tuple[SampleRole, str, SampleType, float | None, str |
     (SampleRole.VOCAL, "Vocal", SampleType.ONE_SHOT, None, None),
     (SampleRole.SYNTH, "Stab", SampleType.ONE_SHOT, None, None),
     (SampleRole.FX, "FX", SampleType.ONE_SHOT, None, None),
+    (SampleRole.IMPACT, "Impact", SampleType.ONE_SHOT, None, None),
+    (SampleRole.DOWNLIFTER, "Downlifter", SampleType.LOOP, None, None),
+    (SampleRole.TEXTURE, "Texture", SampleType.LOOP, None, None),
 ]
 
 # Mixing + mastering chains live in copilot.musicplan.mixing (native Ableton devices).
