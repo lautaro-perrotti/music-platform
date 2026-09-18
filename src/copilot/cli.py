@@ -71,6 +71,7 @@ CANONICAL_COMMANDS = (
     "producer-run",
     "cross-project-validate",
     "import-project",
+    "sample-library",
     "regression-v1",
     "capabilities",
 )
@@ -144,7 +145,9 @@ def main(argv: list[str] | None = None) -> int:
             "producer-run",
             "cross-project-validate",
             "downstream-causal-state",
+            "sidechain-automation-state",
             "import-project",
+            "sample-library",
             "install",
             "uninstall-copilot",
             "doctor",
@@ -376,8 +379,19 @@ def main(argv: list[str] | None = None) -> int:
             end_qn=args.end_qn,
             source_names=args.eval_argv or None,
         )
+
+    if args.command == "sidechain-automation-state":
+        return _sidechain_automation_state(
+            evidence, logger,
+            region_id=args.region or "SIDECHAIN",
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+            source_names=args.eval_argv or None,
+        )
     if args.command == "import-project":
         return _import_project(evidence, logger, args.eval_argv)
+    if args.command == "sample-library":
+        return _sample_library(evidence, logger, args.eval_argv)
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2487,6 +2501,119 @@ def _downstream_causal_state(
     logger.info("downstream-causal-state status=%s", report.get("status"))
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     return 0 if report.get("status") in {"VERIFIED", "READ_ONLY_EVIDENCE"} else 2
+
+
+def _sidechain_automation_state(
+    evidence: Path,
+    logger,
+    *,
+    region_id: str,
+    start_qn: float | None,
+    end_qn: float | None,
+    source_names: list[str] | None,
+) -> int:
+    from copilot.audio.sidechain_automation_state_v1 import run_sidechain_automation_state
+
+    connected = _connect_live_or_block(evidence, "sidechain_automation_state_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = run_sidechain_automation_state(
+            connected,
+            evidence=evidence,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+            source_names=source_names,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("sidechain-automation-state status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("status") in {"VERIFIED", "READ_ONLY_EVIDENCE"} else 2
+
+
+def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
+    from copilot.sample_library.library_v1 import index_library, load_index, search
+    from copilot.sample_library.schemas import SampleRole
+
+    roots_file = evidence / "sample_library_roots.json"
+    index_path = evidence / "sample_library_index.json"
+
+    if not argv:
+        print("uso: sample-library add|index|status|search")
+        return 2
+
+    sub = argv[0]
+    if sub == "add":
+        if len(argv) < 2:
+            print("uso: sample-library add <folder>")
+            return 2
+        root = Path(argv[1]).expanduser().resolve()
+        if not root.is_dir():
+            print(json.dumps({"status": "BLOCKED", "error": f"not a directory: {root}"}, ensure_ascii=False))
+            return 2
+        roots = json.loads(roots_file.read_text(encoding="utf-8")) if roots_file.is_file() else []
+        if str(root) not in roots:
+            roots.append(str(root))
+        roots_file.parent.mkdir(parents=True, exist_ok=True)
+        roots_file.write_text(json.dumps(roots, indent=2), encoding="utf-8")
+        print(json.dumps({"status": "OK", "roots": roots}, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "index":
+        roots = json.loads(roots_file.read_text(encoding="utf-8")) if roots_file.is_file() else []
+        if not roots:
+            print(json.dumps({"status": "BLOCKED", "error": "no roots; use 'sample-library add <folder>'"}, ensure_ascii=False))
+            return 2
+        counts = index_library([Path(r) for r in roots], index_path)
+        print(json.dumps({"status": "OK", **counts}, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "status":
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        roles: dict[str, int] = {}
+        for a in idx.assets.values():
+            roles[a.semantic_role.value] = roles.get(a.semantic_role.value, 0) + 1
+        print(json.dumps({
+            "status": "OK",
+            "total": len(idx.assets),
+            "roots": idx.roots,
+            "duplicates": len(idx.duplicates),
+            "roles": roles,
+            "updated_at": idx.updated_at,
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "search":
+        if len(argv) < 2:
+            print("uso: sample-library search <query> [--role KICK]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        query = argv[1]
+        role = None
+        if "--role" in argv:
+            role = SampleRole(argv[argv.index("--role") + 1].upper())
+        hits = search(idx, query, role=role, top_k=10)
+        print(json.dumps({
+            "status": "OK", "query": query, "role": role.value if role else None,
+            "results": [
+                {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
+                 "path": h.asset.relative_path, "score": h.score, "reasons": h.reasons}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"subcommand desconocido: {sub}")
+    return 2
 
 
 def _import_project(evidence: Path, logger, argv: list[str]) -> int:

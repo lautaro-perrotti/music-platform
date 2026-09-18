@@ -640,6 +640,27 @@ class AbletonTcpAdapter(DawAdapter):
     def get_track_output_routing(self, track_index: int) -> dict[str, Any]:
         return self._command("get_track_output_routing", {"track_index": track_index})
 
+    def get_track_available_input_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_input_types", {"track_index": track_index})
+
+    def get_track_available_output_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_output_types", {"track_index": track_index})
+
+    def get_session_automation_record(self) -> dict[str, Any]:
+        return self._command("get_session_automation_record", {})
+
+    def get_clip_automation(
+        self, track_index: int, clip_index: int, parameter_name: str
+    ) -> dict[str, Any]:
+        return self._command(
+            "get_clip_automation",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+            },
+        )
+
     def set_track_input_routing(
         self,
         track_index: int,
