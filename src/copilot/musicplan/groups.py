@@ -66,8 +66,8 @@ def build_group_actions(*, project_identity: str) -> dict[str, list]:
                 build_set_track_routing_action(
                     track=_vtrack(m),
                     project_identity=project_identity,
-                    routing_type="Track",
-                    routing_channel=g,
+                    routing_type=g,
+                    routing_channel="",
                     reason=f"route {m} -> bus {g}",
                     evidence_refs=[],
                 )

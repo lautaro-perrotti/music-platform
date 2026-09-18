@@ -2988,7 +2988,10 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     tmp = Path(tempfile.mkdtemp())
     tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
     report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
-    print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
+    if leave:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} · LEAVE (track armado)")
+    else:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
     return 0 if report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
 
 
