@@ -2781,5 +2781,178 @@ def _manual_control_surface_action() -> str:
     )
 
 
+def _track_build(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
+    """Build a groovy/latin tech house track from 0 (library + recipe + groove + mixing + arrangement)."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.tech_house import build_tech_house_plan, TECH_HOUSE_BPM
+    from copilot.musicplan.arrangement import (
+        TECH_HOUSE_ARRANGEMENT,
+        build_arrangement_mute_actions,
+    )
+    from copilot.musicplan.mixing import MIXING_CHAINS, MASTER_CHAIN, MIXING_PHILOSOPHY
+
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    # build the plan against a blank template (mock) or the real live bridge.
+    from copilot.daw.state_tokens import attach_tokens
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\trackbuild_lab.als"
+        daw.session_name = "trackbuild_lab"
+    session = daw.snapshot()
+    attach_tokens(session)
+
+    plan = build_tech_house_plan(index=idx, session=session)
+    arrangement = build_arrangement_mute_actions(project_identity=session.project_identity)
+    plan.actions.extend(arrangement)
+    if leave:
+        # leave the set in the full-groove (DROP) state: everything active
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(
+            build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop])
+        )
+
+    # ---- print structure ----
+    print(f"\n=== GROOVY / LATIN TECH HOUSE — {TECH_HOUSE_BPM} BPM ===\n")
+    print("SONIDO (sample por pista, percusión-first):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {a.params.sample_uri}")
+
+    print("\nMIXING (cadenas nativas):")
+    for track, devices in MIXING_CHAINS.items():
+        print(f"  {track:12s} {' → '.join(devices)}")
+    print(f"  {'MASTER':12s} {' → '.join(MASTER_CHAIN)}")
+
+    print("\nARRANGEMENT (substracción/variación):")
+    for sec in TECH_HOUSE_ARRANGEMENT:
+        muted = 10 - len(sec.active)
+        print(f"  {sec.name:8s} {sec.bars:>3d}b  activas: {', '.join(sec.active)}  (mute: {muted})")
+
+    print(f"\nPLAN: {len(plan.actions)} acciones de build + {len(arrangement)} de arreglo")
+
+    # silence write/transaction INFO logs so the structure reads clean
+    import logging
+    for _name in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
+
+    # ---- execute against mock (write + rollback) ----
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    build_report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
+    print(f"\nEJECUCIÓN: {build_report['status']}  ·  tracks {build_report['after_track_count']} → rollback {build_report['restored_track_count']}  ·  RESTORE_VERIFIED={build_report['RESTORE_VERIFIED']}")
+
+    result = {
+        "status": build_report["status"],
+        "style": "groovy latin tech house",
+        "bpm": TECH_HOUSE_BPM,
+        "plan_actions": len(plan.actions),
+        "arrangement_actions": len(arrangement),
+        "tracks": [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"],
+        "restore_verified": build_report["RESTORE_VERIFIED"],
+    }
+    return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
+
+
+def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
+    """prompt -> Astra -> MusicPlan (vibe coding). Falls back to deterministic if no Astra."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.astra_plan import build_plan_from_prompt
+
+    intent = " ".join(argv) if argv else "dark percussive groovy tech house"
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    from copilot.daw.state_tokens import attach_tokens
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
+    session = daw.snapshot(); attach_tokens(session)
+
+    plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
+
+    from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
+    plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
+    if leave:
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop]))
+
+    print(f'\n=== VIBE: "{intent}" ===\n')
+    print(f"astra_used: {meta['astra_used']}")
+    print(f"reasoning: {meta.get('reasoning', '')}")
+    print("\nSELECCIÓN (sample por pista):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {Path(a.params.sample_uri).name}")
+
+    import logging
+    for _n in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_n).setLevel(logging.WARNING)
+
+    import tempfile
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
+    if leave:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} · LEAVE (track armado)")
+    else:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
+    ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
+    # End-to-end finalization: arrangement timeline + mix/master, before save.
+    if ok and leave:
+        from copilot.musicplan.arrangement_builder import build_arrangement
+        from copilot.musicplan.mix_tweaks import apply_mix
+
+        final_session = daw.snapshot()
+        arr = build_arrangement(daw, session=final_session)
+        print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")
+        for e in arr["errors"][:6]:
+            print(f"  ! {e}")
+        mix = apply_mix(daw, session=final_session)
+        print(f"MIX/MASTER: {mix['volumes']} volúmenes · {mix['master_devices']} dispositivos master · {mix['master_tweaks']} tweaks · {len(mix['errors'])} errores")
+        for e in mix["errors"][:6]:
+            print(f"  ! {e}")
+    # Post-build: persist the set, then run the structured critique.
+    if ok and leave:
+        try:
+            saved = daw.save_session()
+            if saved.get("saved"):
+                print(f"\nGUARDADO: {saved.get('path') or 'Sin título'}")
+            else:
+                print("\nGUARDADO: el LOM de Ableton no expone save — guardá con Cmd+S en Live")
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nGUARDADO: error ({exc})")
+
+        from copilot.musicplan.critique import critique_track
+
+        after = daw.snapshot()
+        critique = critique_track(plan=plan, session=after)
+        if critique is not None:
+            print(f"\nCRÍTICA: {critique.verdict.upper()}")
+            for i in critique.top_3_issues:
+                print(f"  {i.priority}. [{i.area}] {i.issue} → {i.minimal_fix}")
+            if critique.reasoning:
+                print(f"  ({critique.reasoning})")
+    return 0 if ok else 2
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
