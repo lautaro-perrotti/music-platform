@@ -1343,7 +1343,7 @@ def build_set_track_routing_action(
     effect = ExpectedEffect(
         affected_target=f"{track.name}.routing",
         direction="route",
-        description=f"route {track.name} to bus {routing_type}",
+        description=f"route {track.name} to bus {routing_channel or routing_type}",
         measurement_to_compare_after=f"output routing of {track.name}",
         limitations=["Bus processing applied on the group track."],
     )

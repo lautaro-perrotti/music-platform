@@ -897,6 +897,22 @@ class AbletonTcpAdapter(DawAdapter):
     def load_browser_item(
         self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]:
+        # The live bridge loads a BROWSER item, not a file path. Resolve local
+        # sample paths (e.g. /Volumes/Lucas/Samples/.../kick.wav) to a browser URI
+        # by searching the filename stem across all categories (incl. Places).
+        if item_uri and ("/" in item_uri or "\\" in item_uri or item_uri.lower().endswith((".wav", ".aif", ".aiff", ".flac", ".mp3"))):
+            stem = item_uri.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0]
+            try:
+                sr = self.search_browser(stem, "all")
+                results = sr.get("results", []) if isinstance(sr, dict) else []
+                match = next(
+                    (r for r in results if r.get("is_loadable") and not r.get("is_device")),
+                    None,
+                )
+                if match and match.get("uri"):
+                    item_uri = match["uri"]
+            except Exception:
+                pass  # fall through with the original item_uri
         params: dict[str, Any] = {"track_index": track_index, "item_uri": item_uri}
         if clip_index is not None:
             params["clip_index"] = clip_index

@@ -262,11 +262,16 @@ class AbletonMCP(ControlSurface):
                         "session.read",
                         "session.transport",
                         "track.create_midi",
+                        "track.create_audio",
+                        "track.create_return",
                         "track.delete",
                         "track.rename",
                         "track.volume",
                         "track.mute",
+                        "track.group",
+                        "track.routing",
                         "clip.create",
+                        "clip.create_audio",
                         "clip.delete",
                         "clip.rename",
                         "clip.read_notes",
@@ -274,6 +279,8 @@ class AbletonMCP(ControlSurface):
                         "clip.fire",
                         "device.set_parameter",
                         "device.load",
+                        "browser.load",
+                        "browser.search",
                         "audio.capture_master",
                     ],
                     "bind": "127.0.0.1",
@@ -1772,8 +1779,12 @@ class AbletonMCP(ControlSurface):
                     ("sounds", browser.sounds),
                     ("drums", browser.drums),
                     ("audio_effects", browser.audio_effects),
-                    ("midi_effects", browser.midi_effects)
+                    ("midi_effects", browser.midi_effects),
+                    ("user_library", getattr(browser, "user_library", None)),
                 ]
+                if hasattr(browser, "user_folders"):
+                    for i, folder in enumerate(browser.user_folders):
+                        categories_to_search.append(("places_{0}".format(i), folder))
             elif category == "instruments":
                 categories_to_search = [("instruments", browser.instruments)]
             elif category == "sounds":
@@ -1784,6 +1795,10 @@ class AbletonMCP(ControlSurface):
                 categories_to_search = [("audio_effects", browser.audio_effects)]
             elif category == "midi_effects":
                 categories_to_search = [("midi_effects", browser.midi_effects)]
+            elif category == "user_library":
+                categories_to_search = [("user_library", browser.user_library)]
+            elif category == "places":
+                categories_to_search = [("places_{0}".format(i), folder) for i, folder in enumerate(browser.user_folders)]
             else:
                 return {"error": "Unknown category: {0}".format(category)}
 
@@ -4692,14 +4707,10 @@ class AbletonMCP(ControlSurface):
             # Sort indices in descending order for proper grouping
             sorted_indices = sorted(track_indices, reverse=True)
 
-            # Select the tracks
-            for idx in sorted_indices:
-                self._song.tracks[idx].is_grouped = True
-
-            # Create group - this may require using Live's grouping functionality
-            # In Ableton's API, tracks can be grouped by setting is_part_of_selection
-            # and using the song's create_group_track method if available
-
+            # NOTE: Ableton's LOM has no programmatic "group tracks" API
+            # (Track.is_grouped is read-only; Song has no create_group_track).
+            # Buses are implemented as audio tracks + output routing instead.
+            # Return a clear, non-raising result so callers can fall back.
             if hasattr(self._song, 'create_group_track'):
                 # Select the tracks first
                 self._song.view.selected_track = self._song.tracks[sorted_indices[0]]
@@ -5166,7 +5177,9 @@ class AbletonMCP(ControlSurface):
                 for extra in ("user_library", "current_project", "plugins", "maxforlive", "packs"):
                     if hasattr(browser_or_item, extra):
                         categories.append(getattr(browser_or_item, extra))
-                
+                if hasattr(browser_or_item, "user_folders"):
+                    categories.extend(list(browser_or_item.user_folders))
+
                 for category in categories:
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)
                     if item:
