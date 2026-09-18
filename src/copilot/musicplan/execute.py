@@ -1329,23 +1329,24 @@ def execute_track_build_plan(
     )
     report["transaction_id"] = txn.transaction_id
     current = session
+    local: dict[str, int] = {t.name: t.index for t in session.tracks}
 
     for action in plan.actions:
-        current = tools.get_session_snapshot()
-        attach_tokens(current)
         step: dict[str, Any] = {"action_type": action.action_type.value}
 
         if action.action_type is ActionType.CREATE_TRACK:
             params = action.params
-            if any(t.name == params.track_name for t in current.tracks):
+            if params.track_name in local:
                 step["status"] = "SKIP_EXISTS"
                 report["per_action"].append(step)
                 continue
             try:
                 if params.track_kind == "audio":
-                    tools.create_audio_track(params.track_name, params.index_hint)
+                    created = tools.create_audio_track(params.track_name, params.index_hint)
                 else:
-                    tools.create_midi_track(params.track_name, params.index_hint)
+                    created = tools.create_midi_track(params.track_name, params.index_hint)
+                if isinstance(created, dict) and "index" in created:
+                    local[params.track_name] = int(created["index"])
             except Exception as exc:  # noqa: BLE001
                 step["status"] = "FAILED"
                 step["error"] = str(exc)
@@ -1362,8 +1363,8 @@ def execute_track_build_plan(
         elif action.action_type is ActionType.SAMPLE_LOAD:
             params = action.params
             track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
-            track = _resolve_track_by_name(current, track_name)
-            if track is None:
+            track_index = local.get(track_name)
+            if track_index is None:
                 step["status"] = "FAILED"
                 step["error"] = f"track {track_name!r} not resolvable"
                 report["per_action"].append(step)
@@ -1372,7 +1373,7 @@ def execute_track_build_plan(
                 report["error"] = step["error"]
                 return report
             try:
-                tools.load_sample(track.index, int(params.clip_index), params.sample_uri)
+                tools.load_sample(track_index, int(params.clip_index), params.sample_uri)
             except Exception as exc:  # noqa: BLE001
                 step["status"] = "FAILED"
                 step["error"] = str(exc)
@@ -1389,8 +1390,8 @@ def execute_track_build_plan(
         elif action.action_type is ActionType.CREATE_PATTERN:
             params = action.params
             track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
-            track = _resolve_track_by_name(current, track_name)
-            if track is None:
+            track_index = local.get(track_name)
+            if track_index is None:
                 step["status"] = "FAILED"
                 step["error"] = f"track {track_name!r} not resolvable"
                 report["per_action"].append(step)
@@ -1400,7 +1401,7 @@ def execute_track_build_plan(
                 return report
             try:
                 tools.create_pattern(
-                    track.index,
+                    track_index,
                     int(params.clip_index),
                     float(params.length_beats),
                     list(params.notes),
@@ -1421,8 +1422,8 @@ def execute_track_build_plan(
         elif action.action_type is ActionType.DEVICE_LOAD:
             params = action.params
             track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
-            track = _resolve_track_by_name(current, track_name)
-            if track is None:
+            track_index = local.get(track_name)
+            if track_index is None:
                 step["status"] = "FAILED"
                 step["error"] = f"track {track_name!r} not resolvable"
                 report["per_action"].append(step)
@@ -1432,7 +1433,7 @@ def execute_track_build_plan(
                 return report
             try:
                 tools.load_instrument_or_effect(
-                    track.index, params.device_uri or params.device_name
+                    track_index, params.device_uri or params.device_name
                 )
             except Exception as exc:  # noqa: BLE001
                 step["status"] = "FAILED"
@@ -1450,8 +1451,8 @@ def execute_track_build_plan(
         elif action.action_type is ActionType.SET_TRACK_MUTE:
             params = action.params
             track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
-            track = _resolve_track_by_name(current, track_name)
-            if track is None:
+            track_index = local.get(track_name)
+            if track_index is None:
                 step["status"] = "FAILED"
                 step["error"] = f"track {track_name!r} not resolvable"
                 report["per_action"].append(step)
@@ -1460,7 +1461,7 @@ def execute_track_build_plan(
                 report["error"] = step["error"]
                 return report
             try:
-                tools.set_track_mute(track.index, bool(params.mute))
+                tools.set_track_mute(track_index, bool(params.mute))
             except Exception as exc:  # noqa: BLE001
                 step["status"] = "FAILED"
                 step["error"] = str(exc)
@@ -1477,8 +1478,8 @@ def execute_track_build_plan(
         elif action.action_type is ActionType.SET_TRACK_ROUTING:
             params = action.params
             track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
-            track = _resolve_track_by_name(current, track_name)
-            if track is None:
+            track_index = local.get(track_name)
+            if track_index is None:
                 step["status"] = "FAILED"
                 step["error"] = f"track {track_name!r} not resolvable"
                 report["per_action"].append(step)
@@ -1487,7 +1488,7 @@ def execute_track_build_plan(
                 report["error"] = step["error"]
                 return report
             try:
-                tools.set_track_output_routing(track.index, params.routing_type, params.routing_channel)
+                tools.set_track_output_routing(track_index, params.routing_type, params.routing_channel)
             except Exception as exc:  # noqa: BLE001
                 step["status"] = "FAILED"
                 step["error"] = str(exc)
