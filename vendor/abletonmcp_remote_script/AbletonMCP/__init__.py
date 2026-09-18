@@ -846,6 +846,11 @@ class AbletonMCP(ControlSurface):
                             item_uri = params.get("item_uri", "")
                             clip_index = params.get("clip_index", 0)
                             result = self._load_browser_item(track_index, item_uri, clip_index)
+                        elif command_type == "load_browser_item_by_path":
+                            track_index = params.get("track_index", 0)
+                            rel_path = params.get("rel_path", "")
+                            clip_index = params.get("clip_index", 0)
+                            result = self._load_browser_item_by_path(track_index, rel_path, clip_index)
                         elif command_type == "set_device_parameter":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -5125,6 +5130,46 @@ class AbletonMCP(ControlSurface):
     
     
     
+    def _load_browser_item_by_path(self, track_index, rel_path, clip_index=0):
+        """Navigate the user Places by relative path and load the item onto a clip slot.
+
+        O(depth) navigation (not a full recursive search) so large sample folders load fast.
+        """
+        parts = [p for p in rel_path.replace("\\", "/").split("/") if p]
+        if not parts:
+            raise ValueError("empty rel_path")
+        app = self.application()
+        browser = app.browser
+        item = None
+        if hasattr(browser, "user_folders"):
+            for folder in browser.user_folders:
+                if folder.name.lower() == parts[0].lower():
+                    item = folder
+                    break
+        if item is None:
+            raise ValueError("Place '{0}' not found in user folders".format(parts[0]))
+        for part in parts[1:]:
+            nxt = None
+            if hasattr(item, "children"):
+                for child in item.children:
+                    if child.name.lower() == part.lower():
+                        nxt = child
+                        break
+            if nxt is None:
+                raise ValueError("Path part '{0}' not found under '{1}'".format(part, item.name))
+            item = nxt
+        track = self._resolve_track(track_index)
+        self._song.view.selected_track = track
+        if 0 <= clip_index < len(track.clip_slots):
+            self._song.view.highlighted_clip_slot = track.clip_slots[clip_index]
+        app.browser.load_item(item)
+        return {
+            "loaded": True,
+            "item_name": item.name,
+            "track_name": track.name,
+            "uri": item.uri if hasattr(item, "uri") else rel_path,
+        }
+
     def _load_browser_item(self, track_index, item_uri, clip_index=0):
         """Load a browser item onto a track's clip slot by its URI"""
         try:

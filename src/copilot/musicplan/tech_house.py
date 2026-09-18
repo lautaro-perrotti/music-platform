@@ -101,7 +101,7 @@ def build_tech_house_plan(
             if not results:
                 continue
             asset = results[0].asset
-        sample_uri = asset.path
+        sample_uri = asset.relative_path
         actions.append(
             build_create_track_action(
                 project_identity=session.project_identity,
