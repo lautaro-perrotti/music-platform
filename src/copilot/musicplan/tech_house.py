@@ -197,8 +197,8 @@ def build_tech_house_plan(
             track=_virtual_audio_track("Bass"),
             project_identity=session.project_identity,
             device_index=1,  # Compressor (after EQ Eight) in the Bass chain
-            routing_type="Track",
-            routing_channel="Kick",
+            routing_type="Kick",  # sidechain source track (not a literal 'Track' type)
+            routing_channel="Post FX",  # kick post-FX signal
             reason="sidechain: Bass Compressor ducks against Kick (groove > loudness)",
             evidence_refs=[],
         )
