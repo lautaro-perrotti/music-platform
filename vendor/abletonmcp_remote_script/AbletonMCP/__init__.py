@@ -5141,14 +5141,28 @@ class AbletonMCP(ControlSurface):
         app = self.application()
         browser = app.browser
         item = None
+        remaining = parts
         if hasattr(browser, "user_folders"):
+            # parts[0] may be a Place name itself...
             for folder in browser.user_folders:
                 if folder.name.lower() == parts[0].lower():
                     item = folder
+                    remaining = parts[1:]
                     break
+            # ...or a top-level folder inside one of the Places (common case).
+            if item is None:
+                for folder in browser.user_folders:
+                    if hasattr(folder, "children"):
+                        for child in folder.children:
+                            if child.name.lower() == parts[0].lower():
+                                item = child
+                                remaining = parts[1:]
+                                break
+                    if item is not None:
+                        break
         if item is None:
             raise ValueError("Place '{0}' not found in user folders".format(parts[0]))
-        for part in parts[1:]:
+        for part in remaining:
             nxt = None
             if hasattr(item, "children"):
                 for child in item.children:
