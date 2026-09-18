@@ -844,7 +844,8 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
-                            result = self._load_browser_item(track_index, item_uri)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._load_browser_item(track_index, item_uri, clip_index)
                         elif command_type == "set_device_parameter":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -1951,6 +1952,10 @@ class AbletonMCP(ControlSurface):
                         "is_playing": clip.is_playing,
                         "is_recording": clip.is_recording
                     }
+                    if not track.has_midi_input:
+                        # Audio clip: the clip name is the sample file name.
+                        clip_info["sample_uri"] = clip.name
+                        clip_info["sample_path"] = clip.name
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -5120,26 +5125,28 @@ class AbletonMCP(ControlSurface):
     
     
     
-    def _load_browser_item(self, track_index, item_uri):
-        """Load a browser item onto a track by its URI"""
+    def _load_browser_item(self, track_index, item_uri, clip_index=0):
+        """Load a browser item onto a track's clip slot by its URI"""
         try:
             track = self._resolve_track(track_index)
-            
+
             # Access the application's browser instance instead of creating a new one
             app = self.application()
-            
+
             # Find the browser item by URI
             item = self._find_browser_item_by_uri(app.browser, item_uri)
-            
+
             if not item:
                 raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
-            
-            # Select the track
+
+            # Select the track AND its clip slot so load_item lands in Session View
             self._song.view.selected_track = track
-            
+            if 0 <= clip_index < len(track.clip_slots):
+                self._song.view.highlighted_clip_slot = track.clip_slots[clip_index]
+
             # Load the item
             app.browser.load_item(item)
-            
+
             result = {
                 "loaded": True,
                 "item_name": item.name,
