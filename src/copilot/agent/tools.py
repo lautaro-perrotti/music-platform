@@ -296,6 +296,46 @@ class AgentTools:
             )
             return result
 
+    def set_track_mute(self, track_index: int, mute: bool) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_track_mute")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before_mute = bool(track.mixer.mute)
+            before = {"mute": before_mute}
+            expected_after = {"mute": bool(mute)}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_track_mute",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_track_mute",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_track_mute(track_index, bool(mute)),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_track_mute",
+                before=before,
+                after={"mute": bool(mute)},
+                expected_after=expected_after,
+                inverse_operation="set_track_mute",
+                inverse_params={"mute": before_mute},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def set_device_parameter(
         self,
         track_index: int,

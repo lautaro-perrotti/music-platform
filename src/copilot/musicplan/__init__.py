@@ -39,6 +39,7 @@ from copilot.schemas.musicplan import (
     PlanStatus,
     RollbackSpec,
     SampleLoadActionParams,
+    SetTrackMuteActionParams,
     SampleSwapActionParams,
     VerificationSpec,
     VolumeActionParams,
@@ -1255,6 +1256,60 @@ def build_pattern_action(
             ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
             ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
             ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_clip inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def build_set_track_mute_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    mute: bool,
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SetTrackMuteActionParams(mute=bool(mute))
+    rollback = RollbackSpec(parameter="mute", unit="bool", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"track.mute", expected_after=1.0, unit="state"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.mute",
+        direction="mute" if mute else "unmute",
+        description=f"{'mute' if mute else 'unmute'} track {track.name}",
+        measurement_to_compare_after=f"mute state of {track.name}",
+        limitations=["Arrangement muting only; playback/looping is a later layer."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SET_TRACK_MUTE,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="mute inverse prepared"),
             ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
         ],
     )

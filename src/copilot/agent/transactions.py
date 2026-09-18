@@ -443,6 +443,9 @@ class TransactionManager:
         if op == "set_mixer_volume":
             self.daw.set_mixer_volume(locator.track_index, float(params["volume"]))
             return
+        if op == "set_track_mute":
+            self.daw.set_track_mute(locator.track_index, bool(params["mute"]))
+            return
         if op == "set_device_parameter":
             if locator.device_index is None or locator.parameter_index is None:
                 raise RollbackConflict("Device inverse missing current locator")

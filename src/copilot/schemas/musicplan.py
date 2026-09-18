@@ -33,6 +33,7 @@ class ActionType(StrEnum):
     CREATE_TRACK = "CREATE_TRACK"
     SAMPLE_LOAD = "SAMPLE_LOAD"
     CREATE_PATTERN = "CREATE_PATTERN"
+    SET_TRACK_MUTE = "SET_TRACK_MUTE"
 
 
 class VolumeOperation(StrEnum):
@@ -170,6 +171,11 @@ class PatternActionParams(BaseModel):
     notes: list[MidiNote] = Field(default_factory=list)
 
 
+class SetTrackMuteActionParams(BaseModel):
+    kind: Literal["set_track_mute"] = "set_track_mute"
+    mute: bool
+
+
 ActionParams = Annotated[
     Union[
         VolumeActionParams,
@@ -179,6 +185,7 @@ ActionParams = Annotated[
         CreateTrackActionParams,
         SampleLoadActionParams,
         PatternActionParams,
+        SetTrackMuteActionParams,
     ],
     Field(discriminator="kind"),
 ]

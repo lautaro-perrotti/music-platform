@@ -41,6 +41,9 @@ class DawAdapter(ABC):
     def set_mixer_volume(self, track_index: int, volume: float) -> dict[str, Any]: ...
 
     @abstractmethod
+    def set_track_mute(self, track_index: int, mute: bool) -> dict[str, Any]: ...
+
+    @abstractmethod
     def create_midi_clip(
         self, track_index: int, clip_index: int, length_beats: float
     ) -> dict[str, Any]: ...

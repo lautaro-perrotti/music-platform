@@ -1437,6 +1437,33 @@ def execute_track_build_plan(
             step["device_name"] = params.device_name
             report["MUSICAL_WRITE_COUNT"]["forward"] += 1
 
+        elif action.action_type is ActionType.SET_TRACK_MUTE:
+            params = action.params
+            track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
+            track = _resolve_track_by_name(current, track_name)
+            if track is None:
+                step["status"] = "FAILED"
+                step["error"] = f"track {track_name!r} not resolvable"
+                report["per_action"].append(step)
+                tools.transactions.abort(step["error"])
+                report["status"] = "FAILED"
+                report["error"] = step["error"]
+                return report
+            try:
+                tools.set_track_mute(track.index, bool(params.mute))
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"SET_TRACK_MUTE {track_name}: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = track_name
+            step["mute"] = bool(params.mute)
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
         else:
             step["status"] = "UNSUPPORTED"
             step["error"] = f"{action.action_type.value} not supported in multi-action yet"
