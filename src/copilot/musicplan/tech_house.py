@@ -1,7 +1,14 @@
-"""Tech house style template + plan builder (genre knowledge, no reference analyzer).
+"""Groovy / Latin Tech House style template + plan builder.
 
-TRACK_BUILDER_V1: turn genre conventions + sample library into a MusicPlan
-(CREATE_TRACK + SAMPLE_LOAD per groove role). No reference-track analysis here.
+Producer context: underground, groovy, percussive Tech House with Latin/tribal
+influences (references: Nacho Scoppa, Jay de Lys, Mar BR, Mau P — used as sonic
+reference only, never copied).
+
+Philosophy: GROOVE > SOUND SELECTION > RHYTHM > ARRANGEMENT > MIXING.
+Fewer elements, more identity. Percussion is the track's identity.
+
+No reference-track analysis here: this is pure genre knowledge + sample-library
+retrieval (the "build a track from 0" path of TRACK_BUILDER_V1).
 """
 
 from __future__ import annotations
@@ -13,15 +20,30 @@ from copilot.sample_library.schemas import LibraryIndex, SampleRole, SampleType
 from copilot.schemas.musicplan import DiagnosisBinding, MusicPlan, PlanIntentClass
 from copilot.schemas.session import MixerState, RoutingState, SessionState, TrackState
 
-TECH_HOUSE_BPM = 124.0
+# 126-128 BPM; default 127.
+TECH_HOUSE_BPM = 127.0
 
-# groove skeleton: (role, track_name, sample_type, bpm_filter_or_None)
-TECH_HOUSE_GROOVE: list[tuple[SampleRole, str, SampleType, float | None]] = [
-    (SampleRole.KICK, "Kick", SampleType.ONE_SHOT, None),
-    (SampleRole.CLAP, "Clap", SampleType.ONE_SHOT, None),
-    (SampleRole.CLOSED_HAT, "Closed Hat", SampleType.ONE_SHOT, None),
-    (SampleRole.OPEN_HAT, "Open Hat", SampleType.ONE_SHOT, None),
-    (SampleRole.BASS, "Bass", SampleType.LOOP, TECH_HOUSE_BPM),
+# Groove skeleton: (role, track_name, sample_type, bpm_filter, text_query_hint)
+# Percussion-first: the conversation between kick/clap/hats/shaker/conga/clave/loop
+# is the identity. Bass + vocal + one rhythmic stab complete a minimal, groove-led set.
+GROOVY_LATIN_GROOVE: list[tuple[SampleRole, str, SampleType, float | None, str | None]] = [
+    (SampleRole.KICK, "Kick", SampleType.ONE_SHOT, None, None),
+    (SampleRole.CLAP, "Clap", SampleType.ONE_SHOT, None, None),
+    (SampleRole.CLOSED_HAT, "Closed Hat", SampleType.ONE_SHOT, None, None),
+    (SampleRole.SHAKER, "Shaker", SampleType.ONE_SHOT, None, "shaker"),
+    (SampleRole.PERCUSSION, "Conga", SampleType.ONE_SHOT, None, "conga"),
+    (SampleRole.PERCUSSION, "Clave", SampleType.ONE_SHOT, None, "clave"),
+    (SampleRole.TOP_LOOP, "Perc Loop", SampleType.LOOP, TECH_HOUSE_BPM, None),
+    (SampleRole.BASS, "Bass", SampleType.LOOP, TECH_HOUSE_BPM, None),
+    (SampleRole.VOCAL, "Vocal", SampleType.ONE_SHOT, None, None),
+    (SampleRole.SYNTH, "Stab", SampleType.ONE_SHOT, None, None),
+]
+
+# Mixing hints (groove-first; applied as DEVICE_LOAD/DEVICE_TWEAK in a later step).
+MIXING_HINTS = [
+    "sidechain Bass to Kick (Duck/Compressor sidechain) so kick+bass feel like one machine",
+    "moderate Saturator drive on mid-bass (harmonics around low-mid, keep sub controlled)",
+    "EQ Eight on percussion to carve low-mid buildup; cut rather than boost",
 ]
 
 
@@ -42,7 +64,7 @@ def build_tech_house_plan(
     *,
     index: LibraryIndex,
     session: SessionState,
-    plan_id: str = "tech_house_groove",
+    plan_id: str = "groovy_latin_tech_house",
     top_k: int = 1,
 ) -> MusicPlan:
     """Retrieve a sample per groove role from the library and build a MusicPlan.
@@ -52,9 +74,13 @@ def build_tech_house_plan(
     retriever = SampleRetriever(index)
     actions = []
     evidence_refs: list[str] = []
-    for role, track_name, sample_type, bpm in TECH_HOUSE_GROOVE:
+    for role, track_name, sample_type, bpm, text_query in GROOVY_LATIN_GROOVE:
         results = retriever.search_samples(
-            role=role, one_shot_or_loop=sample_type, bpm=bpm, top_k=top_k
+            role=role,
+            one_shot_or_loop=sample_type,
+            bpm=bpm,
+            text_query=text_query,
+            top_k=top_k,
         )
         if not results:
             continue
@@ -65,7 +91,7 @@ def build_tech_house_plan(
                 project_identity=session.project_identity,
                 track_name=track_name,
                 track_kind="audio",
-                reason=f"tech house {role.value} track",
+                reason=f"groovy latin tech house {role.value} track",
                 evidence_refs=[asset.id],
             )
         )
@@ -84,7 +110,7 @@ def build_tech_house_plan(
     return MusicPlan(
         plan_id=plan_id,
         diagnosis=DiagnosisBinding(
-            diagnosis_id="style_tech_house",
+            diagnosis_id="style_groovy_latin_tech_house",
             diagnosis_status="SUPPORTED",
             diagnosis_accepted=True,
             cause_status="CAUSE_SUPPORTED",
@@ -95,6 +121,10 @@ def build_tech_house_plan(
         target_state_tokens={},
         evidence_refs=evidence_refs,
         actions=actions,
-        notes=[f"build tech house groove at {TECH_HOUSE_BPM} BPM from sample library"],
+        notes=[
+            f"groovy latin tech house groove at {TECH_HOUSE_BPM} BPM from sample library",
+            "philosophy: GROOVE > SOUND SELECTION > RHYTHM > ARRANGEMENT > MIXING",
+            "percussion-first; fewer elements, more identity",
+        ],
         created_at=now_iso(),
     )
