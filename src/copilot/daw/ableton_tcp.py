@@ -62,6 +62,7 @@ class AbletonTcpAdapter(DawAdapter):
         require_local_host(host)
         self.host = host
         self.port = port
+        self._device_uri_cache: dict[str, str] = {}
         self.timeouts = timeouts or DEFAULT_TIMEOUTS
         self._sock: socket.socket | None = None
         self.ids = IdentityRegistry()
@@ -270,7 +271,7 @@ class AbletonTcpAdapter(DawAdapter):
             name = info.get("name") or f"Track {index}"
             tracks.append(
                 TrackState(
-                    stable_id="",
+                    stable_id=name,
                     index=index,
                     name=name,
                     role=role,
@@ -881,13 +882,15 @@ class AbletonTcpAdapter(DawAdapter):
         self, track_index: int, uri: str
     ) -> dict[str, Any]:
         # The live bridge needs a browser query URI (e.g. "query:AudioFx#EQ%20Eight"),
-        # not a bare device name. Resolve bare names via search_browser.
+        # not a bare device name. Resolve bare names via search_browser, CACHED so a
+        # 52-device build does not re-search the browser for every load.
         if ":" not in uri and "/" not in uri:
-            sr = self.search_browser(uri, "all")
-            results = sr.get("results", []) if isinstance(sr, dict) else []
-            device = next((r for r in results if r.get("is_device")), None)
-            if device:
-                uri = device.get("uri", uri)
+            if uri not in self._device_uri_cache:
+                sr = self.search_browser(uri, "all")
+                results = sr.get("results", []) if isinstance(sr, dict) else []
+                device = next((r for r in results if r.get("is_device")), None)
+                self._device_uri_cache[uri] = device.get("uri", uri) if device else uri
+            uri = self._device_uri_cache[uri]
         return self._command(
             "load_instrument_or_effect",
             {"track_index": track_index, "uri": uri},

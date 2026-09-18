@@ -181,6 +181,11 @@ def main(argv: list[str] | None = None) -> int:
         help="track-build/vibe: run against the real Ableton TCP bridge instead of the mock.",
     )
     parser.add_argument(
+        "--leave",
+        action="store_true",
+        help="track-build/vibe: skip the rollback and LEAVE the built track in the set.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="production-write: validate/compile only; ZERO musical mutations.",
@@ -400,9 +405,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sample-library":
         return _sample_library(evidence, logger, args.eval_argv)
     if args.command == "track-build":
-        return _track_build(evidence, logger, args.eval_argv, live=bool(args.live))
+        return _track_build(evidence, logger, args.eval_argv, live=bool(args.live), leave=bool(args.leave))
     if args.command == "vibe":
-        return _vibe(evidence, logger, args.eval_argv, live=bool(args.live))
+        return _vibe(evidence, logger, args.eval_argv, live=bool(args.live), leave=bool(args.leave))
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2853,7 +2858,7 @@ def _manual_control_surface_action() -> str:
     )
 
 
-def _track_build(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
+def _track_build(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
     """Build a groovy/latin tech house track from 0 (library + recipe + groove + mixing + arrangement)."""
     from copilot.sample_library.library_v1 import load_index
     from copilot.musicplan.tech_house import build_tech_house_plan, TECH_HOUSE_BPM
@@ -2884,6 +2889,13 @@ def _track_build(evidence: Path, logger, argv: list[str], live: bool = False) ->
 
     plan = build_tech_house_plan(index=idx, session=session)
     arrangement = build_arrangement_mute_actions(project_identity=session.project_identity)
+    plan.actions.extend(arrangement)
+    if leave:
+        # leave the set in the full-groove (DROP) state: everything active
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(
+            build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop])
+        )
 
     # ---- print structure ----
     print(f"\n=== GROOVY / LATIN TECH HOUSE — {TECH_HOUSE_BPM} BPM ===\n")
@@ -2914,7 +2926,7 @@ def _track_build(evidence: Path, logger, argv: list[str], live: bool = False) ->
     import tempfile
     tmp = Path(tempfile.mkdtemp())
     tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
-    build_report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp)
+    build_report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
     print(f"\nEJECUCIÓN: {build_report['status']}  ·  tracks {build_report['after_track_count']} → rollback {build_report['restored_track_count']}  ·  RESTORE_VERIFIED={build_report['RESTORE_VERIFIED']}")
 
     result = {
@@ -2929,7 +2941,7 @@ def _track_build(evidence: Path, logger, argv: list[str], live: bool = False) ->
     return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
 
 
-def _vibe(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
+def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
     """prompt -> Astra -> MusicPlan (vibe coding). Falls back to deterministic if no Astra."""
     from copilot.sample_library.library_v1 import load_index
     from copilot.musicplan.astra_plan import build_plan_from_prompt
@@ -2953,6 +2965,12 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
 
     plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
 
+    from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
+    plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
+    if leave:
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop]))
+
     print(f'\n=== VIBE: "{intent}" ===\n')
     print(f"astra_used: {meta['astra_used']}")
     print(f"reasoning: {meta.get('reasoning', '')}")
@@ -2969,7 +2987,7 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False) -> int:
     from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
     tmp = Path(tempfile.mkdtemp())
     tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
-    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp)
+    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
     print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
     return 0 if report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
 

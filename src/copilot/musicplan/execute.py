@@ -1295,6 +1295,7 @@ def execute_track_build_plan(
     plan: MusicPlan,
     session: SessionState,
     persist_dir: Path | None = None,
+    leave: bool = False,
 ) -> dict[str, Any]:
     """Multi-action track build: CREATE_TRACK + SAMPLE_LOAD (extensible) in ONE transaction.
 
@@ -1517,6 +1518,16 @@ def execute_track_build_plan(
     report["after_track_count"] = len(after.tracks)
     report["after_clip_count"] = sum(len(t.clips) for t in after.tracks)
     tools.transactions.commit({"EXECUTION_VERIFICATION": "PASS"}, session=after)
+
+    if leave:
+        report["LEAVE"] = True
+        report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+        report["open_transaction"] = tools.transactions._open is not None
+        report["created_at"] = now_iso()
+        report["schema_version"] = SCHEMA_VERSION
+        artifact = _persist(root / f"{plan.plan_id}_track_build_loop.json", report)
+        report["artifact"] = artifact
+        return report
 
     # Unconditional rollback for engineering validation (LIFO over all actions).
     lifecycle.append("ROLLBACK_PREPARED")
