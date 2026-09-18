@@ -111,6 +111,7 @@ class LibraryIndex(BaseModel):
     roots: list[str] = Field(default_factory=list)
     assets: dict[str, SampleAsset] = Field(default_factory=dict)  # keyed by sha256
     duplicates: dict[str, list[str]] = Field(default_factory=dict)  # sha256 -> extra paths
+    path_meta: dict[str, dict] = Field(default_factory=dict)  # path -> {size_bytes, mtime_ns}
     created_at: str | None = None
     updated_at: str | None = None
 

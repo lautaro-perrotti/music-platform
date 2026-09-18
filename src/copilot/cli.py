@@ -2591,7 +2591,7 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
 
     if sub == "search":
         if len(argv) < 2:
-            print("uso: sample-library search <query> [--role KICK]")
+            print("uso: sample-library search <query> [ROLE]")
             return 2
         idx = load_index(index_path)
         if idx is None:
@@ -2599,8 +2599,11 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
             return 0
         query = argv[1]
         role = None
-        if "--role" in argv:
-            role = SampleRole(argv[argv.index("--role") + 1].upper())
+        if len(argv) >= 3:
+            try:
+                role = SampleRole(argv[2].upper())
+            except ValueError:
+                role = None
         hits = search(idx, query, role=role, top_k=10)
         print(json.dumps({
             "status": "OK", "query": query, "role": role.value if role else None,

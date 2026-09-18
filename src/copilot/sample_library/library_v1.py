@@ -319,13 +319,23 @@ def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) 
         for fp in discover(root):
             discovered[str(fp)] = fp
 
-    # known path -> sha (primary path + duplicate paths), reconstructed from index
+    # current per-path metadata (size + mtime)
+    cur_meta: dict[str, dict] = {}
+    for path_str, fp in discovered.items():
+        try:
+            st = fp.stat()
+            cur_meta[path_str] = {"size_bytes": st.st_size, "mtime_ns": st.st_mtime_ns}
+        except OSError:
+            cur_meta[path_str] = {}
+
+    # known path -> sha (primary + duplicate paths) from existing index
     known_sha_by_path: dict[str, str] = {}
     for sha, asset in existing.assets.items():
         known_sha_by_path[asset.path] = sha
     for sha, paths in existing.duplicates.items():
         for pth in paths:
             known_sha_by_path[pth] = sha
+    prev_meta = existing.path_meta
 
     assets: dict[str, SampleAsset] = {}
     paths_by_sha: dict[str, list[str]] = {}
@@ -333,40 +343,36 @@ def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) 
 
     for path_str, fp in discovered.items():
         sha = known_sha_by_path.get(path_str)
-        if sha is not None:
-            try:
-                st = fp.stat()
-            except OSError:
-                counts["MISSING"] += 1
-                continue
+        pm = prev_meta.get(path_str)
+        cm = cur_meta.get(path_str) or {}
+        if sha is not None and pm and pm.get("size_bytes") == cm.get("size_bytes") and pm.get("mtime_ns") == cm.get("mtime_ns"):
+            counts["UNCHANGED"] += 1
             prev = existing.assets.get(sha)
-            if prev is not None and st.st_size == prev.size_bytes and st.st_mtime_ns == prev.mtime_ns:
-                counts["UNCHANGED"] += 1
+            if prev is not None:
                 assets.setdefault(sha, prev)
-                paths_by_sha.setdefault(sha, []).append(path_str)
-                continue
-            counts["MODIFIED"] += 1
-            to_analyze.append(fp)
-        else:
-            counts["NEW"] += 1
-            to_analyze.append(fp)
+            paths_by_sha.setdefault(sha, []).append(path_str)
+            continue
+        # new, or content/metadata changed -> (re)analyze
+        counts["MODIFIED" if sha is not None else "NEW"] += 1
+        to_analyze.append(fp)
 
     for fp in to_analyze:
         asset = analyze_sample(fp, _root_for(fp, roots))
         sha = asset.sha256
-        if sha and asset.status == AssetStatus.INDEXED:
+        if sha:
             assets[sha] = asset
+            if asset.status == AssetStatus.INDEXED:
+                paths_by_sha.setdefault(sha, []).append(str(fp))
+            else:
+                counts["FAILED"] += 1
         else:
             counts["FAILED"] += 1
-            continue
-        paths_by_sha.setdefault(sha, []).append(str(fp))
 
     # missing = known paths no longer on disk
     for path_str in known_sha_by_path:
         if path_str not in discovered:
             counts["MISSING"] += 1
 
-    # duplicates: sha -> extra paths (beyond the primary path)
     duplicates: dict[str, list[str]] = {}
     for sha, paths in paths_by_sha.items():
         if len(paths) > 1:
@@ -381,6 +387,7 @@ def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) 
         roots=[str(r) for r in roots],
         assets=assets,
         duplicates=duplicates,
+        path_meta=cur_meta,
         created_at=existing.created_at or now,
         updated_at=now,
     )
