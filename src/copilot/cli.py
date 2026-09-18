@@ -143,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             "producer-analyze",
             "producer-run",
             "cross-project-validate",
+            "downstream-causal-state",
             "import-project",
             "install",
             "uninstall-copilot",
@@ -367,6 +368,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "cross-project-validate":
         return _cross_project_validate(evidence, logger)
+    if args.command == "downstream-causal-state":
+        return _downstream_causal_state(
+            evidence, logger,
+            region_id=args.region or "DOWNSTREAM",
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+            source_names=args.eval_argv or None,
+        )
     if args.command == "import-project":
         return _import_project(evidence, logger, args.eval_argv)
     if args.command == "install":
@@ -2447,6 +2456,37 @@ def _cross_project_validate(evidence: Path, logger) -> int:
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     status = str(report.get("status") or "")
     return 0 if status in {NEXT_READ_ONLY_VERIFIED, NEXT_VOLUME_LOOP} else 2
+
+
+def _downstream_causal_state(
+    evidence: Path,
+    logger,
+    *,
+    region_id: str,
+    start_qn: float | None,
+    end_qn: float | None,
+    source_names: list[str] | None,
+) -> int:
+    from copilot.audio.downstream_causal_state_v1 import run_downstream_causal_state_v1
+
+    connected = _connect_live_or_block(evidence, "downstream_causal_state_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = run_downstream_causal_state_v1(
+            connected,
+            evidence=evidence,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+            source_names=source_names,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("downstream-causal-state status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("status") in {"VERIFIED", "READ_ONLY_EVIDENCE"} else 2
 
 
 def _import_project(evidence: Path, logger, argv: list[str]) -> int:
