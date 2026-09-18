@@ -564,6 +564,128 @@ def validate_musicplan(
     return plan
 
 
+def validate_device_tweak_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a DEVICE_TWEAK plan (tokens, target, device/param readback). No writes."""
+    attach_tokens(session)
+    if not plan.actions:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "no_actions"
+        return plan
+    action = plan.actions[0]
+    if action.action_type is not ActionType.DEVICE_TWEAK:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_tweak"
+        return plan
+
+    live_project = session.project_token or session.project_identity or ""
+    live_audible = session.audible_token or ""
+
+    target_ref = _as_ref(action.target.ref)
+    resolved = resolve_track(session, target_ref)
+    track: TrackState | None = None
+    live_target = ""
+    if resolved.status is ResolveStatus.RESOLVED and resolved.track_index is not None:
+        try:
+            track = require_resolved(session, target_ref)
+            live_target = target_token(track)
+        except Exception:
+            track = None
+
+    gate = evaluate_musicplan_gate(
+        diagnosis_accepted=True,
+        diagnosis_status="SUPPORTED",
+        actionable=True,
+        cause_status="CAUSE_SUPPORTED",
+        require_cause_supported=False,
+        evidence_project_token=plan.project_state_token,
+        evidence_audible_token=plan.audible_state_token,
+        evidence_target_token=next(iter(plan.target_state_tokens.values()), None),
+        live_project_token=live_project,
+        live_audible_token=live_audible,
+        live_target_token=live_target or None,
+        require_target=True,
+        target_resolve_status=resolved.status.value,
+    )
+
+    plan = plan.model_copy(deep=True)
+    plan.gate = gate.as_dict()
+    action = plan.actions[0]
+    action.target.resolve_status = resolved.status.value
+    action.target.track_index_locator = resolved.track_index
+
+    if gate.gate != "OPEN":
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = gate.reason
+        return plan
+    if track is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = resolved.status.value
+        return plan
+
+    params = action.params
+    if not isinstance(params, DeviceTweakActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_tweak_params"
+        return plan
+
+    device = next((d for d in track.devices if int(d.index) == int(params.device_index)), None)
+    if device is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "DEVICE_NOT_FOUND"
+        return plan
+
+    param = next((pp for pp in device.parameters if pp.name.lower() == params.parameter_name.lower()), None)
+    if param is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "PARAMETER_NOT_FOUND"
+        return plan
+
+    current = float(param.value)
+    if abs(current - float(params.expected_before)) > params.readback_tolerance:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"EXPECTED_PARAM_MISMATCH current={current} expected={params.expected_before}"
+        return plan
+
+    if params.allowed_min is not None and params.intended_after < params.allowed_min:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "out_of_range_param"
+        return plan
+    if params.allowed_max is not None and params.intended_after > params.allowed_max:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "out_of_range_param"
+        return plan
+
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    # authoritative rollback from live readback
+    action.rollback = RollbackSpec(
+        parameter=action.rollback.parameter,
+        unit=action.rollback.unit,
+        restore_value=current,
+        prepared=True,
+        source="authoritative_prewrite_readback",
+    )
+    action.params.expected_before = current
+    action.verification.execution.expected_after = float(params.intended_after)
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
 def compile_execution_envelope(
     plan: MusicPlan,
     *,
