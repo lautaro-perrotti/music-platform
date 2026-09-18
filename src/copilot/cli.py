@@ -148,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             "sidechain-automation-state",
             "import-project",
             "sample-library",
+            "track-build",
             "install",
             "uninstall-copilot",
             "doctor",
@@ -392,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
         return _import_project(evidence, logger, args.eval_argv)
     if args.command == "sample-library":
         return _sample_library(evidence, logger, args.eval_argv)
+    if args.command == "track-build":
+        return _track_build(evidence, logger, args.eval_argv)
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2842,5 +2845,79 @@ def _manual_control_surface_action() -> str:
     )
 
 
+def _track_build(evidence: Path, logger, argv: list[str]) -> int:
+    """Build a groovy/latin tech house track from 0 (library + recipe + groove + mixing + arrangement)."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.tech_house import build_tech_house_plan, TECH_HOUSE_BPM
+    from copilot.musicplan.arrangement import (
+        TECH_HOUSE_ARRANGEMENT,
+        build_arrangement_mute_actions,
+    )
+    from copilot.musicplan.mixing import MIXING_CHAINS, MASTER_CHAIN, MIXING_PHILOSOPHY
+
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    # build the plan against a blank template (mock session).
+    from copilot.daw.mock import MockAbletonAdapter
+    from copilot.daw.state_tokens import attach_tokens
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.session_path = r"D:\sets\trackbuild_lab.als"
+    daw.session_name = "trackbuild_lab"
+    session = daw.snapshot()
+    attach_tokens(session)
+
+    plan = build_tech_house_plan(index=idx, session=session)
+    arrangement = build_arrangement_mute_actions(project_identity=session.project_identity)
+
+    # ---- print structure ----
+    print(f"\n=== GROOVY / LATIN TECH HOUSE — {TECH_HOUSE_BPM} BPM ===\n")
+    print("SONIDO (sample por pista, percusión-first):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {a.params.sample_uri}")
+
+    print("\nMIXING (cadenas nativas):")
+    for track, devices in MIXING_CHAINS.items():
+        print(f"  {track:12s} {' → '.join(devices)}")
+    print(f"  {'MASTER':12s} {' → '.join(MASTER_CHAIN)}")
+
+    print("\nARRANGEMENT (substracción/variación):")
+    for sec in TECH_HOUSE_ARRANGEMENT:
+        muted = 10 - len(sec.active)
+        print(f"  {sec.name:8s} {sec.bars:>3d}b  activas: {', '.join(sec.active)}  (mute: {muted})")
+
+    print(f"\nPLAN: {len(plan.actions)} acciones de build + {len(arrangement)} de arreglo")
+
+    # silence write/transaction INFO logs so the structure reads clean
+    import logging
+    for _name in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
+
+    # ---- execute against mock (write + rollback) ----
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    build_report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp)
+    print(f"\nEJECUCIÓN: {build_report['status']}  ·  tracks {build_report['after_track_count']} → rollback {build_report['restored_track_count']}  ·  RESTORE_VERIFIED={build_report['RESTORE_VERIFIED']}")
+
+    result = {
+        "status": build_report["status"],
+        "style": "groovy latin tech house",
+        "bpm": TECH_HOUSE_BPM,
+        "plan_actions": len(plan.actions),
+        "arrangement_actions": len(arrangement),
+        "tracks": [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"],
+        "restore_verified": build_report["RESTORE_VERIFIED"],
+    }
+    return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+

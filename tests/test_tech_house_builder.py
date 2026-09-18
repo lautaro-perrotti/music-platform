@@ -58,17 +58,19 @@ def test_build_tech_house_plan():
     from copilot.musicplan.tech_house import build_tech_house_plan
     _, session = _session()
     plan = build_tech_house_plan(index=_synthetic_index(), session=session)
-    # 10 roles x (CREATE_TRACK + SAMPLE_LOAD) + mixing (2 devices on Bass)
-    assert len(plan.actions) == 22
+    # 10 roles x (CREATE_TRACK + SAMPLE_LOAD) + mixing (per-track native chains)
+    assert len(plan.actions) == 42
     kinds = [a.action_type.value for a in plan.actions]
     assert kinds.count("CREATE_TRACK") == 10
     assert kinds.count("SAMPLE_LOAD") == 10
-    assert kinds.count("DEVICE_LOAD") == 2
+    assert kinds.count("DEVICE_LOAD") == 22
     names = [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"]
     assert names == ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
                      "Perc Loop", "Bass", "Vocal", "Stab"]
-    devices = [a.params.device_name for a in plan.actions if a.action_type.value == "DEVICE_LOAD"]
-    assert devices == ["Saturator", "Compressor"]
+    # Bass gets the sidechain/saturation chain: EQ Eight + Compressor + Saturator
+    bass_devices = [a.params.device_name for a in plan.actions
+                    if a.action_type.value == "DEVICE_LOAD" and a.target.ref.get("name") == "Bass"]
+    assert bass_devices == ["EQ Eight", "Compressor", "Saturator"]
 
 
 def test_execute_tech_house_plan_full_loop(tmp_path):
@@ -87,7 +89,7 @@ def test_execute_tech_house_plan_full_loop(tmp_path):
 
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTED"] is True
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 22
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 42
     assert report["after_track_count"] == 10
     assert report["after_clip_count"] == 10
     # rollback reversed the whole plan -> empty set restored

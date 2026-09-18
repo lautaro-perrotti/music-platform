@@ -16,7 +16,6 @@ from __future__ import annotations
 from copilot.human_eval.store import now_iso
 from copilot.musicplan import (
     build_create_track_action,
-    build_device_load_action,
     build_sample_load_action,
 )
 from copilot.sample_library.retrieval import SampleRetriever
@@ -43,12 +42,7 @@ GROOVY_LATIN_GROOVE: list[tuple[SampleRole, str, SampleType, float | None, str |
     (SampleRole.SYNTH, "Stab", SampleType.ONE_SHOT, None, None),
 ]
 
-# Mixing hints (groove-first; applied as DEVICE_LOAD/DEVICE_TWEAK in a later step).
-MIXING_HINTS = [
-    "sidechain Bass to Kick (Duck/Compressor sidechain) so kick+bass feel like one machine",
-    "moderate Saturator drive on mid-bass (harmonics around low-mid, keep sub controlled)",
-    "EQ Eight on percussion to carve low-mid buildup; cut rather than boost",
-]
+# Mixing + mastering chains live in copilot.musicplan.mixing (native Ableton devices).
 
 
 def _virtual_track(name: str, role: str = "audio") -> TrackState:
@@ -115,23 +109,11 @@ def build_tech_house_plan(
         )
         evidence_refs.append(asset.id)
 
-    # MIXING_V1: native devices on Bass (mid-bass saturation + sidechain compressor).
-    # Each drum element stays on its own track (no Drum Rack); the groove pattern
-    # lives per-element in copilot.musicplan.groove for the arrangement layer.
-    for device_name, device_uri in [
-        ("Saturator", "devices/audio-effects/Saturator"),
-        ("Compressor", "devices/audio-effects/Compressor"),
-    ]:
-        actions.append(
-            build_device_load_action(
-                track=_virtual_track("Bass", role="audio"),
-                project_identity=session.project_identity,
-                device_name=device_name,
-                device_uri=device_uri,
-                reason=f"mixing: {device_name} on Bass ({'sidechain to Kick' if device_name == 'Compressor' else 'mid-bass saturation'})",
-                evidence_refs=[],
-            )
-        )
+    # MIXING_V1: native per-track chains (EQ/saturation/sidechain) from mixing.py.
+    # Each drum element stays on its own track (no Drum Rack).
+    from copilot.musicplan.mixing import build_mixing_actions
+
+    actions.extend(build_mixing_actions(project_identity=session.project_identity))
 
     return MusicPlan(
         plan_id=plan_id,
