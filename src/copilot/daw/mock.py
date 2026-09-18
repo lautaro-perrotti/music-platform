@@ -286,6 +286,48 @@ class MockAbletonAdapter(DawAdapter):
             },
         )
 
+    def load_instrument_or_effect(self, track_index: int, uri: str) -> dict[str, Any]:
+        self._before_write("load_instrument_or_effect")
+        track = self._track(track_index)
+        name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+        device = {
+            "name": name,
+            "class_name": name,
+            "enabled": True,
+            "parameters": [
+                {"index": 0, "name": "Device On", "value": 1.0, "min": 0.0, "max": 1.0},
+                {"index": 1, "name": "Mix", "value": 0.5, "min": 0.0, "max": 1.0},
+            ],
+        }
+        track["devices"].append(device)
+        device_index = len(track["devices"]) - 1
+        return self._after_write(
+            "load_instrument_or_effect",
+            {"device_index": device_index, "device_name": name},
+        )
+
+    def delete_device(self, track_index: int, device_index: int) -> dict[str, Any]:
+        self._before_write("delete_device")
+        track = self._track(track_index)
+        if device_index < 0 or device_index >= len(track["devices"]):
+            raise DawError("Device index out of range")
+        name = track["devices"][device_index]["name"]
+        del track["devices"][device_index]
+        return self._after_write(
+            "delete_device",
+            {"deleted": True, "device_index": device_index, "device_name": name},
+        )
+
+    def load_browser_item(self, track_index: int, item_uri: str) -> dict[str, Any]:
+        # SAMPLE_SWAP primitive. Mock records the loaded sample uri on the clip slot.
+        self._before_write("load_browser_item")
+        track = self._track(track_index)
+        track.setdefault("loaded_browser_items", []).append(item_uri)
+        return self._after_write(
+            "load_browser_item",
+            {"track_index": track_index, "item_uri": item_uri},
+        )
+
     def _before_write(self, operation: str) -> None:
         if (
             self.fail_after_writes is not None

@@ -686,6 +686,178 @@ def validate_device_tweak_plan(
     return plan
 
 
+def _resolve_plan_header(
+    plan: MusicPlan,
+    session: SessionState,
+    expected_type: ActionType,
+) -> tuple[MusicPlan, PlanAction | None, TrackState | None]:
+    """Shared abstention/action-type/target/gate validation for new action types."""
+    attach_tokens(session)
+    if not plan.actions:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "no_actions"
+        return plan, None, None
+    action = plan.actions[0]
+    if action.action_type is not expected_type:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"not_{expected_type.value.lower()}"
+        return plan, None, None
+
+    live_project = session.project_token or session.project_identity or ""
+    live_audible = session.audible_token or ""
+
+    target_ref = _as_ref(action.target.ref)
+    resolved = resolve_track(session, target_ref)
+    track: TrackState | None = None
+    live_target = ""
+    if resolved.status is ResolveStatus.RESOLVED and resolved.track_index is not None:
+        try:
+            track = require_resolved(session, target_ref)
+            live_target = target_token(track)
+        except Exception:
+            track = None
+
+    gate = evaluate_musicplan_gate(
+        diagnosis_accepted=True,
+        diagnosis_status="SUPPORTED",
+        actionable=True,
+        cause_status="CAUSE_SUPPORTED",
+        require_cause_supported=False,
+        evidence_project_token=plan.project_state_token,
+        evidence_audible_token=plan.audible_state_token,
+        evidence_target_token=next(iter(plan.target_state_tokens.values()), None),
+        live_project_token=live_project,
+        live_audible_token=live_audible,
+        live_target_token=live_target or None,
+        require_target=True,
+        target_resolve_status=resolved.status.value,
+    )
+
+    plan = plan.model_copy(deep=True)
+    plan.gate = gate.as_dict()
+    action = plan.actions[0]
+    action.target.resolve_status = resolved.status.value
+    action.target.track_index_locator = resolved.track_index
+
+    if gate.gate != "OPEN":
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = gate.reason
+        return plan, None, None
+    if track is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = resolved.status.value
+        return plan, None, None
+    return plan, action, track
+
+
+def build_device_load_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_name: str,
+    device_uri: str,
+    reason: str,
+    evidence_refs: list[str],
+    device_index_hint: int = -1,
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = DeviceLoadActionParams(
+        device_name=device_name,
+        device_uri=device_uri,
+        device_index_hint=device_index_hint,
+    )
+    rollback = RollbackSpec(
+        parameter="device",
+        unit="",
+        restore_value=-1.0,
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"device[{device_name}]",
+            expected_after=1.0,
+            unit="present",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.devices",
+        direction="add",
+        description=f"load native device {device_name}",
+        measurement_to_compare_after=f"device presence of {device_name}",
+        limitations=["Device loaded but not yet tuned."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.DEVICE_LOAD,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_device inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_device_load_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a DEVICE_LOAD plan (tokens, target, device uri, not duplicate). No writes."""
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.DEVICE_LOAD)
+    if action is None:
+        return plan
+
+    params = action.params
+    if not isinstance(params, DeviceLoadActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_load_params"
+        return plan
+    if not params.device_uri:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "device_uri_required"
+        return plan
+    existing = [d.name for d in track.devices if d.name.lower() == params.device_name.lower()]
+    if existing:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"DEVICE_ALREADY_PRESENT {params.device_name}"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
 def compile_execution_envelope(
     plan: MusicPlan,
     *,

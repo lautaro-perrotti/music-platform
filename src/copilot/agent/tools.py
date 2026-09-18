@@ -308,6 +308,49 @@ class AgentTools:
             )
             return result
 
+    def load_instrument_or_effect(self, track_index: int, uri: str) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_instrument_or_effect")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"device_count": len(track.devices)}
+            expected_after = {"device_count": len(track.devices) + 1}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_instrument_or_effect",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_instrument_or_effect",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_instrument_or_effect(track_index, uri),
+            )
+            track = self._track_at(track_index)
+            new_device_index = len(track.devices) - 1
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, device_index=new_device_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="load_instrument_or_effect",
+                before=before,
+                after={"device_count": len(track.devices),
+                       "device_name": result.get("device_name", uri)},
+                expected_after=expected_after,
+                inverse_operation="delete_device",
+                inverse_params={},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def _pre_write(
         self, operation: str, expected_revision: int | None = None
     ) -> SessionState:

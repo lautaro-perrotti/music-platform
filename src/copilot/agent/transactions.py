@@ -453,6 +453,14 @@ class TransactionManager:
                 float(params["value"]),
             )
             return
+        if op == "delete_device":
+            if locator.device_index is None:
+                raise RollbackConflict("Device inverse missing current device locator")
+            self.daw.delete_device(locator.track_index, locator.device_index)
+            return
+        if op == "load_browser_item":
+            self.daw.load_browser_item(locator.track_index, str(params["item_uri"]))
+            return
         raise DawError(f"Unsupported inverse: {op}")
 
     def _journal(self, **record: Any) -> None:

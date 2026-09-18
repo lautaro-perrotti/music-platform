@@ -791,3 +791,126 @@ def execute_device_tweak_write_loop(
     report["artifact"] = artifact
     return report
 
+
+def _find_track_by_stable_id(session: SessionState, stable_id: str) -> TrackState | None:
+    return next((t for t in session.tracks if t.stable_id == stable_id), None)
+
+
+def execute_device_load_write_loop(
+    tools: AgentTools,
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    persist_dir: Path | None = None,
+) -> dict[str, Any]:
+    """DEVICE_LOAD lifecycle: validate -> load device -> verify presence -> rollback (delete) -> verify gone."""
+    from copilot.musicplan import _as_ref, validate_device_load_plan
+    from copilot.daw.object_ref import require_resolved
+
+    root = persist_dir or PLANS_DIR
+    lifecycle: list[str] = []
+    report: dict[str, Any] = {
+        "status": "STARTED",
+        "CONTROLLED_WRITE_LOOP_V1": "BLOCKED",
+        "action_type": "DEVICE_LOAD",
+        "lifecycle": lifecycle,
+        "MUSICAL_WRITE_COUNT": {"forward": 0, "rollback": 0},
+        "EXECUTED": False,
+    }
+
+    validated = validate_device_load_plan(plan, session=session)
+    report["plan_id"] = validated.plan_id
+    report["plan_status"] = validated.status.value
+    if validated.status is not PlanStatus.READY_FOR_EXECUTION:
+        report["status"] = "NOT_EXECUTABLE"
+        report["error"] = validated.rejection_reason or validated.status.value
+        return report
+
+    action = validated.actions[0]
+    params = action.params  # DeviceLoadActionParams
+    track = require_resolved(session, _as_ref(action.target.ref))
+    device_name = params.device_name
+    device_uri = params.device_uri or device_name
+    before_count = len(track.devices)
+    report["before_device_count"] = before_count
+    lifecycle.append("PREPARED")
+
+    txn = tools.transactions.begin(
+        user_intent=f"DEVICE_LOAD {track.name}.{device_name}",
+        session=session,
+    )
+    report["transaction_id"] = txn.transaction_id
+    lifecycle.append("EXECUTING")
+
+    try:
+        write_result = tools.load_instrument_or_effect(track.index, device_uri)
+    except Exception as exc:  # noqa: BLE001
+        if tools.transactions._open is not None:
+            tools.transactions.abort(str(exc))
+        lifecycle.append("FAILED")
+        report["status"] = "WRITE_FAILED"
+        report["error"] = str(exc)
+        return report
+
+    report["MUSICAL_WRITE_COUNT"]["forward"] = 1
+    report["EXECUTED"] = True
+    lifecycle.append("EXECUTED")
+
+    after = tools.get_session_snapshot()
+    after_track = _find_track_by_stable_id(after, track.stable_id)
+    loaded = bool(after_track) and any(
+        d.name.lower() == device_name.lower() for d in after_track.devices
+    )
+    report["device_present_after_write"] = loaded
+    report["after_device_count"] = len(after_track.devices) if after_track else None
+    if not loaded:
+        if tools.transactions._open is not None:
+            tools.transactions.mark_in_doubt("device not present after load")
+        lifecycle.append("IN_DOUBT")
+        report["status"] = "IN_DOUBT"
+        report["error"] = "device not present after load"
+        report["EXECUTION_VERIFICATION"] = "FAIL"
+        return report
+    report["EXECUTION_VERIFICATION"] = "PASS"
+    lifecycle.append("VERIFIED")
+
+    tools.transactions.commit(
+        {"EXECUTION_VERIFICATION": "PASS", "device_name": device_name}, session=after
+    )
+    validated.status = PlanStatus.VERIFIED
+
+    lifecycle.append("ROLLBACK_PREPARED")
+    rollback_txn = tools.transactions.rollback_last()
+    report["MUSICAL_WRITE_COUNT"]["rollback"] = 1
+    if rollback_txn.status is not TransactionStatus.ROLLED_BACK:
+        lifecycle.append(rollback_txn.status.value)
+        report["status"] = "ROLLBACK_FAILED"
+        report["error"] = rollback_txn.error
+        return report
+    lifecycle.append("ROLLED_BACK")
+    validated.status = PlanStatus.ROLLED_BACK
+
+    restored = tools.get_session_snapshot()
+    restored_track = _find_track_by_stable_id(restored, track.stable_id)
+    still_present = bool(restored_track) and any(
+        d.name.lower() == device_name.lower() for d in restored_track.devices
+    )
+    report["device_present_after_rollback"] = still_present
+    report["after_rollback_device_count"] = len(restored_track.devices) if restored_track else None
+    if still_present:
+        report["status"] = "RESTORE_READBACK_FAILED"
+        report["error"] = "device still present after rollback"
+        report["RESTORE_VERIFIED"] = False
+        return report
+
+    lifecycle.append("RESTORE_VERIFIED")
+    report["RESTORE_VERIFIED"] = True
+    report["status"] = "CONTROLLED_WRITE_LOOP_COMPLETE"
+    report["CONTROLLED_WRITE_LOOP_V1"] = "VERIFIED"
+    report["open_transaction"] = tools.transactions._open is not None
+    report["created_at"] = now_iso()
+    report["schema_version"] = SCHEMA_VERSION
+    artifact = _persist(root / f"{validated.plan_id}_device_load_loop.json", report)
+    report["artifact"] = artifact
+    return report
+
