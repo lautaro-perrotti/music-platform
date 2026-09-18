@@ -65,13 +65,15 @@ def test_build_tech_house_plan():
     from copilot.musicplan.tech_house import build_tech_house_plan
     _, session = _session()
     plan = build_tech_house_plan(index=_synthetic_index(), session=session)
-    # 11 roles x (CREATE_TRACK + SAMPLE_LOAD) + mixing + groups (routing + bus)
-    assert len(plan.actions) == 105
+    # 16 elements x (CREATE_TRACK + SAMPLE_LOAD) + 3 MIDI groove patterns + mixing + sidechain + groups
+    assert len(plan.actions) == 109
     kinds = [a.action_type.value for a in plan.actions]
     assert kinds.count("CREATE_TRACK") == 21
     assert kinds.count("SAMPLE_LOAD") == 16
     assert kinds.count("DEVICE_LOAD") == 52
     assert kinds.count("SET_TRACK_ROUTING") == 16
+    assert kinds.count("CREATE_PATTERN") == 3
+    assert kinds.count("SET_DEVICE_ROUTING") == 1
     names = [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"]
     assert names == ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
                      "Perc Loop", "Bass", "Vocal", "Stab", "Guitar", "Sax", "FX", "Impact", "Downlifter", "Texture",
@@ -98,7 +100,7 @@ def test_execute_tech_house_plan_full_loop(tmp_path):
 
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTED"] is True
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 105
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 109
     assert report["after_track_count"] == 21
     assert report["after_clip_count"] == 16
     # rollback reversed the whole plan -> empty set restored

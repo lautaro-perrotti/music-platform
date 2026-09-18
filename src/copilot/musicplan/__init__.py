@@ -42,6 +42,7 @@ from copilot.schemas.musicplan import (
     SetTrackMuteActionParams,
     SampleSwapActionParams,
     SetTrackRoutingActionParams,
+    SetDeviceRoutingActionParams,
     VerificationSpec,
     VolumeActionParams,
     VolumeOperation,
@@ -1370,6 +1371,64 @@ def build_set_track_routing_action(
         ],
     )
 
+
+
+def build_set_device_routing_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_index: int,
+    routing_type: str = "Track",
+    routing_channel: str = "",
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SetDeviceRoutingActionParams(
+        device_index=device_index, routing_type=routing_type, routing_channel=routing_channel
+    )
+    rollback = RollbackSpec(parameter="device.routing", unit="source", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter="device.input_routing", expected_after=1.0, unit="state"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.device[{device_index}].input_routing",
+        direction="route",
+        description=f"route {track.name} device[{device_index}] sidechain input to {routing_channel or routing_type}",
+        measurement_to_compare_after=f"sidechain source of {track.name} device[{device_index}]",
+        limitations=["Sidechain source is a device input routing."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SET_DEVICE_ROUTING,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="routing inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
 
 def compile_execution_envelope(
     plan: MusicPlan,

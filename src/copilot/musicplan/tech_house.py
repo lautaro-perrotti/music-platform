@@ -50,6 +50,29 @@ GROOVY_LATIN_GROOVE: list[tuple[SampleRole, str, SampleType, float | None, str |
 
 # Mixing + mastering chains live in copilot.musicplan.mixing (native Ableton devices).
 
+# Latin percussion humanized as MIDI patterns (Simpler + groove swing), not static samples.
+# Kick/Clap/Closed Hat stay audio samples (their transients are the identity).
+MIDI_PERCUSSION: dict[str, str] = {
+    "Shaker": "shaker_pattern",
+    "Conga": "conga_pattern",
+    "Clave": "clave_pattern",
+}
+
+_PATTERN_FNS = None
+
+
+def _pattern_notes(name: str) -> list:
+    global _PATTERN_FNS
+    if _PATTERN_FNS is None:
+        from copilot.musicplan.groove import shaker_pattern, conga_pattern, clave_pattern
+
+        _PATTERN_FNS = {
+            "shaker_pattern": shaker_pattern,
+            "conga_pattern": conga_pattern,
+            "clave_pattern": clave_pattern,
+        }
+    return _PATTERN_FNS[name]()
+
 
 def _virtual_track(name: str, role: str = "audio") -> TrackState:
     return TrackState(
@@ -102,25 +125,62 @@ def build_tech_house_plan(
                 continue
             asset = results[0].asset
         sample_uri = asset.relative_path
-        actions.append(
-            build_create_track_action(
-                project_identity=session.project_identity,
-                track_name=track_name,
-                track_kind="audio",
-                reason=f"groovy latin tech house {role.value} track",
-                evidence_refs=[asset.id],
+        if track_name in MIDI_PERCUSSION:
+            # Humanized latin percussion: MIDI track + Simpler(sample) + groove pattern
+            # with velocity/micro-timing/swing (not a static audio one-shot).
+            actions.append(
+                build_create_track_action(
+                    project_identity=session.project_identity,
+                    track_name=track_name,
+                    track_kind="midi",
+                    reason=f"groovy latin tech house {role.value} MIDI track",
+                    evidence_refs=[asset.id],
+                )
             )
-        )
-        actions.append(
-            build_sample_load_action(
-                track=_virtual_audio_track(track_name),
-                project_identity=session.project_identity,
-                clip_index=0,
-                sample_uri=sample_uri,
-                reason=f"load {role.value} sample {asset.filename}",
-                evidence_refs=[asset.id],
+            actions.append(
+                build_sample_load_action(
+                    track=_virtual_track(track_name, role="midi"),
+                    project_identity=session.project_identity,
+                    clip_index=0,
+                    sample_uri=sample_uri,
+                    reason=f"load {role.value} sample {asset.filename} into Simpler",
+                    evidence_refs=[asset.id],
+                )
             )
-        )
+            from copilot.musicplan import build_pattern_action
+
+            notes = _pattern_notes(MIDI_PERCUSSION[track_name])
+            actions.append(
+                build_pattern_action(
+                    track=_virtual_track(track_name, role="midi"),
+                    project_identity=session.project_identity,
+                    clip_index=0,
+                    length_beats=1.0,
+                    notes=notes,
+                    reason=f"humanize {track_name} groove (velocity/micro-timing/swing)",
+                    evidence_refs=[asset.id],
+                )
+            )
+        else:
+            actions.append(
+                build_create_track_action(
+                    project_identity=session.project_identity,
+                    track_name=track_name,
+                    track_kind="audio",
+                    reason=f"groovy latin tech house {role.value} track",
+                    evidence_refs=[asset.id],
+                )
+            )
+            actions.append(
+                build_sample_load_action(
+                    track=_virtual_audio_track(track_name),
+                    project_identity=session.project_identity,
+                    clip_index=0,
+                    sample_uri=sample_uri,
+                    reason=f"load {role.value} sample {asset.filename}",
+                    evidence_refs=[asset.id],
+                )
+            )
         evidence_refs.append(asset.id)
 
     # MIXING_V1: native per-track chains (EQ/saturation/sidechain) from mixing.py.
@@ -128,6 +188,21 @@ def build_tech_house_plan(
     from copilot.musicplan.mixing import build_mixing_actions
 
     actions.extend(build_mixing_actions(project_identity=session.project_identity))
+
+    # SIDECHAIN_V1: native Compressor sidechain on the Bass (source = Kick).
+    from copilot.musicplan import build_set_device_routing_action
+
+    actions.append(
+        build_set_device_routing_action(
+            track=_virtual_audio_track("Bass"),
+            project_identity=session.project_identity,
+            device_index=1,  # Compressor (after EQ Eight) in the Bass chain
+            routing_type="Track",
+            routing_channel="Kick",
+            reason="sidechain: Bass Compressor ducks against Kick (groove > loudness)",
+            evidence_refs=[],
+        )
+    )
 
     # MIX_GROUPS_V1: buses (drums/synth/fx/vocals) + routing + bus processing.
     from copilot.musicplan.groups import build_group_actions

@@ -9,7 +9,7 @@ from copilot.daw.state_tokens import attach_tokens, target_token
 def _session_with_audio_clip():
     daw = MockAbletonAdapter()
     daw.connect()
-    daw.create_midi_track("Pad")
+    daw.create_audio_track("Pad")
     # pre-populate an audio clip at slot 0 with an "old" sample
     daw.load_browser_item(0, "samples/hihat_old.wav", clip_index=0)
     session = daw.snapshot()

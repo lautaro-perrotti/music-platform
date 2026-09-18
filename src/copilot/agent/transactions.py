@@ -453,6 +453,16 @@ class TransactionManager:
                 str(params.get("output_channel", "")),
             )
             return
+        if op == "set_device_input_routing":
+            if locator.device_index is None:
+                raise RollbackConflict("Device input routing inverse missing current device locator")
+            self.daw.set_device_input_routing(
+                locator.track_index,
+                locator.device_index,
+                str(params["input_type"]),
+                str(params.get("input_channel", "")),
+            )
+            return
         if op == "set_device_parameter":
             if locator.device_index is None or locator.parameter_index is None:
                 raise RollbackConflict("Device inverse missing current locator")

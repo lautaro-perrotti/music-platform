@@ -377,6 +377,54 @@ class AgentTools:
             )
             return result
 
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_device_input_routing")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"input_type": "No Input", "input_channel": ""}
+            expected_after = {"input_type": routing_type, "input_channel": routing_channel}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_device_input_routing",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_device_input_routing",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_device_input_routing(
+                    track_index, device_index, routing_type, routing_channel
+                ),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, device_index=device_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_device_input_routing",
+                before=before,
+                after=expected_after,
+                expected_after=expected_after,
+                inverse_operation="set_device_input_routing",
+                inverse_params={
+                    "input_type": before["input_type"],
+                    "input_channel": before["input_channel"],
+                },
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def set_device_parameter(
         self,
         track_index: int,
@@ -534,6 +582,7 @@ class AgentTools:
             before_state = self._pre_write("load_sample")
             command_id = self._command_id()
             track = self._track_at(track_index)
+            is_midi = track.role == "midi"
             before = {"clip_exists": False, "clip_index": clip_index}
             expected_after = {"clip_exists": True, "sample_uri": sample_uri}
             self.transactions.plan_write(
@@ -552,22 +601,42 @@ class AgentTools:
                 lambda: self.daw.load_browser_item(track_index, sample_uri, clip_index=clip_index),
             )
             track = self._track_at(track_index)
-            self.transactions.record(
-                target_stable_id=track.stable_id,
-                target_locator_at_apply=TargetLocator(
-                    track_index=track.index, clip_index=clip_index
-                ),
-                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
-                target_name_at_apply=track.name,
-                operation="load_sample",
-                before=before,
-                after={"sample_uri": sample_uri},
-                expected_after=expected_after,
-                inverse_operation="delete_clip",
-                inverse_params={},
-                command_id=command_id,
-                expected_revision=before_state.revision,
-            )
+            if is_midi:
+                # sample landed in a Simpler device, not a clip slot
+                device_index = len(track.devices) - 1
+                self.transactions.record(
+                    target_stable_id=track.stable_id,
+                    target_locator_at_apply=TargetLocator(
+                        track_index=track.index, device_index=device_index
+                    ),
+                    target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    target_name_at_apply=track.name,
+                    operation="load_sample",
+                    before=before,
+                    after={"sample_uri": sample_uri, "device_index": device_index},
+                    expected_after=expected_after,
+                    inverse_operation="delete_device",
+                    inverse_params={},
+                    command_id=command_id,
+                    expected_revision=before_state.revision,
+                )
+            else:
+                self.transactions.record(
+                    target_stable_id=track.stable_id,
+                    target_locator_at_apply=TargetLocator(
+                        track_index=track.index, clip_index=clip_index
+                    ),
+                    target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    target_name_at_apply=track.name,
+                    operation="load_sample",
+                    before=before,
+                    after={"sample_uri": sample_uri},
+                    expected_after=expected_after,
+                    inverse_operation="delete_clip",
+                    inverse_params={},
+                    command_id=command_id,
+                    expected_revision=before_state.revision,
+                )
             return result
 
     def create_pattern(

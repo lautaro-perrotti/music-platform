@@ -1502,6 +1502,35 @@ def execute_track_build_plan(
             step["bus"] = params.routing_type
             report["MUSICAL_WRITE_COUNT"]["forward"] += 1
 
+        elif action.action_type is ActionType.SET_DEVICE_ROUTING:
+            params = action.params
+            track_name = action.target.ref.get("name", "") if isinstance(action.target.ref, dict) else ""
+            track_index = local.get(track_name)
+            if track_index is None:
+                step["status"] = "FAILED"
+                step["error"] = f"track {track_name!r} not resolvable"
+                report["per_action"].append(step)
+                tools.transactions.abort(step["error"])
+                report["status"] = "FAILED"
+                report["error"] = step["error"]
+                return report
+            try:
+                tools.set_device_input_routing(
+                    track_index, params.device_index, params.routing_type, params.routing_channel
+                )
+            except Exception as exc:  # noqa: BLE001
+                step["status"] = "FAILED"
+                step["error"] = str(exc)
+                report["per_action"].append(step)
+                tools.transactions.abort(str(exc))
+                report["status"] = "FAILED"
+                report["error"] = f"SET_DEVICE_ROUTING {track_name} dev[{params.device_index}]: {exc}"
+                return report
+            step["status"] = "OK"
+            step["track_name"] = track_name
+            step["sidechain_source"] = params.routing_channel
+            report["MUSICAL_WRITE_COUNT"]["forward"] += 1
+
         else:
             step["status"] = "UNSUPPORTED"
             step["error"] = f"{action.action_type.value} not supported in multi-action yet"

@@ -35,6 +35,7 @@ class ActionType(StrEnum):
     CREATE_PATTERN = "CREATE_PATTERN"
     SET_TRACK_MUTE = "SET_TRACK_MUTE"
     SET_TRACK_ROUTING = "SET_TRACK_ROUTING"
+    SET_DEVICE_ROUTING = "SET_DEVICE_ROUTING"
 
 
 class VolumeOperation(StrEnum):
@@ -183,6 +184,13 @@ class SetTrackRoutingActionParams(BaseModel):
     routing_channel: str = ""
 
 
+class SetDeviceRoutingActionParams(BaseModel):
+    kind: Literal["set_device_routing"] = "set_device_routing"
+    device_index: int
+    routing_type: str = "Track"
+    routing_channel: str = ""
+
+
 ActionParams = Annotated[
     Union[
         VolumeActionParams,
@@ -194,6 +202,7 @@ ActionParams = Annotated[
         PatternActionParams,
         SetTrackMuteActionParams,
         SetTrackRoutingActionParams,
+        SetDeviceRoutingActionParams,
     ],
     Field(discriminator="kind"),
 ]

@@ -240,6 +240,23 @@ class MockAbletonAdapter(DawAdapter):
             {"output_type": routing_type, "output_channel": routing_channel},
         )
 
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        self._before_write("set_device_input_routing")
+        track = self._track(track_index)
+        devices = track.setdefault("devices", [])
+        if device_index < 0 or device_index >= len(devices):
+            raise DawError("Device index out of range")
+        dev = devices[device_index]
+        routing = dev.setdefault("routing", {})
+        routing["input_type"] = routing_type
+        routing["input_channel"] = routing_channel
+        return self._after_write(
+            "set_device_input_routing",
+            {"index": track_index, "device_index": device_index, "routing": routing},
+        )
+
     def get_session_path(self) -> dict[str, Any]:
         return {"path": self.session_path, "name": self.session_name}
 
@@ -358,8 +375,28 @@ class MockAbletonAdapter(DawAdapter):
         self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]:
         # SAMPLE_SWAP primitive. Loads a sample into a clip slot (audio clip).
+        # On a MIDI track, a sample becomes a Simpler device (not an audio clip).
         self._before_write("load_browser_item")
         track = self._track(track_index)
+        if track.get("is_midi"):
+            device = {
+                "name": "Simpler",
+                "class_name": "OriginalSimpler",
+                "enabled": True,
+                "parameters": [],
+                "sample_uri": item_uri,
+            }
+            track.setdefault("devices", []).append(device)
+            device_index = len(track["devices"]) - 1
+            return self._after_write(
+                "load_browser_item",
+                {
+                    "track_index": track_index,
+                    "device_index": device_index,
+                    "item_uri": item_uri,
+                    "simpler": True,
+                },
+            )
         if clip_index is None:
             clip_index = next(
                 (i for i, c in enumerate(track["clips"]) if c is None), 0

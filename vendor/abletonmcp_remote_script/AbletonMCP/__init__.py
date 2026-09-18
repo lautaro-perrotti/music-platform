@@ -635,7 +635,7 @@ class AbletonMCP(ControlSurface):
                                  "start_recording", "stop_recording", "toggle_session_record",
                                  "toggle_arrangement_record", "set_overdub", "capture_midi",
                                  "set_arrangement_loop", "jump_to_time", "create_locator", "delete_locator",
-                                 "set_track_input_routing", "set_track_output_routing",
+                                 "set_track_input_routing", "set_track_output_routing", "set_device_input_routing",
                                  "set_metronome",
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
                                  "generate_drum_pattern", "generate_bassline",
@@ -1012,6 +1012,12 @@ class AbletonMCP(ControlSurface):
                             routing_type = params.get("routing_type", "")
                             routing_channel = params.get("routing_channel", "")
                             result = self._set_track_output_routing(track_index, routing_type, routing_channel)
+                        elif command_type == "set_device_input_routing":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            routing_type = params.get("routing_type", "")
+                            routing_channel = params.get("routing_channel", "")
+                            result = self._set_device_input_routing(track_index, device_index, routing_type, routing_channel)
                         # Metronome control
                         elif command_type == "set_metronome":
                             enabled = params.get("enabled", True)
@@ -3834,6 +3840,37 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting available inputs: " + str(e))
+            raise
+
+    def _set_device_input_routing(self, track_index, device_index, routing_type, routing_channel):
+        """Set a device's input routing (e.g. Compressor sidechain Audio-From)."""
+        try:
+            track = self._song.tracks[track_index]
+            device = track.devices[device_index]
+            matched_type = self._match_routing(
+                getattr(device, "available_input_routing_types", []), routing_type
+            )
+            if matched_type is not None:
+                device.input_routing_type = matched_type
+            matched_channel = None
+            if routing_channel:
+                matched_channel = self._match_routing(
+                    getattr(device, "available_input_routing_channels", []), routing_channel
+                )
+                if matched_channel is not None:
+                    device.input_routing_channel = matched_channel
+            def _dn(v):
+                return str(v.display_name) if hasattr(v, "display_name") else str(v)
+            return {
+                "track_index": track_index,
+                "device_index": device_index,
+                "input_routing_type": _dn(device.input_routing_type),
+                "input_routing_channel": _dn(device.input_routing_channel),
+                "type_matched": matched_type is not None,
+                "channel_matched": matched_channel is not None if routing_channel else None,
+            }
+        except Exception as e:
+            self.log_message("Error setting device input routing: " + str(e))
             raise
 
     def _get_available_outputs(self, track_index):

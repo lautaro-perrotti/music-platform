@@ -695,6 +695,20 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        return self._command(
+            "set_device_input_routing",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "routing_type": routing_type,
+                "routing_channel": routing_channel,
+            },
+            side_effect=True,
+        )
+
     def set_track_monitoring(self, track_index: int, monitoring: str) -> dict[str, Any]:
         return self._command(
             "set_track_monitoring",

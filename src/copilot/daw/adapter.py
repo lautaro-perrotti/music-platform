@@ -49,6 +49,11 @@ class DawAdapter(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     def create_midi_clip(
         self, track_index: int, clip_index: int, length_beats: float
     ) -> dict[str, Any]: ...
