@@ -34,6 +34,17 @@ MASTER_CHAIN: list[str] = ["EQ Eight", "Glue Compressor", "Saturator", "Limiter"
 
 MASTER_LIMITER_CEILING = -0.3  # dB
 
+# Ableton volume.value is LINEAR 0-1 (0.85 = 0 dB unity, 1.0 = +6 dB),
+# NOT dB. Negative dB values get clamped to 0.0 = silence.
+UNITY_LINEAR = 0.85
+
+
+def _db_to_linear(db: float) -> float:
+    """Convert a dB level to Ableton's linear volume.value (0-1)."""
+    return max(0.0, min(1.0, UNITY_LINEAR * (10 ** (db / 20))))
+
+
+
 # Candidate names (EN + ES) for the limiter ceiling parameter.
 _CEILING_CANDIDATES = ("ceiling", "techo", "output", "salida", "peak", "out")
 
@@ -51,7 +62,10 @@ def _set_master_limiter(daw, report: dict[str, Any]) -> None:
         for p in params.get("parameters") or []:
             pn = (p.get("name") or "").lower()
             if any(c in pn for c in _CEILING_CANDIDATES):
-                daw.set_device_parameter(-1, di, int(p["index"]), MASTER_LIMITER_CEILING)
+                # Ceiling is normalized 0-1 (0 = -36 dB, 1 = 0 dB). Map the dB
+                # ceiling to the normalized value so we don't clamp to silence.
+                value = max(0.0, min(1.0, 1.0 + MASTER_LIMITER_CEILING / 36.0))
+                daw.set_device_parameter(-1, di, int(p["index"]), value)
                 report["master_tweaks"] += 1
                 return
 
@@ -72,7 +86,7 @@ def apply_mix(daw, *, session) -> dict[str, Any]:
         if t is None:
             continue
         try:
-            daw.set_mixer_volume(int(t.index), vol)
+            daw.set_mixer_volume(int(t.index), _db_to_linear(vol))
             report["volumes"] += 1
         except Exception as exc:  # noqa: BLE001
             report["errors"].append(f"volume {name}: {exc}")
