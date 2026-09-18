@@ -2992,7 +2992,20 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} · LEAVE (track armado)")
     else:
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
-    return 0 if report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
+    ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
+    # Post-build structured critique (the critic in the producer operating system).
+    if ok and leave:
+        from copilot.musicplan.critique import critique_track
+
+        after = daw.snapshot()
+        critique = critique_track(plan=plan, session=after)
+        if critique is not None:
+            print(f"\nCRÍTICA: {critique.verdict.upper()}")
+            for i in critique.top_3_issues:
+                print(f"  {i.priority}. [{i.area}] {i.issue} → {i.minimal_fix}")
+            if critique.reasoning:
+                print(f"  ({critique.reasoning})")
+    return 0 if ok else 2
 
 
 if __name__ == "__main__":
