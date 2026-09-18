@@ -76,8 +76,7 @@ def test_build_track_state_summary(tmp_path):
     assert "Shaker" in summary  # groove-MIDI percussion
     assert "Sidechain" in summary
     assert "Routing (element -> bus)" in summary
-    assert "Kick->DRUMS" in summary
-    assert "Bass->BASS BUS" in summary
+    assert "direct to Main" in summary  # no buses: every element goes direct to Main
     assert "chain[Bass]" in summary and "Compressor" in summary
 
 

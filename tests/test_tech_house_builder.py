@@ -66,18 +66,17 @@ def test_build_tech_house_plan():
     _, session = _session()
     plan = build_tech_house_plan(index=_synthetic_index(), session=session)
     # 16 elements x (CREATE_TRACK + SAMPLE_LOAD) + 3 MIDI groove patterns + mixing + sidechain + groups
-    assert len(plan.actions) == 109
+    assert len(plan.actions) == 75
     kinds = [a.action_type.value for a in plan.actions]
-    assert kinds.count("CREATE_TRACK") == 21
+    assert kinds.count("CREATE_TRACK") == 16
     assert kinds.count("SAMPLE_LOAD") == 16
-    assert kinds.count("DEVICE_LOAD") == 52
-    assert kinds.count("SET_TRACK_ROUTING") == 16
+    assert kinds.count("DEVICE_LOAD") == 39
+    assert kinds.count("SET_TRACK_ROUTING") == 0
     assert kinds.count("CREATE_PATTERN") == 3
     assert kinds.count("SET_DEVICE_ROUTING") == 1
     names = [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"]
     assert names == ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
-                     "Perc Loop", "Bass", "Vocal", "Stab", "Guitar", "Sax", "FX", "Impact", "Downlifter", "Texture",
-                     "DRUMS", "BASS BUS", "SYNTHS", "FX BUS", "VOCALS"]
+                     "Perc Loop", "Bass", "Vocal", "Stab", "Guitar", "Sax", "FX", "Impact", "Downlifter", "Texture"]
     # Bass gets the sidechain/saturation chain: EQ Eight + Compressor + Saturator
     bass_devices = [a.params.device_name for a in plan.actions
                     if a.action_type.value == "DEVICE_LOAD" and a.target.ref.get("name") == "Bass"]
@@ -100,8 +99,8 @@ def test_execute_tech_house_plan_full_loop(tmp_path):
 
     assert report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE", report
     assert report["EXECUTED"] is True
-    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 109
-    assert report["after_track_count"] == 21
+    assert report["MUSICAL_WRITE_COUNT"]["forward"] == 75
+    assert report["after_track_count"] == 16
     assert report["after_clip_count"] == 16
     # rollback reversed the whole plan -> empty set restored
     assert report["restored_track_count"] == 0

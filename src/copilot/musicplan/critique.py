@@ -90,7 +90,11 @@ def build_track_state_summary(*, plan: MusicPlan, session: SessionState) -> str:
     lines.append(f"MIDI groove percussion (Simpler + swing pattern): {', '.join(midi_percussion)}")
     lines.append(f"Muted in final section (DROP): {', '.join(sorted(muted)) or 'none'}")
     lines.append(f"Active in final section: {', '.join(active)}")
-    lines.append("Routing (element -> bus): " + "; ".join(f"{k}->{v}" for k, v in sorted(routing.items())))
+    lines.append(
+        "Routing (element -> bus): direct to Main (no buses)"
+        if not routing
+        else "Routing (element -> bus): " + "; ".join(f"{k}->{v}" for k, v in sorted(routing.items()))
+    )
     lines.append("Sidechain: " + ("; ".join(sidechain) if sidechain else "none"))
     for e in elements:
         devs = chains.get(e, [])
