@@ -2542,7 +2542,7 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
     index_path = evidence / "sample_library_index.json"
 
     if not argv:
-        print("uso: sample-library add|index|status|search")
+        print("uso: sample-library add|index|status|search|embed")
         return 2
 
     sub = argv[0]
@@ -2613,6 +2613,25 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
                 for h in hits
             ],
         }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "embed":
+        provider_name = argv[1] if len(argv) >= 2 else None
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.embeddings import EmbeddingProviderUnavailable, get_embedding_provider
+        from copilot.sample_library.library_v1 import compute_embeddings, save_index
+
+        try:
+            provider = get_embedding_provider(provider_name)
+        except (EmbeddingProviderUnavailable, ValueError) as exc:
+            print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False))
+            return 2
+        counts = compute_embeddings(idx, provider)
+        save_index(idx, index_path)
+        print(json.dumps({"status": "OK", **counts}, ensure_ascii=False, indent=2))
         return 0
 
     print(f"subcommand desconocido: {sub}")

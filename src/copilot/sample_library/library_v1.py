@@ -21,6 +21,7 @@ from copilot.sample_library.schemas import (
     AssetStatus,
     AudioDescriptors,
     BpmEstimate,
+    EmbeddingRef,
     LibraryIndex,
     PitchEstimate,
     SampleAsset,
@@ -476,3 +477,35 @@ def build_sample_set_context(
         ctx.roles[role.value] = role_list
         ctx.candidates.extend(role_list)
     return ctx
+
+
+def compute_embeddings(index: LibraryIndex, provider: Any = None) -> dict[str, Any]:
+    """Compute + store embedding refs for INDEXED assets. Returns coverage."""
+    from copilot.sample_library.embeddings import EmbeddingProvider, get_embedding_provider
+
+    prov = provider or get_embedding_provider()
+    done = 0
+    skipped = 0
+    for asset in index.assets.values():
+        if asset.status != AssetStatus.INDEXED:
+            skipped += 1
+            continue
+        try:
+            emb = prov.embed_digest(asset.sha256) if not prov.is_semantic else prov.embed_audio(Path(asset.path))
+        except Exception:
+            asset.embedding = None
+            asset.status = AssetStatus.EMBEDDING_FAILED
+            skipped += 1
+            continue
+        asset.embedding = EmbeddingRef(
+            provider=emb.provider, model=emb.model, version=emb.version, reference=asset.sha256
+        )
+        done += 1
+    return {
+        "embedded": done,
+        "skipped": skipped,
+        "provider": prov.name,
+        "model": prov.model,
+        "version": prov.version,
+        "semantic": prov.is_semantic,
+    }
