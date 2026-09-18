@@ -2997,7 +2997,10 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     if ok and leave:
         try:
             saved = daw.save_session()
-            print(f"\nGUARDADO: {saved.get('path') or 'Sin título'}")
+            if saved.get("saved"):
+                print(f"\nGUARDADO: {saved.get('path') or 'Sin título'}")
+            else:
+                print("\nGUARDADO: el LOM de Ableton no expone save — guardá con Cmd+S en Live")
         except Exception as exc:  # noqa: BLE001
             print(f"\nGUARDADO: error ({exc})")
 
