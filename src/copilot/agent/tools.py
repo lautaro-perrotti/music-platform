@@ -260,7 +260,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("set_mixer_volume")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before_volume = track.mixer.volume
             before = {"volume": before_volume}
             expected_after = {"volume": volume}
@@ -300,7 +300,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("set_track_mute")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before_mute = bool(track.mixer.mute)
             before = {"mute": before_mute}
             expected_after = {"mute": bool(mute)}
@@ -342,7 +342,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("set_track_output_routing")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before = {"output_type": track.routing.output_type, "output_channel": track.routing.output_channel}
             expected_after = {"output_type": routing_type, "output_channel": routing_channel}
             self.transactions.plan_write(
@@ -383,7 +383,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("set_device_input_routing")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before = {"input_type": "No Input", "input_channel": ""}
             expected_after = {"input_type": routing_type, "input_channel": routing_channel}
             self.transactions.plan_write(
@@ -487,7 +487,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("load_instrument_or_effect")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before = {"device_count": len(track.devices)}
             expected_after = {"device_count": len(track.devices) + 1}
             self.transactions.plan_write(
@@ -536,7 +536,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("load_browser_item")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before = {"sample": previous_item_uri or ""}
             expected_after = {"sample": item_uri}
             self.transactions.plan_write(
@@ -581,7 +581,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("load_sample")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             is_midi = track.role == "midi"
             before = {"clip_exists": False, "clip_index": clip_index}
             expected_after = {"clip_exists": True, "sample_uri": sample_uri}
@@ -649,7 +649,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("create_pattern")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before = {"clip_exists": False, "clip_index": clip_index}
             expected_after = {"clip_exists": True, "note_count": len(notes)}
             self.transactions.plan_write(
@@ -769,6 +769,11 @@ class AgentTools:
 
     def _track_at(self, track_index: int) -> TrackState:
         state = self.get_session_snapshot()
+        if track_index < 0 or track_index >= len(state.tracks):
+            raise DawError("Track index out of range after mutation")
+        return state.tracks[track_index]
+
+    def _track_from(self, state: SessionState, track_index: int) -> TrackState:
         if track_index < 0 or track_index >= len(state.tracks):
             raise DawError("Track index out of range after mutation")
         return state.tracks[track_index]
