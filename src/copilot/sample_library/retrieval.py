@@ -73,6 +73,9 @@ class SampleRetriever:
             if bpm is not None:
                 if not asset.bpm.value or abs(asset.bpm.value - bpm) > bpm_tol:
                     continue
+            if key is not None:
+                if not asset.pitch.value or asset.pitch.value.split()[0].lower() != key.lower():
+                    continue
 
             score = 0.0
             reasons: list[str] = []

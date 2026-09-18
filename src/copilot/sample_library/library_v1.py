@@ -16,6 +16,7 @@ import numpy as np
 import soundfile as sf
 
 from copilot.audio.file_hash import sha256_file
+from copilot.sample_library.key_detection import estimate_key, is_tonal
 from copilot.human_eval.store import now_iso
 from copilot.sample_library.schemas import (
     AssetStatus,
@@ -33,6 +34,7 @@ from copilot.sample_library.schemas import (
 
 MILESTONE = "SAMPLE_LIBRARY_INTELLIGENCE_V1"
 SUPPORTED_EXTENSIONS = {".wav", ".aiff", ".aif", ".flac"}
+ANALYSIS_VERSION = "sample-library-v2"  # v2 adds key detection
 
 # --- semantic role keyword vocabulary (filename/folder priors) ---
 _ROLE_KEYWORDS: dict[SampleRole, list[str]] = {
@@ -258,6 +260,15 @@ def analyze_sample(path: Path, library_root: Path) -> SampleAsset:
 
     role, role_conf, role_ev = _classify_role(path.name, folder)
     stype, stype_conf, stype_ev = _classify_type(descriptors.duration_s, path.name)
+    pitch = PitchEstimate(value=None, confidence=None)
+    if is_tonal(role):
+        try:
+            ki = estimate_key(path)
+            if ki.get("name") and ki.get("name") != "UNKNOWN":
+                pitch = PitchEstimate(value=ki["name"], confidence=ki.get("confidence"))
+        except Exception:
+            pass
+
     bpm = BpmEstimate(value=None, confidence=None)
     fname_bpm = _extract_filename_bpm(path.name)
     if fname_bpm is not None:
@@ -287,7 +298,7 @@ def analyze_sample(path: Path, library_root: Path) -> SampleAsset:
         sample_type=stype,
         semantic_role=role,
         bpm=bpm,
-        pitch=PitchEstimate(value=None, confidence=None),
+        pitch=pitch,
         descriptors=descriptors,
         classification_confidence=confidence,
         provenance=provenance,
@@ -311,6 +322,7 @@ def save_index(index: LibraryIndex, index_path: Path) -> None:
 
 def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) -> dict[str, Any]:
     existing = load_index(index_path) or LibraryIndex()
+    force = existing.analysis_version != ANALYSIS_VERSION
     now = now_iso()
     counts: dict[str, Any] = {
         "NEW": 0, "UNCHANGED": 0, "MODIFIED": 0, "MISSING": 0, "FAILED": 0,
@@ -348,7 +360,7 @@ def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) 
         sha = known_sha_by_path.get(path_str)
         pm = prev_meta.get(path_str)
         cm = cur_meta.get(path_str) or {}
-        if sha is not None and pm and pm.get("size_bytes") == cm.get("size_bytes") and pm.get("mtime_ns") == cm.get("mtime_ns"):
+        if not force and sha is not None and pm and pm.get("size_bytes") == cm.get("size_bytes") and pm.get("mtime_ns") == cm.get("mtime_ns"):
             counts["UNCHANGED"] += 1
             prev = existing.assets.get(sha)
             if prev is not None:
@@ -386,7 +398,7 @@ def index_library(roots: list[Path], index_path: Path, *, progress: Any = None) 
 
     index = LibraryIndex(
         version=existing.version,
-        analysis_version="sample-library-v1",
+        analysis_version=ANALYSIS_VERSION,
         roots=[str(r) for r in roots],
         assets=assets,
         duplicates=duplicates,

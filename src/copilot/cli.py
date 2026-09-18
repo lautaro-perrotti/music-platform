@@ -2542,7 +2542,7 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
     index_path = evidence / "sample_library_index.json"
 
     if not argv:
-        print("uso: sample-library add|index|status|search|embed|retrieve")
+        print("uso: sample-library add|index|status|search|embed|retrieve|scan-key")
         return 2
 
     sub = argv[0]
@@ -2610,6 +2610,34 @@ def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
             "results": [
                 {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
                  "path": h.asset.relative_path, "score": h.score, "reasons": h.reasons}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "scan-key":
+        if len(argv) < 2:
+            print("uso: sample-library scan-key <KEY> [ROLE]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.retrieval import SampleRetriever
+        key = argv[1].lower()
+        role = None
+        if len(argv) >= 3:
+            try:
+                role = SampleRole(argv[2].upper())
+            except ValueError:
+                role = None
+        hits = SampleRetriever(idx).search_samples(role=role, key=key, top_k=10)
+        print(json.dumps({
+            "status": "OK", "key": key, "role": role.value if role else None,
+            "results": [
+                {"filename": h.asset.filename, "key": h.asset.pitch.value,
+                 "role": h.asset.semantic_role.value, "path": h.asset.relative_path,
+                 "confidence": h.asset.pitch.confidence}
                 for h in hits
             ],
         }, ensure_ascii=False, indent=2))
