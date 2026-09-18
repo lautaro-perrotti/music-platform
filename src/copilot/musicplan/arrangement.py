@@ -14,7 +14,7 @@ from copilot.schemas.session import MixerState, RoutingState, TrackState
 # Track names in recipe order (matches tech_house.GROOVY_LATIN_GROOVE).
 ALL_TRACKS: list[str] = [
     "Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave",
-    "Perc Loop", "Bass", "Vocal", "Stab",
+    "Perc Loop", "Bass", "Vocal", "Stab", "FX",
 ]
 
 
@@ -29,9 +29,9 @@ TECH_HOUSE_ARRANGEMENT: list[Section] = [
     Section("INTRO", 8, ["Conga", "Clave", "Shaker"]),
     Section("GROOVE", 16, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop"]),
     Section("BASS", 8, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop", "Bass"]),
-    Section("DROP", 32, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop", "Bass", "Vocal", "Stab"]),
+    Section("DROP", 32, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop", "Bass", "Vocal", "Stab", "FX"]),
     Section("BREAK", 8, ["Shaker", "Conga", "Clave", "Vocal"]),
-    Section("DROP2", 16, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop", "Bass", "Vocal", "Stab"]),
+    Section("DROP2", 16, ["Kick", "Clap", "Closed Hat", "Shaker", "Conga", "Clave", "Perc Loop", "Bass", "Vocal", "Stab", "FX"]),
     Section("OUTRO", 8, ["Conga", "Clave", "Shaker"]),
 ]
 

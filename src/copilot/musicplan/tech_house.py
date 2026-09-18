@@ -40,6 +40,7 @@ GROOVY_LATIN_GROOVE: list[tuple[SampleRole, str, SampleType, float | None, str |
     (SampleRole.BASS, "Bass", SampleType.LOOP, TECH_HOUSE_BPM, None),
     (SampleRole.VOCAL, "Vocal", SampleType.ONE_SHOT, None, None),
     (SampleRole.SYNTH, "Stab", SampleType.ONE_SHOT, None, None),
+    (SampleRole.FX, "FX", SampleType.ONE_SHOT, None, None),
 ]
 
 # Mixing + mastering chains live in copilot.musicplan.mixing (native Ableton devices).
@@ -114,6 +115,14 @@ def build_tech_house_plan(
     from copilot.musicplan.mixing import build_mixing_actions
 
     actions.extend(build_mixing_actions(project_identity=session.project_identity))
+
+    # MIX_GROUPS_V1: buses (drums/synth/fx/vocals) + routing + bus processing.
+    from copilot.musicplan.groups import build_group_actions
+
+    ga = build_group_actions(project_identity=session.project_identity)
+    actions.extend(ga["groups"])
+    actions.extend(ga["routes"])
+    actions.extend(ga["bus"])
 
     return MusicPlan(
         plan_id=plan_id,

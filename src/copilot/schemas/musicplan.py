@@ -34,6 +34,7 @@ class ActionType(StrEnum):
     SAMPLE_LOAD = "SAMPLE_LOAD"
     CREATE_PATTERN = "CREATE_PATTERN"
     SET_TRACK_MUTE = "SET_TRACK_MUTE"
+    SET_TRACK_ROUTING = "SET_TRACK_ROUTING"
 
 
 class VolumeOperation(StrEnum):
@@ -176,6 +177,12 @@ class SetTrackMuteActionParams(BaseModel):
     mute: bool
 
 
+class SetTrackRoutingActionParams(BaseModel):
+    kind: Literal["set_track_routing"] = "set_track_routing"
+    routing_type: str
+    routing_channel: str = ""
+
+
 ActionParams = Annotated[
     Union[
         VolumeActionParams,
@@ -186,6 +193,7 @@ ActionParams = Annotated[
         SampleLoadActionParams,
         PatternActionParams,
         SetTrackMuteActionParams,
+        SetTrackRoutingActionParams,
     ],
     Field(discriminator="kind"),
 ]

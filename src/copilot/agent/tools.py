@@ -336,6 +336,47 @@ class AgentTools:
             )
             return result
 
+    def set_track_output_routing(
+        self, track_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_track_output_routing")
+            command_id = self._command_id()
+            track = self._track_at(track_index)
+            before = {"output_type": track.routing.output_type, "output_channel": track.routing.output_channel}
+            expected_after = {"output_type": routing_type, "output_channel": routing_channel}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_track_output_routing",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_track_output_routing",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_track_output_routing(track_index, routing_type, routing_channel),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_track_output_routing",
+                before=before,
+                after={"output_type": routing_type, "output_channel": routing_channel},
+                expected_after=expected_after,
+                inverse_operation="set_track_output_routing",
+                inverse_params={"output_type": before["output_type"], "output_channel": before["output_channel"]},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def set_device_parameter(
         self,
         track_index: int,

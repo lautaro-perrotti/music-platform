@@ -446,6 +446,13 @@ class TransactionManager:
         if op == "set_track_mute":
             self.daw.set_track_mute(locator.track_index, bool(params["mute"]))
             return
+        if op == "set_track_output_routing":
+            self.daw.set_track_output_routing(
+                locator.track_index,
+                str(params["output_type"]),
+                str(params.get("output_channel", "")),
+            )
+            return
         if op == "set_device_parameter":
             if locator.device_index is None or locator.parameter_index is None:
                 raise RollbackConflict("Device inverse missing current locator")

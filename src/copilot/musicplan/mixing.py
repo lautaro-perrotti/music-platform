@@ -35,6 +35,7 @@ MIXING_CHAINS: dict[str, list[str]] = {
     "Bass": ["EQ Eight", "Compressor", "Saturator"],
     "Vocal": ["EQ Eight", "Compressor", "Echo"],
     "Stab": ["EQ Eight", "Auto Filter", "Echo"],
+    "FX": ["EQ Eight", "Saturator"],
 }
 
 # Master bus (simple): EQ -> Glue -> Saturator -> Limiter. Applied on a master track later.
