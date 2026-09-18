@@ -14,6 +14,8 @@ from copilot.agent.slices import (
 from copilot.agent.tools import AgentTools
 from copilot.agent.transactions import TransactionManager
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
+from copilot.daw.ableton_tcp import DEFAULT_HOST as LIVE_DEFAULT_HOST
+from copilot.daw.ableton_tcp import DEFAULT_PORT as LIVE_DEFAULT_PORT
 from copilot.daw.adapter import DawError
 from copilot.daw.detect import detect_ableton, live_block_status, write_detection
 from copilot.daw.session_ready_v1 import (
@@ -67,25 +69,29 @@ CANONICAL_COMMANDS = (
     "onboard-project",
     "project-ready",
     "project-bootstrap",
+    "analyze-project",
     "producer-analyze",
     "producer-run",
     "cross-project-validate",
     "import-project",
     "regression-v1",
     "capabilities",
+    "performance-report",
 )
 HELP_EPILOG = """
 Canonical supported envelope:
   install                  (Windows or macOS local runtime; no musical writes)
   import-project "<folder>"
+  analyze-project "<folder>"   (Producer Runtime: one call, owns the whole flow)
   doctor
   onboard-project          (alias of project-ready)
   project-bootstrap
-  producer-analyze
+  producer-analyze         (low-level debug path; prefer analyze-project)
   producer-run --mode analyze|autonomous
   cross-project-validate
   regression-v1
   capabilities
+  performance-report       (read-only latency report; no musical writes)
 
 Lab runners require --lab and are not the supported envelope.
 Live is ready only after SESSION_READY (not a listening port).
@@ -141,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             "project-ready",
             "onboard-project",
             "producer-analyze",
+            "analyze-project",
             "producer-run",
             "cross-project-validate",
             "import-project",
@@ -149,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             "doctor",
             "regression-v1",
             "capabilities",
+            "performance-report",
         ],
     )
     parser.add_argument("eval_argv", nargs="*", default=[])
@@ -204,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--region",
         default=None,
-        help="producer-analyze / producer-run: optional region id.",
+        help="analyze-project / producer-analyze / producer-run: optional region id.",
     )
     parser.add_argument(
         "--start-qn",
@@ -217,6 +225,37 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="producer-analyze / producer-run: explicit region end.",
+    )
+    parser.add_argument(
+        "--trace-performance",
+        action="store_true",
+        help=(
+            "producer-analyze / production-write: record an ExecutionSpan trace "
+            "of the run (logs/performance/) including every Ableton round trip. "
+            "Measurement only; does not change what the run does."
+        ),
+    )
+    parser.add_argument(
+        "--live-host",
+        default=LIVE_DEFAULT_HOST,
+        help="performance-report: Ableton Remote Script host.",
+    )
+    parser.add_argument(
+        "--live-port",
+        type=int,
+        default=LIVE_DEFAULT_PORT,
+        help="performance-report: Ableton Remote Script port (not the eval server --port).",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=5,
+        help="performance-report: samples per measured operation (default 5).",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="performance-report: skip live Ableton reads.",
     )
     parser.add_argument(
         "--remove-venv",
@@ -337,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
             autonomous_evaluation_v2=bool(args.autonomous_musical_evaluation_v2),
             autonomous_evaluation_v3=bool(args.autonomous_musical_evaluation_v3),
             arrangement_source_isolation=bool(args.arrangement_active_source_isolation),
+            trace_performance=bool(args.trace_performance),
             delta=float(args.delta),
             target_track=args.target_track,
             source_plan_id=str(args.source_plan),
@@ -348,6 +388,15 @@ def main(argv: list[str] | None = None) -> int:
         return _project_bootstrap(evidence, logger)
     if args.command in {"project-ready", "onboard-project"}:
         return _project_ready(evidence, logger)
+    if args.command == "analyze-project":
+        return _analyze_project(
+            evidence,
+            logger,
+            args.eval_argv,
+            region_id=args.region,
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+        )
     if args.command == "producer-analyze":
         return _producer_analyze(
             evidence,
@@ -355,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             region_id=args.region,
             start_qn=args.start_qn,
             end_qn=args.end_qn,
+            trace_performance=bool(args.trace_performance),
         )
     if args.command == "producer-run":
         return _producer_run(
@@ -391,6 +441,15 @@ def main(argv: list[str] | None = None) -> int:
         return _regression_v1(evidence, logger)
     if args.command == "capabilities":
         return _capabilities()
+    if args.command == "performance-report":
+        return _performance_report(
+            evidence,
+            logger,
+            host=args.live_host,
+            port=args.live_port,
+            repeats=int(args.repeats),
+            include_live=not args.offline,
+        )
 
     if args.command == "capture-journal-recover":
         return _capture_journal_recover(evidence, logger)
@@ -1942,6 +2001,7 @@ def _production_write(
     autonomous_evaluation_v2: bool = False,
     autonomous_evaluation_v3: bool = False,
     arrangement_source_isolation: bool = False,
+    trace_performance: bool = False,
     delta: float = -0.02,
     target_track: str | None = None,
     source_plan_id: str = "plan_82608749d172",
@@ -2002,11 +2062,24 @@ def _production_write(
         print(json.dumps(payload, indent=2))
         return 2
 
+    from contextlib import ExitStack
+
+    from copilot.perf.ableton import instrumented_rpc, rpc_breakdown
+    from copilot.perf.trace import active_trace
+
     adapter = AbletonTcpAdapter()
     adapter.connect()
+    stack = ExitStack()
+    trace = None
+    if trace_performance:
+        # Measurement only. active_trace/instrumented_rpc never alter the run.
+        trace = stack.enter_context(active_trace("production-write"))
+        stack.enter_context(instrumented_rpc(adapter))
     try:
         session = adapter.snapshot(include_notes=False)
         attach_tokens(session)
+        if trace is not None:
+            trace.set_project(session.project_identity or session.project_token)
 
         if arrangement_source_isolation:
             from copilot.audio.arrangement_active_source_isolation import (
@@ -2277,6 +2350,25 @@ def _production_write(
             adapter.disconnect()
         except Exception:
             pass
+        # Close the trace before persisting so total_s is final. A cancelled or
+        # failed run still writes its trace: that is when it is most useful.
+        stack.close()
+        if trace is not None:
+            try:
+                path = trace.persist(evidence, name="production_write_trace.json")
+                rpc = rpc_breakdown(trace)
+                logger.info(
+                    "performance trace: %s rpc=%s rpc_s=%.2f total_s=%.2f -> %s",
+                    trace.operation_id,
+                    rpc["total_calls"],
+                    rpc["total_s"],
+                    trace.total_s,
+                    path,
+                )
+                print()
+                print(trace.render(min_s=0.05))
+            except Exception as exc:  # noqa: BLE001 — never fail a run over a report
+                logger.warning("performance trace not written: %s", exc)
 
 
 def _capture_journal_recover(evidence: Path, logger) -> int:
@@ -2483,6 +2575,73 @@ def _capabilities() -> int:
     return 0
 
 
+def _performance_report(
+    evidence: Path,
+    logger,
+    *,
+    host: str,
+    port: int,
+    repeats: int,
+    include_live: bool,
+) -> int:
+    """Read-only latency report. Never writes to the session."""
+    from copilot.perf.report import performance_report, persist_report, render_summary
+
+    report = performance_report(
+        evidence,
+        host=host,
+        port=port,
+        repeats=repeats,
+        include_live=include_live,
+    )
+    path = persist_report(report, evidence)
+    logger.info("performance report written: %s", path)
+    print(render_summary(report))
+    print()
+    print(report["tree"])
+    print()
+    print(json.dumps({"artifact": str(path), "operation_id": report["operation_id"]}, indent=2))
+    blocked = (report.get("ableton") or {}).get("status") == "BLOCKED"
+    return 2 if blocked and include_live else 0
+
+
+def _analyze_project(
+    evidence: Path,
+    logger,
+    argv: list[str],
+    *,
+    region_id: str | None,
+    start_qn: float | None,
+    end_qn: float | None,
+) -> int:
+    """Thin CLI adapter. Orchestration lives in Producer Runtime."""
+    from copilot.runtime import Producer
+
+    folder = " ".join(argv).strip() or None
+    producer = Producer(evidence=evidence)
+    result = producer.analyze_project(
+        folder,
+        region_preference=region_id,
+        start_qn=start_qn,
+        end_qn=end_qn,
+    )
+    payload = result.to_dict()
+    logger.info(
+        "analyze-project status=%s commands=%s",
+        payload.get("status"),
+        payload.get("AGENT_HIGH_LEVEL_COMMAND_COUNT"),
+    )
+    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    status = str(result.status.value if hasattr(result.status, "value") else result.status)
+    if result.musical_writes != 0:
+        return 2
+    if status in {"SUCCEEDED"}:
+        return 0
+    if status == "BLOCKED":
+        return 2
+    return 2
+
+
 def _producer_analyze(
     evidence: Path,
     logger,
@@ -2490,13 +2649,24 @@ def _producer_analyze(
     region_id: str | None,
     start_qn: float | None,
     end_qn: float | None,
+    trace_performance: bool = False,
 ) -> int:
+    from contextlib import ExitStack
+
     from copilot.audio.producer_analyze_v1 import PRESERVED_STATUSES, producer_analyze
+    from copilot.perf.ableton import instrumented_rpc, rpc_breakdown
+    from copilot.perf.trace import active_trace
 
     connected = _connect_live_or_block(evidence, "producer_analyze_v1.json")
     if isinstance(connected, dict):
         print(json.dumps(connected, indent=2, default=str))
         return 2
+    stack = ExitStack()
+    trace = None
+    if trace_performance:
+        # Measurement only; neither context manager alters the analysis.
+        trace = stack.enter_context(active_trace("producer-analyze"))
+        stack.enter_context(instrumented_rpc(connected))
     try:
         report = producer_analyze(
             connected,
@@ -2507,6 +2677,21 @@ def _producer_analyze(
         )
     finally:
         connected.disconnect()
+        stack.close()
+        if trace is not None:
+            try:
+                path = trace.persist(evidence, name="producer_analyze_trace.json")
+                rpc = rpc_breakdown(trace)
+                logger.info(
+                    "performance trace: %s rpc=%s rpc_s=%.2f total_s=%.2f -> %s",
+                    trace.operation_id,
+                    rpc["total_calls"],
+                    rpc["total_s"],
+                    trace.total_s,
+                    path,
+                )
+            except Exception as exc:  # noqa: BLE001 — never fail a run over a report
+                logger.warning("performance trace not written: %s", exc)
     logger.info("producer-analyze status=%s", report.get("status"))
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     status = str(report.get("status") or "BLOCKED")

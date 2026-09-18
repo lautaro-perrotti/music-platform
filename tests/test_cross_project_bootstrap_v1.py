@@ -120,16 +120,20 @@ def test_b_partial_host_without_tap() -> None:
     assert "ENSURE_MASTER_TAP" not in ops
 
 
-def test_c_fully_bootstrapped_no_changes() -> None:
-    routing = RoutingState(
-        input_type="Lead",
-        input_channel="Post Mixer",
+def _parked() -> RoutingState:
+    return RoutingState(
+        input_type="Resampling",
+        input_channel="",
         output_type="Sends Only",
-        monitoring="In",
+        monitoring="off",
     )
+
+
+def test_c_fully_bootstrapped_no_changes() -> None:
+    routing = _parked()
     session = _session(
         [
-            _track(0, "Lead", routing=routing),
+            _track(0, "Lead"),
             _track(
                 1,
                 "Copilot Capture",
@@ -140,6 +144,7 @@ def test_c_fully_bootstrapped_no_changes() -> None:
                 2,
                 "Copilot Capture Bass",
                 devices=[DeviceState(stable_id="d2", index=0, name="Copilot Audio Tap")],
+                routing=routing,
             ),
         ]
     )
@@ -223,7 +228,7 @@ def test_original_set_refused() -> None:
     assert plan_bootstrap(discovery)["status"] == "BLOCKED"
 
 
-def test_existing_isolated_routing_is_not_retargeted() -> None:
+def test_existing_isolated_routing_is_not_parked() -> None:
     routing = RoutingState(
         input_type="LIVE22 Kick",
         input_channel="Post Mixer",
@@ -249,6 +254,35 @@ def test_existing_isolated_routing_is_not_retargeted() -> None:
                     output_type="Sends Only",
                     monitoring="In",
                 ),
+            ),
+        ]
+    )
+    inventory = [_tap("MASTER", 0), _tap("Copilot Capture", 1), _tap("Copilot Capture Bass", 2)]
+    discovery = discover_topology(
+        session=session, inventory=inventory, master_pos=_master(True)
+    )
+    plan = plan_bootstrap(discovery)
+    assert plan["status"] == "CHANGES_REQUIRED"
+    assert {row["op"] for row in plan["actions"]} == {"ENSURE_HOST_PARKED"}
+    assert all(row["op"] != "ENSURE_HOST_ROUTING" for row in plan["actions"])
+
+
+def test_canonical_parked_hosts_are_no_changes() -> None:
+    routing = _parked()
+    session = _session(
+        [
+            _track(0, "1-MIDI", role="midi"),
+            _track(
+                1,
+                "Copilot Capture",
+                devices=[DeviceState(stable_id="d1", index=0, name="Copilot Audio Tap")],
+                routing=routing,
+            ),
+            _track(
+                2,
+                "Copilot Capture Bass",
+                devices=[DeviceState(stable_id="d2", index=0, name="Copilot Audio Tap")],
+                routing=routing,
             ),
         ]
     )

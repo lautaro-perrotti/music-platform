@@ -69,6 +69,13 @@ from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
 from copilot.daw.object_ref import ResolveStatus, ref_from_track, resolve_track
 from copilot.daw.state_tokens import attach_tokens
+from copilot.perf.trace import (
+    CAT_ABLETON,
+    CAT_CPU,
+    CAT_INTRINSIC,
+    CAT_IO,
+    span,
+)
 from copilot.human_eval.store import now_iso
 from copilot.schemas.observation import SignalPoint
 from copilot.schemas.session import SessionState, TrackState
@@ -344,6 +351,42 @@ def _build_source_recorders(
     return [master, source]
 
 
+def _pass_timings(one: dict[str, Any]) -> dict[str, Any]:
+    """Compact latency view of one playback pass.
+
+    capture_parallel_pass already measures its own phases; this keeps only the
+    scalars worth persisting so the RECORDING phase can be decomposed without
+    dragging tap inventories into every artifact.
+    """
+    raw = one.get("timings") or {}
+    stop = raw.get("stop_breakdown") or {}
+    release = stop.get("staging_handle_release") or {}
+    prepare = raw.get("prepare_breakdown") or {}
+    out: dict[str, Any] = {
+        "total_s": raw.get("total_s"),
+        "region_s": raw.get("region_s"),
+        "record_s": raw.get("record_s"),
+        "pre_roll_s": raw.get("pre_roll_s"),
+        "pre_roll_qn": raw.get("pre_roll_qn"),
+        "recorder_start_s": raw.get("recorder_start_s"),
+        "recorder_stop_s": raw.get("recorder_stop_s"),
+        "stop_command_rtt_s": raw.get("stop_command_rtt_s"),
+        "wav_finalize_s": raw.get("wav_finalize_s"),
+        "restore_s": raw.get("restore_s"),
+        # The number the audit could not see: how long the writer held the WAV.
+        "wav_shared_readable_waited_s": release.get("waited_s"),
+        "wav_shared_readable_ok": release.get("ok"),
+        "wav_shared_readable_phase_s": release.get("s"),
+    }
+    out["prepare_phases_s"] = {
+        key: value.get("s") for key, value in prepare.items() if isinstance(value, dict)
+    }
+    out["stop_phases_s"] = {
+        key: value.get("s") for key, value in stop.items() if isinstance(value, dict)
+    }
+    return {key: value for key, value in out.items() if value is not None}
+
+
 def capture_source_post_mixer(
     daw: AbletonTcpAdapter,
     *,
@@ -385,8 +428,14 @@ def capture_source_post_mixer(
         ref=ref.model_dump(mode="json"),
     )
 
-    before = _snapshot_host(daw, host_index)
+    with span("capture.snapshot_host_before", category=CAT_ABLETON, host=host_index):
+        before = _snapshot_host(daw, host_index)
     routing_mutations: list[str] = []
+    # Cancellation is a BaseException, so neither the success path nor the
+    # `except Exception` path below runs on Ctrl-C. Without this sentinel the
+    # host keeps its rewritten input routing, zeroed sends and changed
+    # monitoring, and the journal never reaches a terminal state.
+    settled = False
     try:
         # Ensure host tap Device On / Rec idle before arming.
         set_tap_enabled(daw, host_index, True)
@@ -422,18 +471,28 @@ def capture_source_post_mixer(
             channel=input_channel,
             routing_claim=claim.get("claim"),
         )
-        one = capture_parallel_pass(
-            daw,
-            start_beat=start_qn,
-            end_beat=end_qn,
-            fire_tracks=[],
-            tempo=tempo,
-            session_revision=int(preflight.get("revision") or session.revision or 0),
-            pass_id=pass_id,
-            recorders=recorders,
-            transport="arrangement",
-        )
-        journal.record(FINALIZING)
+        with span(
+            "capture.playback_pass",
+            category=CAT_INTRINSIC,
+            recorders=len(recorders),
+            region_qn=float(end_qn) - float(start_qn),
+        ):
+            one = capture_parallel_pass(
+                daw,
+                start_beat=start_qn,
+                end_beat=end_qn,
+                fire_tracks=[],
+                tempo=tempo,
+                session_revision=int(preflight.get("revision") or session.revision or 0),
+                pass_id=pass_id,
+                recorders=recorders,
+                transport="arrangement",
+            )
+        # capture_parallel_pass already decomposes its own phases, including the
+        # WAV shared-readable wait. Every caller used to drop it, which is why
+        # ~16.6s per pass was unattributable. Keep it and journal it.
+        pass_timings = _pass_timings(one)
+        journal.record(FINALIZING, timings=pass_timings)
         assets = one.get("assets") or {}
         source_asset = assets.get("source")
         main_asset = assets.get("master")
@@ -451,17 +510,21 @@ def capture_source_post_mixer(
         tag = track.name.replace(" ", "_")
         src_dest = dest_root / f"aasi_v1_{region_id}_{tag}_{pass_id}.wav"
         main_dest = dest_root / f"aasi_v1_{region_id}_Main_with_{tag}_{pass_id}.wav"
-        shutil.copy2(source_wav, src_dest)
-        shutil.copy2(main_wav, main_dest)
-        src_stats = _wav_stats(src_dest)
-        main_stats = _wav_stats(main_dest)
+        with span("capture.copy_artifacts", category=CAT_IO, files=2):
+            shutil.copy2(source_wav, src_dest)
+            shutil.copy2(main_wav, main_dest)
+        with span("capture.wav_stats_and_hash", category=CAT_CPU, files=2):
+            src_stats = _wav_stats(src_dest)
+            main_stats = _wav_stats(main_dest)
         hashes = {
             "source": src_stats["audio_sha256"],
             "main": main_stats["audio_sha256"],
         }
         journal.record(VERIFIED, hashes=hashes, signal_class=src_stats["signal_class"])
 
-        restore = _restore_host_full(daw, host_index, before)
+        with span("capture.restore_host", category=CAT_ABLETON, host=host_index):
+            restore = _restore_host_full(daw, host_index, before)
+        settled = True
         if not restore.get("ok"):
             journal.record(FAILED, error="RESTORE_FAILED", restore=restore)
             return {
@@ -506,6 +569,7 @@ def capture_source_post_mixer(
                 "monitoring": before.get("monitoring"),
             },
             "restore": restore,
+            "timings": pass_timings,
             "protocol": "TapProtocol3_parallel_arrangement",
             "transport": "arrangement",
             "region": {"id": region_id, "start_qn": start_qn, "end_qn": end_qn},
@@ -517,6 +581,7 @@ def capture_source_post_mixer(
     except Exception as exc:  # noqa: BLE001
         journal.record(FAILED, error=str(exc))
         restore = _restore_host_full(daw, host_index, before)
+        settled = True
         return {
             "ok": False,
             "signal_status": "CAPTURE_FAILED",
@@ -528,6 +593,37 @@ def capture_source_post_mixer(
             "routing_mutations": routing_mutations,
             "restore": restore,
         }
+    finally:
+        if not settled:
+            # Reached only on BaseException (KeyboardInterrupt / SystemExit).
+            # Best effort, in safety order: stop the transport, restore the
+            # host, then close the journal. Each step is independent so a
+            # failure in one still lets the others run, and a second interrupt
+            # cannot leave the journal open.
+            _cancel_cleanup(daw, host_index, before, journal)
+
+
+def _cancel_cleanup(
+    daw: AbletonTcpAdapter,
+    host_index: int,
+    before: dict[str, Any],
+    journal: CaptureJournal,
+) -> None:
+    """Terminal cleanup for a cancelled capture. Never raises."""
+    for step in (
+        lambda: daw.stop_playback(),
+        lambda: _restore_host_full(daw, host_index, before),
+    ):
+        try:
+            step()
+        except BaseException:  # noqa: BLE001 — cleanup must not mask the cancel
+            pass
+    try:
+        # FAILED is already a terminal journal status, so recovery semantics
+        # are unchanged; the reason distinguishes a cancel from a real failure.
+        journal.record(FAILED, error="CANCELLED_BY_USER")
+    except BaseException:  # noqa: BLE001
+        pass
 
 
 def _ensure_idle_taps(daw: AbletonTcpAdapter, preflight: dict[str, Any]) -> None:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from copilot.audio.astra_external_reasoning_v1 import (
-    CANONICAL_PACK_PATH,
     EXPECTED_PACK_ID,
     classify_rejection,
     evidence_sufficiency_audit,
@@ -110,10 +111,25 @@ def test_no_action_scripted_still_accepted() -> None:
     assert applied["status"] == DiagnosisStatus.NO_ACTION_REQUIRED.value
 
 
+# The canonical pack must come from a committed fixture, not from
+# logs/evidence_pack_v1.json: that path is a single runtime slot which every
+# producer-analyze run overwrites, so pinning a pack_id there makes this test
+# fail whenever the product is run on a different project. See
+# fixtures/frozen/README.md.
+FROZEN_PACK_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures"
+    / "frozen"
+    / "evidence_pack_v1_astra_external_reasoning.json"
+)
+
+
 def test_persisted_pack_hash_and_scripted_ie(tmp_path: Path) -> None:
-    if not CANONICAL_PACK_PATH.is_file():
-        return
-    pack = load_persisted_pack()
+    if not FROZEN_PACK_PATH.is_file():
+        pytest.skip(
+            "frozen canonical pack absent; re-seed per fixtures/frozen/README.md"
+        )
+    pack = load_persisted_pack(FROZEN_PACK_PATH)
     assert pack.pack_id == EXPECTED_PACK_ID
     reconstructed = reconstruct_input(pack)
     assert reconstructed["payload_sha256"] == pack_payload_hash(pack)
@@ -123,6 +139,7 @@ def test_persisted_pack_hash_and_scripted_ie(tmp_path: Path) -> None:
     first = pack.items[0].evidence_id
     report = replay_persisted_pack(
         evidence=tmp_path,
+        pack_path=FROZEN_PACK_PATH,
         provider=ScriptedProvider({pack.pack_id: _ie_output(first)}),
     )
     assert report["accepted"] is True

@@ -89,7 +89,9 @@ def classify_project(project_path: str | None, project_name: str | None = None) 
 
 
 def is_exact_infra_name(name: str) -> bool:
-    return name in KNOWN_INFRA_NAMES
+    from copilot.audio.capture_scalability_v2 import is_capture_host_name
+
+    return name in KNOWN_INFRA_NAMES or is_capture_host_name(name)
 
 
 def is_lookalike_user_track(name: str) -> bool:
@@ -132,9 +134,35 @@ def eligible_bootstrap_sources(session: SessionState) -> list[TrackState]:
     return rows[:SOURCE_BUDGET]
 
 
+def expected_host_slot(name: str) -> int | None:
+    if name in SLOT_BY_OWNER:
+        return SLOT_BY_OWNER[name]
+    from copilot.audio.capture_scalability_v2 import slot_for_host_name
+
+    return slot_for_host_name(name)
+
+
+def _host_info_from_track(track: TrackState) -> dict[str, Any]:
+    routing = getattr(track, "routing", None)
+    if routing is None:
+        return {}
+    return {
+        "input_routing_type": routing.input_type,
+        "input_routing_channel": routing.input_channel,
+        "output_routing_type": routing.output_type,
+        "monitoring": routing.monitoring,
+        "sends": [
+            {"send_index": send.index, "level": send.value, "min": 0.0, "max": 1.0}
+            for send in getattr(track, "sends", []) or []
+        ],
+    }
+
+
 def _host_routing_card(info: dict[str, Any] | None, target_name: str | None) -> dict[str, Any]:
+    from copilot.audio.capture_host_baseline_v1 import evaluate_parked
+
     if info is None:
-        return {"claim": "MISSING", "routed_target": None}
+        return {"claim": "MISSING", "routed_target": None, "already_correct": False}
     through_main = str(info.get("output_routing_type") or "").lower() in {
         "main",
         "master",
@@ -150,11 +178,26 @@ def _host_routing_card(info: dict[str, Any] | None, target_name: str | None) -> 
         sends=list(info.get("sends") or []),
         target_name=target,
     )
-    isolated = claim.get("claim") in {"OFF_MIX_GRAPH", "OFF_DIRECT_MAIN"}
+    parked_state = {
+        "input": {
+            "input_routing_type": info.get("input_routing_type"),
+            "input_routing_channel": info.get("input_routing_channel"),
+        },
+        "output": {
+            "output_routing_type": info.get("output_routing_type"),
+            "output_routing_channel": info.get("output_routing_channel") or "",
+        },
+        "monitoring": {"monitoring": info.get("monitoring"), "value": info.get("monitoring")},
+        "sends": list(info.get("sends") or []),
+        "taps": list(info.get("taps") or []),
+        "devices": list(info.get("devices") or []),
+    }
+    parked = evaluate_parked(parked_state)
     return {
         **claim,
         "routed_target": current or None,
-        "already_correct": isolated and bool(current) and not is_exact_infra_name(current),
+        "already_correct": bool(parked.get("ok")),
+        "parked": parked,
     }
 
 
@@ -187,31 +230,26 @@ def discover_topology(
                 "device_names": [device.name for device in track.devices],
             }
         )
-    eligible = eligible_bootstrap_sources(session)
     hosts: dict[str, Any] = {}
     infos = host_infos or {}
-    for name, target in zip(INFRA_HOSTS, list(eligible) + [None] * len(INFRA_HOSTS)):
+    from copilot.audio.capture_scalability_v2 import is_capture_host_name
+
+    host_names = list(INFRA_HOSTS)
+    for track in session.tracks:
+        if is_capture_host_name(track.name) and track.name not in host_names:
+            host_names.append(track.name)
+    for name in host_names:
         track = session.track_by_name(name)
         info = infos.get(name)
-        if info is None and track is not None and hasattr(track, "routing"):
-            info = {
-                "input_routing_type": track.routing.input_type,
-                "input_routing_channel": track.routing.input_channel,
-                "output_routing_type": track.routing.output_type,
-                "monitoring": track.routing.monitoring,
-                "sends": [
-                    {"send_index": send.index, "level": send.value, "min": 0.0, "max": 1.0}
-                    for send in track.sends
-                ],
-            }
-        target_name = target.name if target is not None else None
+        if info is None and track is not None:
+            info = _host_info_from_track(track)
         hosts[name] = {
             "present": track is not None,
             "index": None if track is None else track.index,
             "name_collision": False if track is None else _user_collision_on_infra_name(track),
             "tap": tap_by_track.get(name),
-            "target_name": target_name,
-            "routing": _host_routing_card(info, target_name),
+            "target_name": None,
+            "routing": _host_routing_card(info, None),
             "lookalikes": [
                 row["display_name"] for row in sources if row["lookalike_user"]
             ],
@@ -261,28 +299,32 @@ def missing_topology(discovery: dict[str, Any]) -> list[str]:
         missing.append("Main has no Copilot Audio Tap")
     elif not main.get("is_last"):
         missing.append("Main tap is not last (MAIN_FINAL required)")
-    for name in INFRA_HOSTS:
-        host = (discovery.get("hosts") or {}).get(name) or {}
+    for name, host in (discovery.get("hosts") or {}).items():
+        required = name in INFRA_HOSTS
         if host.get("name_collision"):
             continue
         if not host.get("present"):
-            missing.append(f"capture track missing: {name}")
+            if required:
+                missing.append(f"capture track missing: {name}")
             continue
         tap = host.get("tap")
         if tap is None:
             missing.append(f"{name} has no Copilot Audio Tap")
             continue
-        expected_slot = SLOT_BY_OWNER[name]
+        expected_slot = expected_host_slot(name)
         slot = tap.get("slot")
-        if slot is None or int(slot) != expected_slot:
+        if expected_slot is not None and (slot is None or int(slot) != expected_slot):
             missing.append(f"{name} Slot={slot} expected {expected_slot}")
         if not _tap_rec_off(tap):
             missing.append(f"{name} Rec={tap.get('rec')} expected 0")
         protocol = tap.get("tap_protocol")
-        if protocol is not None and int(protocol) != EXPECTED_TAP_PROTOCOL:
+        if protocol is not None and int(protocol) not in {EXPECTED_TAP_PROTOCOL, 4}:
             missing.append(
-                f"{name} TapProtocol={protocol} expected {EXPECTED_TAP_PROTOCOL}"
+                f"{name} TapProtocol={protocol} expected {EXPECTED_TAP_PROTOCOL} or 4"
             )
+        routing = host.get("routing") or {}
+        if not routing.get("already_correct"):
+            missing.append(f"{name} is not in canonical parked state")
     if discovery.get("slot_collisions"):
         missing.append(f"duplicate tap slots: {discovery['slot_collisions']}")
     return missing
@@ -324,25 +366,32 @@ def plan_bootstrap(discovery: dict[str, Any]) -> dict[str, Any]:
         tap = host.get("tap")
         if tap is None:
             actions.append({"op": "ENSURE_HOST_TAP", "name": name})
-        expected_slot = SLOT_BY_OWNER[name]
-        if tap is None or tap.get("slot") is None or int(tap.get("slot")) != expected_slot:
+        expected_slot = expected_host_slot(name)
+        if tap is None or tap.get("slot") is None or (
+            expected_slot is not None and int(tap.get("slot")) != expected_slot
+        ):
             actions.append({"op": "ENSURE_SLOT", "name": name, "slot": expected_slot})
         elif not _tap_rec_off(tap):
             actions.append({"op": "IDLE_TAP", "name": name})
-    if not (discovery.get("project") or {}).get("is_development_working_copy"):
-        eligible = list(discovery.get("eligible_source_names") or [])
-        for name, target in zip(INFRA_HOSTS, eligible):
-            host = hosts.get(name) or {}
-            routing = host.get("routing") or {}
-            if routing.get("already_correct"):
-                continue
-            actions.append(
-                {
-                    "op": "ENSURE_HOST_ROUTING",
-                    "name": name,
-                    "target_name": target,
-                }
-            )
+    for name, host in hosts.items():
+        if host.get("name_collision") or not host.get("present"):
+            continue
+        if name not in INFRA_HOSTS:
+            tap = host.get("tap")
+            if tap is None:
+                actions.append({"op": "ENSURE_HOST_TAP", "name": name})
+            expected_slot = expected_host_slot(name)
+            if tap is None or (
+                expected_slot is not None
+                and (tap.get("slot") is None or int(tap.get("slot")) != expected_slot)
+            ):
+                actions.append({"op": "ENSURE_SLOT", "name": name, "slot": expected_slot})
+            elif not _tap_rec_off(tap):
+                actions.append({"op": "IDLE_TAP", "name": name})
+        routing = host.get("routing") or {}
+        if routing.get("already_correct"):
+            continue
+        actions.append({"op": "ENSURE_HOST_PARKED", "name": name})
     if not actions:
         return {"status": "NO_CHANGES_REQUIRED", "actions": []}
     return {"status": "CHANGES_REQUIRED", "actions": actions}
@@ -352,7 +401,13 @@ def _live_host_infos(
     daw: AbletonTcpAdapter, session: SessionState
 ) -> dict[str, dict[str, Any]]:
     infos: dict[str, dict[str, Any]] = {}
-    for name in INFRA_HOSTS:
+    from copilot.audio.capture_scalability_v2 import is_capture_host_name
+
+    names = list(INFRA_HOSTS)
+    for track in session.tracks:
+        if is_capture_host_name(track.name) and track.name not in names:
+            names.append(track.name)
+    for name in names:
         track = session.track_by_name(name)
         if track is None:
             continue
@@ -412,6 +467,33 @@ def _apply_action(
         set_tap_recording(daw, False, index, broadcast_udp=False)
         mutations.append(f"idle:{action['name']}")
         return {"rec": 0}
+    if op == "ENSURE_HOST_PARKED":
+        from copilot.audio.capture_host_baseline_v1 import (
+            normalize_and_verify_host,
+            record_host_repair,
+        )
+
+        session = daw.snapshot(include_notes=False)
+        index = _host_index(session, str(action["name"]))
+        if index is None:
+            raise AudioCaptureError(
+                "HOST_PROVISION_FAILED", f"{action['name']} missing for parked init"
+            )
+        parked = normalize_and_verify_host(
+            daw, index, expected_slot=expected_host_slot(str(action["name"]))
+        )
+        if not parked.get("verified"):
+            raise AudioCaptureError(
+                "HOST_PROVISION_FAILED",
+                f"{action['name']} parked verify failed: "
+                f"{(parked.get('verdict') or {}).get('mismatches')}",
+            )
+        mutations.append(f"park:{action['name']}")
+        record_host_repair(
+            str(action["name"]),
+            {"verified": True, "mutations": (parked.get("applied") or {}).get("mutations") or []},
+        )
+        return parked
     if op == "ENSURE_HOST_ROUTING":
         session = daw.snapshot(include_notes=False)
         index = _host_index(session, str(action["name"]))
@@ -442,7 +524,7 @@ def _off_mix_claims(
     daw: AbletonTcpAdapter, session: SessionState, discovery: dict[str, Any]
 ) -> dict[str, Any]:
     claims: dict[str, Any] = {}
-    for name in INFRA_HOSTS:
+    for name, host in (discovery.get("hosts") or {}).items():
         track = session.track_by_name(name)
         if track is None:
             claims[name] = {"claim": "MISSING"}

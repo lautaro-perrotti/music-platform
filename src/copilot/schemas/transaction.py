@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class TransactionStatus(StrEnum):
     PLANNED = "PLANNED"
+    PREPARED = "PREPARED"
     SENT = "SENT"
     APPLIED = "APPLIED"
     VERIFIED = "VERIFIED"
@@ -16,6 +17,9 @@ class TransactionStatus(StrEnum):
     ROLLED_BACK = "ROLLED_BACK"
     FAILED = "FAILED"
     ROLLBACK_CONFLICT = "ROLLBACK_CONFLICT"
+    PARTIAL_FAILURE = "PARTIAL_FAILURE"
+    CANCELLED = "CANCELLED"
+    SUPERSEDED = "SUPERSEDED"
 
 
 class TargetFingerprint(BaseModel):

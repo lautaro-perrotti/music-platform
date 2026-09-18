@@ -1,0 +1,139 @@
+{
+  "artifact": "performance_baseline_v1",
+  "measured_at": "2026-09-17",
+  "environment": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "python": "3.12.10",
+    "ableton": "running, remote script listening on 127.0.0.1:9877",
+    "project_tracks": 32,
+    "note": "Measured on 2026-09-17 against the live session on 127.0.0.1:9877 (Ableton Live running, 32 tracks, vendored AbletonMCP remote script)."
+  },
+  "regression": {
+    "baseline_before_changes": {
+      "collected": 432,
+      "passed": 429,
+      "failed": 3
+    },
+    "after_instrumentation": {
+      "collected": 452,
+      "passed": 449,
+      "failed": 3
+    },
+    "failures": [
+      {
+        "test": "tests/test_detect_and_cli.py::test_cli_probe_never_uses_mock",
+        "cause": "PRE-EXISTING / ENVIRONMENTAL. Asserts exit code 2 (blocked); Ableton is actually running on this machine so the probe legitimately succeeds and returns 0."
+      },
+      {
+        "test": "tests/test_detect_and_cli.py::test_cli_slice1_never_falls_back_to_mock",
+        "cause": "PRE-EXISTING / ENVIRONMENTAL. Same reason."
+      },
+      {
+        "test": "tests/test_live_probe.py::test_real_ableton_is_blocked_without_live",
+        "cause": "PRE-EXISTING TEST BUG. When Live IS reachable the test calls adapter.disconnect() and then adapter.health(), which raises 'Not connected'. The test cannot pass in a Live-present environment."
+      }
+    ],
+    "conclusion": "No regression introduced. The same three tests fail before and after; all three depend on Ableton being absent."
+  },
+  "measurements": {
+    "ableton_rpc": {
+      "health_check_no_op": {
+        "n": 60,
+        "min_s": 0.2133,
+        "p50_s": 0.4262,
+        "mean_s": 0.3681,
+        "p95_s": 0.4272,
+        "max_s": 0.4278
+      },
+      "quantisation": {
+        "quantum_s": 0.1067,
+        "buckets_observed": [
+          0.2133,
+          0.3196,
+          0.4265,
+          0.5335
+        ],
+        "samples_between_buckets": 0,
+        "meaning": "Live main-thread scheduler tick. Payload size is irrelevant; RPC count is everything."
+      },
+      "connect_plus_handshake": {
+        "n": 7,
+        "min_s": 0.4264,
+        "p50_s": 0.5338,
+        "max_s": 0.6544
+      },
+      "snapshot_no_notes": {
+        "p50_s": 0.654,
+        "rpc": 1,
+        "source": "topology"
+      },
+      "snapshot_with_notes": {
+        "p50_s": 0.962,
+        "rpc": 2
+      },
+      "get_capture_topology": {
+        "p50_s": 0.632,
+        "result_bytes": 174365,
+        "tracks": 32
+      },
+      "get_tracks_info": {
+        "p50_s": 0.728,
+        "result_bytes": 172704
+      },
+      "get_session_info": {
+        "p50_s": 0.427,
+        "result_bytes": 196
+      },
+      "payload_vs_latency": "174KB costs 0.63s; 196 bytes costs 0.43s. Bytes are not the cost."
+    },
+    "local_cpu_and_io": {
+      "sample": "5,376,088 byte / 15.24s stereo 44.1kHz WAV",
+      "sha256_whole_file_s": 0.0048,
+      "soundfile_read_full_s": 0.0046,
+      "soundfile_info_s": 0.00015,
+      "fullmix_observation_s": 0.0223,
+      "capture_corpus": {
+        "files": 22,
+        "bytes": 118273936,
+        "hash_all_s_estimate": 0.11
+      },
+      "conclusion": "Filesystem, hashing and DSP are NOT bottlenecks. Caching DSP output would save ~22ms against a 15s capture. Do not optimise here."
+    },
+    "model_pipeline": {
+      "samples": 85,
+      "source": "recorded reasoning audits in logs/*.json",
+      "model_s": {
+        "min": 25.9,
+        "p50": 50.3,
+        "p95": 112.1,
+        "max": 163.5,
+        "mean": 57.8
+      },
+      "prompt_build_s": {
+        "p50": 0.00029,
+        "max": 0.0104
+      },
+      "validation_s": {
+        "p50": 0.00107,
+        "max": 0.025
+      },
+      "local_share_pct": 0.0027,
+      "config": "COPILOT_REASONING_MODEL=gpt-6-astra, COPILOT_REASONING_EFFORT=high",
+      "conclusion": "Astra is 100% provider-bound. The only levers are fewer calls, lower reasoning effort, and overlapping it with other work."
+    },
+    "capture": {
+      "region": "AUTO_36_68 (32 quarter notes)",
+      "region_duration_s": 15.238,
+      "recorded_passes": 11,
+      "files": 22,
+      "classification": "INTRINSIC_AUDIO_DURATION for the playback; everything else is overhead."
+    }
+  },
+  "not_measured": [
+    "producer-analyze end to end (mutates the live session; not run without authorisation)",
+    "project-ready end to end (bootstrap_project(apply=True) can create capture host tracks)",
+    "import-project / project launch (kills and relaunches Ableton)",
+    "a live Astra call (spends provider budget; 85 recorded samples used instead)"
+  ],
+  "live_report_artifact": "op_3d1390f60d39"
+}

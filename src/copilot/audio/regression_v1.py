@@ -44,6 +44,9 @@ SUITE = (
     "tests/test_external_causal_context_v1.py",
     "tests/test_second_machine_installer_v1.py",
     "tests/test_macos_detect_v1.py",
+    "tests/test_source_capture_batch_v1.py",
+    "tests/test_performance_trace_v1.py",
+    "tests/test_producer_runtime_v1.py",
     # test_detect_and_cli.py omitted: Live-environment sensitive (hits Ableton).
 )
 

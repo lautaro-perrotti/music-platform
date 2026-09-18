@@ -30,6 +30,9 @@ class MockRemoteScriptServer:
         self.duplicate_response = False
         self.slow_seconds = 0.0
         self.disconnect_after_recv = False
+        self.advertise_compound = False
+        self.fail_mutation_step: str | None = None
+        self.disconnect_during_mutation = False
 
     def start(self) -> tuple[str, int]:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -116,7 +119,22 @@ class MockRemoteScriptServer:
 
     def _dispatch(self, command_type: str, params: dict[str, Any]) -> dict[str, Any]:
         if command_type == "protocol_hello":
-            return {**handshake_payload(), "backend": "mock"}
+            payload = {**handshake_payload(), "backend": "mock"}
+            if self.advertise_compound:
+                caps = set(payload.get("capabilities") or [])
+                caps.add("compound.temporary_mutation")
+                payload["capabilities"] = sorted(caps)
+                payload["compound_mutation_version"] = "1"
+                payload["compound_supported_operations"] = [
+                    "SET_TRACK_MONITORING",
+                    "SET_TRACK_INPUT_ROUTING",
+                    "SET_TRACK_OUTPUT_ROUTING",
+                    "SET_DEVICE_PARAMETER",
+                    "SET_SEND_LEVEL",
+                ]
+            return payload
+        if command_type == "execute_mutation_batch":
+            return self._execute_mutation_batch(params)
         if command_type == "health_check":
             return self.backend.health()
         if command_type == "get_session_info":
@@ -214,6 +232,20 @@ class MockRemoteScriptServer:
                     for index in indices
                 ],
                 "track_count": len(snap.tracks),
+            }
+        if command_type in {"get_capture_hosts_state", "get_tracks_state"}:
+            return self._dispatch("get_tracks_info", params)
+        if command_type == "get_tracks_sends":
+            payload = self._dispatch("get_tracks_info", params)
+            return {
+                "tracks": [
+                    {
+                        "track_index": int(item["index"]),
+                        "sends": list(item.get("sends") or []),
+                    }
+                    for item in payload.get("tracks") or []
+                    if "index" in item
+                ]
             }
         if command_type == "get_capture_topology":
             return {
@@ -330,3 +362,52 @@ class MockRemoteScriptServer:
                 ],
             }
         raise ValueError(f"Unsupported command: {command_type}")
+
+    def _execute_mutation_batch(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.disconnect_during_mutation:
+            raise ConnectionError("disconnect during mutation batch")
+        results: list[dict[str, Any]] = []
+        stop = False
+        for step in params.get("steps") or []:
+            step_id = str(step.get("step_id") or "")
+            independent = bool(step.get("independent"))
+            row = {
+                "step_id": step_id,
+                "target": step.get("target_ref") or {},
+                "operation": step.get("operation"),
+                "requested_value": step.get("arguments") or {},
+                "host_id": step.get("host_id") or "",
+                "purpose": step.get("purpose") or "",
+                "observed": None,
+                "error": None,
+                "status": "NOT_ATTEMPTED",
+            }
+            if stop and not independent:
+                row["error"] = "not_attempted_after_failure"
+                results.append(row)
+                continue
+            if self.fail_mutation_step and step_id == self.fail_mutation_step:
+                row["status"] = "FAILED"
+                row["error"] = "injected_failure"
+                stop = True
+                results.append(row)
+                continue
+            row["status"] = "APPLIED"
+            row["observed"] = {"ok": True, "arguments": step.get("arguments") or {}}
+            results.append(row)
+        applied = [row for row in results if row["status"] == "APPLIED"]
+        failed = [row for row in results if row["status"] == "FAILED"]
+        if failed:
+            status = "PARTIAL_FAILURE"
+        elif applied and len(applied) == len(results):
+            status = "COMPLETE"
+        elif not results:
+            status = "COMPLETE"
+        else:
+            status = "PARTIAL_FAILURE"
+        return {
+            "batch_id": params.get("batch_id") or "",
+            "project_identity": params.get("project_identity") or "",
+            "batch_status": status,
+            "step_results": results,
+        }

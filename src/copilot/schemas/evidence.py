@@ -19,6 +19,59 @@ class EvidenceKind(StrEnum):
     LIMITATION = "LIMITATION"
     STATE_TOKEN = "STATE_TOKEN"
     FACT = "FACT"
+    OBSERVATION = "OBSERVATION"
+    RELATIONSHIP = "RELATIONSHIP"
+    INTERPRETATION = "INTERPRETATION"
+    DIAGNOSIS = "DIAGNOSIS"
+
+
+class FusionStatus(StrEnum):
+    AGREE = "AGREE"
+    PARTIALLY_AGREE = "PARTIALLY_AGREE"
+    CONTRADICT = "CONTRADICT"
+    NOT_COMPARABLE = "NOT_COMPARABLE"
+
+
+class LimitationCode(StrEnum):
+    ALIGNMENT_LIMITED = "ALIGNMENT_LIMITED"
+    MIDI_UNAVAILABLE = "MIDI_UNAVAILABLE"
+    AUTOMATION_UNREAD = "AUTOMATION_UNREAD"
+    ROUTING_UNRESOLVED = "ROUTING_UNRESOLVED"
+    CAPTURE_FAILED = "CAPTURE_FAILED"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    SOURCE_MISSING = "SOURCE_MISSING"
+
+
+class ValidityStatus(StrEnum):
+    VALID = "VALID"
+    STALE = "STALE"
+    REJECTED = "REJECTED"
+    UNKNOWN = "UNKNOWN"
+
+
+# Pack-era aliases keep existing EvidencePack JSON readable.
+LIMITATION_ALIASES: dict[str, LimitationCode] = {
+    "MIDI_UNREAD": LimitationCode.MIDI_UNAVAILABLE,
+}
+
+
+MEASURED_KINDS = frozenset(
+    {
+        EvidenceKind.MEASUREMENT,
+        EvidenceKind.OBSERVATION,
+        EvidenceKind.FACT,
+        EvidenceKind.SESSION_ENTITY,
+        EvidenceKind.STATE_TOKEN,
+        EvidenceKind.RELATIONSHIP,
+    }
+)
+INTERPRETIVE_KINDS = frozenset(
+    {
+        EvidenceKind.INTERPRETATION,
+        EvidenceKind.DIAGNOSIS,
+    }
+)
+CANONICAL_LIMITATIONS = frozenset(item.value for item in LimitationCode)
 
 
 class NumericProvenance(StrEnum):

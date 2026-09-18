@@ -22,7 +22,11 @@ from copilot.audio.live_capture import AudioAsset
 from copilot.audio.lowend_features import compute_lowend_features
 from copilot.audio.project_ready_v1 import project_ready
 from copilot.audio.session_diagnose import WORKING_COPY_CANDIDATE
-from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
+from copilot.audio.source_capture_pool_v1 import (
+    capture_source_post_mixer_ref,
+    capture_sources_post_mixer_batch_refs,
+)
+from copilot.audio.source_capture_batch_v1 import plan_batches
 from copilot.audio.terminal_state_v1 import verify_terminal_state
 from copilot.schemas.observation import CaptureView, ObservationSource, SignalPoint
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
@@ -358,6 +362,159 @@ def observations_from_captures(
     }
 
 
+def plan_observation(
+    session,
+    *,
+    region_id: str | None = None,
+    start_qn: float | None = None,
+    end_qn: float | None = None,
+) -> dict[str, Any]:
+    als = _als_path(session.project_path)
+    clips: list[dict[str, Any]] = []
+    if als is not None:
+        try:
+            clips = load_arrangement_clips(als)
+        except OSError:
+            clips = []
+    if start_qn is not None and end_qn is not None:
+        region = {
+            "id": region_id or f"MANUAL_{int(start_qn)}_{int(end_qn)}",
+            "start_qn": float(start_qn),
+            "end_qn": float(end_qn),
+            "why": "explicit",
+        }
+    else:
+        region = select_activity_region(clips) or {
+            "id": region_id or "AUTO_0_32",
+            "start_qn": 0.0,
+            "end_qn": 32.0,
+            "why": "fallback_empty_arrangement",
+        }
+    isolation = inventory_generic_sources(
+        session=session,
+        clips=clips,
+        start_qn=float(region["start_qn"]),
+        end_qn=float(region["end_qn"]),
+    )
+    return {"region": region, "clips": clips, "isolation": isolation}
+
+
+def capture_bounded_sources(
+    daw: AbletonTcpAdapter,
+    *,
+    session,
+    ready: dict[str, Any],
+    isolation: dict[str, Any],
+    region: dict[str, Any],
+    evidence: Path,
+    cancellation: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Reuse SOURCE_CAPTURE_BATCH_V1. Does not copy batch routing logic."""
+    captures: list[dict[str, Any]] = []
+    preflight = {
+        "pass": True,
+        "capture_hosts": ready.get("capture_readiness") or {},
+    }
+    saved_path = session.project_path
+    saved_name = session.project_name
+    bound_identity = session.project_identity
+
+    def _annotate(captured: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+        attach_tokens(session, path=saved_path, name=saved_name)
+        captured["why_included"] = (target.get("capture_eligibility") or {}).get("reason")
+        captured["identity_after_capture"] = {
+            "project_identity": session.project_identity,
+            "bound_identity": bound_identity,
+            "match": session.project_identity == bound_identity,
+            "project_path": session.project_path,
+        }
+        return captured
+
+    def _check() -> None:
+        if cancellation is not None:
+            cancellation.check()
+
+    from copilot.audio.capture_scalability_v2 import (
+        discover_capacity,
+        ensure_capture_pool,
+    )
+    from copilot.audio.tap_trust import inventory_taps
+
+    targets = list(isolation.get("bounded_targets") or [])
+    inventory: list[dict[str, Any]] = []
+    if daw is not None:
+        try:
+            inventory = inventory_taps(daw)
+        except Exception:
+            inventory = []
+    capacity = discover_capacity(session=session, inventory=inventory)
+    ready: list[str] | None = None
+    if daw is not None and targets and hasattr(daw, "snapshot"):
+        pooled = ensure_capture_pool(
+            daw, session, len(targets), capacity=capacity
+        )
+        session = pooled.get("session") or session
+        ready = list(pooled.get("ready_hosts") or [])
+        capacity = discover_capacity(
+            session=session,
+            inventory=inventory_taps(daw),
+            ready_hosts=ready,
+        )
+    groups = plan_batches(targets, session, capacity=capacity, ready_names=ready)
+    for group in groups:
+        _check()
+        attach_tokens(session, path=saved_path, name=saved_name)
+        if len(group) == 1:
+            target = group[0]
+            try:
+                captured = capture_source_post_mixer_ref(
+                    daw,
+                    session=session,
+                    preflight=preflight,
+                    target_ref=target["ref"],
+                    start_qn=float(region["start_qn"]),
+                    end_qn=float(region["end_qn"]),
+                    region_id=str(region["id"]),
+                    tempo=float(session.transport.tempo),
+                    dest_root=evidence / "captures",
+                )
+            except (DawError, OSError, ValueError) as exc:
+                captured = {
+                    "ok": False,
+                    "signal_status": "CAPTURE_FAILED",
+                    "error": str(exc),
+                    "ref": target.get("ref"),
+                }
+            captures.append(_annotate(captured, target))
+            continue
+        try:
+            batched = capture_sources_post_mixer_batch_refs(
+                daw,
+                session=session,
+                preflight=preflight,
+                target_refs=[item["ref"] for item in group],
+                start_qn=float(region["start_qn"]),
+                end_qn=float(region["end_qn"]),
+                region_id=str(region["id"]),
+                tempo=float(session.transport.tempo),
+                dest_root=evidence / "captures",
+                ready_names=ready,
+            )
+        except (DawError, OSError, ValueError) as exc:
+            batched = [
+                {
+                    "ok": False,
+                    "signal_status": "CAPTURE_FAILED",
+                    "error": str(exc),
+                    "ref": item.get("ref"),
+                }
+                for item in group
+            ]
+        for target, captured in zip(group, batched):
+            captures.append(_annotate(captured, target))
+    return captures
+
+
 def producer_analyze(
     daw: AbletonTcpAdapter,
     *,
@@ -382,73 +539,19 @@ def producer_analyze(
 
     session = daw.snapshot(include_notes=False)
     retain_tokens(session)
-    als = _als_path(session.project_path)
-    clips: list[dict[str, Any]] = []
-    if als is not None:
-        try:
-            clips = load_arrangement_clips(als)
-        except OSError:
-            clips = []
-
-    if start_qn is not None and end_qn is not None:
-        region = {
-            "id": region_id or f"MANUAL_{int(start_qn)}_{int(end_qn)}",
-            "start_qn": float(start_qn),
-            "end_qn": float(end_qn),
-            "why": "explicit",
-        }
-    else:
-        region = select_activity_region(clips) or {
-            "id": region_id or "AUTO_0_32",
-            "start_qn": 0.0,
-            "end_qn": 32.0,
-            "why": "fallback_empty_arrangement",
-        }
-
-    isolation = inventory_generic_sources(
-        session=session,
-        clips=clips,
-        start_qn=float(region["start_qn"]),
-        end_qn=float(region["end_qn"]),
+    planned = plan_observation(
+        session, region_id=region_id, start_qn=start_qn, end_qn=end_qn
     )
-    captures: list[dict[str, Any]] = []
-    preflight = {
-        "pass": True,
-        "capture_hosts": ready.get("capture_readiness") or {},
-    }
-    saved_path = session.project_path
-    saved_name = session.project_name
-    bound_identity = session.project_identity
-    for target in isolation.get("bounded_targets") or []:
-        attach_tokens(session, path=saved_path, name=saved_name)
-        try:
-            captured = capture_source_post_mixer_ref(
-                daw,
-                session=session,
-                preflight=preflight,
-                target_ref=target["ref"],
-                start_qn=float(region["start_qn"]),
-                end_qn=float(region["end_qn"]),
-                region_id=str(region["id"]),
-                tempo=float(session.transport.tempo),
-                dest_root=evidence / "captures",
-            )
-        except (DawError, OSError, ValueError) as exc:
-            captured = {
-                "ok": False,
-                "signal_status": "CAPTURE_FAILED",
-                "error": str(exc),
-                "ref": target.get("ref"),
-            }
-        attach_tokens(session, path=saved_path, name=saved_name)
-        captured["why_included"] = (target.get("capture_eligibility") or {}).get("reason")
-        captured["identity_after_capture"] = {
-            "project_identity": session.project_identity,
-            "bound_identity": bound_identity,
-            "match": session.project_identity == bound_identity,
-            "project_path": session.project_path,
-        }
-        captures.append(captured)
+    region = planned["region"]
+    isolation = planned["isolation"]
+    captures = capture_bounded_sources(
+        daw,
+        session=session,
+        ready=ready,
+        isolation=isolation,
+        region=region,
+        evidence=evidence,
+    )
 
     derived = observations_from_captures(
         captures,

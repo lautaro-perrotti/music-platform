@@ -52,6 +52,7 @@ ABLETON AUDIO THREAD
 
 ```
 src/copilot/
+  runtime/      Producer Runtime (AnalyzeProject and future tasks)
   daw/          DawAdapter, Ableton TCP wrap, mock, identities
   schemas/      SessionState, MusicObservation, MusicPlan, AgentTransaction
   agent/        typed tools, transactions, vertical slices

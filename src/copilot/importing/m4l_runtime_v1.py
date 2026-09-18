@@ -17,6 +17,7 @@ from copilot.human_eval.store import now_iso
 
 MILESTONE = "M4L_RUNTIME_PROVISIONING_V1"
 DEVICE_NAME = "Copilot Audio Tap"
+DEVICE_ALIAS_V4 = "Copilot Audio Tap 4"
 EXPECTED_TAP_PROTOCOL = 3
 ARTIFACT = "m4l_runtime_provisioning_v1.json"
 MANIFEST_NAME = "copilot_m4l_runtime.json"
@@ -145,6 +146,7 @@ def ensure_m4l_runtime(
 
     paths = runtime_paths(library_root)
     dest = paths["device"]
+    alias = dest.with_name(f"{DEVICE_ALIAS_V4}.amxd")
     manifest_path = paths["manifest"]
     expected = str(asset["sha256"])
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -175,6 +177,8 @@ def ensure_m4l_runtime(
         status = "INSTALLED"
 
     _retire_legacy_duplicate(paths["legacy"], expected)
+    _provision_identical_alias(Path(str(asset["asset_path"])), alias, expected)
+    _retire_probe_aliases(dest.parent)
     manifest = {
         "milestone": MILESTONE,
         "device_name": DEVICE_NAME,
@@ -204,14 +208,20 @@ def ensure_m4l_runtime(
     return report
 
 
-def item_is_canonical_tap(item: dict[str, Any]) -> bool:
+def _normalized_tap_name(item: dict[str, Any]) -> str:
     name = str(item.get("name") or "").strip()
     if name.lower().endswith(".amxd"):
         name = name[:-5].strip()
-    return name == DEVICE_NAME and bool(item.get("is_loadable"))
+    return name
+
+
+def item_is_canonical_tap(item: dict[str, Any]) -> bool:
+    name = _normalized_tap_name(item)
+    return name in {DEVICE_NAME, DEVICE_ALIAS_V4} and bool(item.get("is_loadable"))
 
 
 def find_canonical_tap_uri(daw: AbletonTcpAdapter) -> str | None:
+    found: list[tuple[str, str]] = []
     for path in (
         ["user_library", "Presets", "Audio Effects", "Max Audio Effect", "Copilot"],
         ["user_library", "Presets", "Audio Effects", "Max Audio Effect"],
@@ -226,14 +236,20 @@ def find_canonical_tap_uri(daw: AbletonTcpAdapter) -> str | None:
             if item_is_canonical_tap(item):
                 uri = item.get("uri")
                 if uri:
-                    return str(uri)
-    searched = daw.search_browser(DEVICE_NAME, "audio_effects")
-    for item in searched.get("results") or []:
-        if item_is_canonical_tap(item):
-            uri = item.get("uri")
-            if uri:
-                return str(uri)
-    return None
+                    found.append((_normalized_tap_name(item), str(uri)))
+        if found:
+            break
+    if not found:
+        searched = daw.search_browser(DEVICE_NAME, "audio_effects")
+        for item in searched.get("results") or []:
+            if item_is_canonical_tap(item):
+                uri = item.get("uri")
+                if uri:
+                    found.append((_normalized_tap_name(item), str(uri)))
+    for name, uri in found:
+        if name == DEVICE_NAME:
+            return uri
+    return found[0][1] if found else None
 
 
 def verify_live_browser(
@@ -285,6 +301,20 @@ def _atomic_copy(source: Path, dest: Path) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
     shutil.copy2(source, tmp)
     tmp.replace(dest)
+
+
+def _provision_identical_alias(source: Path, alias: Path, expected_sha: str) -> None:
+    """Same bytes, different User Library URI. Live caches compiled M4L by URI."""
+    if alias.is_file() and hashlib.sha256(alias.read_bytes()).hexdigest() == expected_sha:
+        return
+    _atomic_copy(source, alias)
+
+
+def _retire_probe_aliases(folder: Path) -> None:
+    if not folder.is_dir():
+        return
+    for leftover in folder.glob("Copilot Audio Tap *Probe.amxd"):
+        leftover.unlink()
 
 
 def _retire_legacy_duplicate(legacy: Path, expected_sha: str) -> None:

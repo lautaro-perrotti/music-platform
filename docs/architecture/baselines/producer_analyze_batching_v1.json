@@ -1,0 +1,223 @@
+{
+  "artifact": "producer_analyze_batching_before_after_v1",
+  "measured_at": "2026-09-17",
+  "confidence": "MEASURED",
+  "method": "Two traced producer-analyze runs on the same open project (Groove Rider working copy, 32 tracks, 126 BPM), same auto-selected region AUTO_36_68 (32 qn = 15.238 s of audio), same 4 eligible sources, read-only, MUSICAL WRITES = 0. Only the capture sequencing changed.",
+  "project": {
+    "path": "C:/Users/lsper/CopilotProjects/Abletunes - Groove Rider Project/Abletunes - Groove Rider.als",
+    "policy": "EXTERNAL_WORKING_COPY (operate=True, autonomous_writes_ok=False)",
+    "tracks": 32,
+    "tempo": 126.0
+  },
+  "change": "SOURCE_CAPTURE_BATCH_V1: sources that share a musical region are recorded in ONE transport pass. Previously producer_analyze called capture_source_post_mixer_ref once per source, so the region AND its 16 qn pre-roll were played once per source.",
+  "ceiling": {
+    "sources_per_pass": 2,
+    "why": "Two capture host tracks exist (Copilot Capture slot 1, Copilot Capture Bass slot 2) and the Max device's slot selector has three outlets mapping slot 0/1/2 to _next.wav/_next_kick.wav/_next_bass.wav. Slot 0 is the Main sidecar, leaving two source slots. Going wider needs a wider slot selector in the device and more host tracks."
+  },
+  "before": {
+    "label": "one playback pass per source",
+    "total_s": 254.22,
+    "playback_passes": 4,
+    "recorders_per_pass": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "playback_pass_wall_s": 136.08,
+    "rpc_count": 237,
+    "rpc_total_s": 110.71,
+    "by_category_exclusive_s": {
+      "ABLETON_RPC": 110.712351,
+      "INTRINSIC_AUDIO": 92.205147,
+      "LOCAL_CPU": 0.218169,
+      "LOCAL_IO": 0.030159,
+      "ORCHESTRATION": 51.054714
+    },
+    "astra_model_s": 49.63,
+    "top_rpc": {
+      "set_device_parameter": {
+        "count": 40,
+        "total_s": 24.43
+      },
+      "get_device_parameters": {
+        "count": 28,
+        "total_s": 10.46
+      },
+      "get_track_info": {
+        "count": 24,
+        "total_s": 8.66
+      },
+      "get_track_monitoring": {
+        "count": 12,
+        "total_s": 7.15
+      },
+      "set_track_input_routing": {
+        "count": 12,
+        "total_s": 6.94
+      },
+      "get_track_sends": {
+        "count": 18,
+        "total_s": 6.3
+      },
+      "stop_playback": {
+        "count": 12,
+        "total_s": 6.19
+      },
+      "get_track_output_routing": {
+        "count": 16,
+        "total_s": 6.18
+      }
+    }
+  },
+  "after": {
+    "label": "batched, 2 sources + Main per pass",
+    "total_s": 194.85,
+    "playback_passes": 2,
+    "recorders_per_pass": [
+      3,
+      3
+    ],
+    "playback_pass_wall_s": 70.13,
+    "rpc_count": 191,
+    "rpc_total_s": 89.54,
+    "by_category_exclusive_s": {
+      "ABLETON_RPC": 89.545742,
+      "INTRINSIC_AUDIO": 49.242208,
+      "LOCAL_CPU": 0.152767,
+      "LOCAL_IO": 0.025615,
+      "ORCHESTRATION": 55.883028
+    },
+    "astra_model_s": 54.56,
+    "top_rpc": {
+      "set_device_parameter": {
+        "count": 26,
+        "total_s": 15.26
+      },
+      "get_track_info": {
+        "count": 24,
+        "total_s": 8.56
+      },
+      "get_track_sends": {
+        "count": 18,
+        "total_s": 6.94
+      },
+      "get_track_monitoring": {
+        "count": 12,
+        "total_s": 6.93
+      },
+      "set_track_input_routing": {
+        "count": 12,
+        "total_s": 6.85
+      },
+      "get_track_output_routing": {
+        "count": 16,
+        "total_s": 6.08
+      },
+      "get_track_input_routing": {
+        "count": 16,
+        "total_s": 5.97
+      },
+      "set_track_output_routing": {
+        "count": 8,
+        "total_s": 5.21
+      }
+    }
+  },
+  "delta": {
+    "total_s": -59.37,
+    "total_pct": -23.4,
+    "rpc_count": -46,
+    "rpc_count_pct": -19.4,
+    "rpc_total_s": -21.17,
+    "playback_pass_wall_s": -65.95,
+    "astra_model_s": 4.94,
+    "capture_side_saving_s": 64.31,
+    "capture_side_note": "Astra was 4.94 s SLOWER in the AFTER run (provider variance, not our change), so the capture-side saving is larger than the headline total."
+  },
+  "correctness_unchanged": {
+    "status": [
+      "INSUFFICIENT_EVIDENCE",
+      "INSUFFICIENT_EVIDENCE"
+    ],
+    "region_id": [
+      "AUTO_36_68",
+      "AUTO_36_68"
+    ],
+    "isolation": [
+      {
+        "active_count": 9,
+        "eligible_count": 7
+      },
+      {
+        "active_count": 9,
+        "eligible_count": 7
+      }
+    ],
+    "captures_ok": [
+      4,
+      4
+    ],
+    "signal_classes": [
+      [
+        "HAS_SIGNAL",
+        "HAS_SIGNAL",
+        "NEAR_SILENCE",
+        "HAS_SIGNAL"
+      ],
+      [
+        "HAS_SIGNAL",
+        "HAS_SIGNAL",
+        "NEAR_SILENCE",
+        "HAS_SIGNAL"
+      ]
+    ],
+    "terminal_ok": [
+      true,
+      true
+    ],
+    "routing_restored": [
+      true,
+      true
+    ],
+    "open_capture_journals": [
+      0,
+      0
+    ],
+    "no_write": [
+      true,
+      true
+    ],
+    "batched_isolation_claims": "OFF_DIRECT_MAIN for all 4 sources; through_main False",
+    "batched_journal_states": "PREPARED -> RECORDING -> FINALIZING -> VERIFIED for each of the 4 recorders"
+  },
+  "per_pass_measured_after": {
+    "region_s": 15.238095238095237,
+    "record_s": 22.863,
+    "pre_roll_qn": 16.0,
+    "pre_roll_s": 7.625,
+    "total_s": [
+      34.53,
+      31.97
+    ],
+    "wav_shared_readable_waited_s": [
+      0.00037850000080652535,
+      0.0003435000035096891
+    ]
+  },
+  "remaining_top_bottleneck": {
+    "1_pre_roll": {
+      "cost_s": 15.25,
+      "detail": "PRE_ROLL_QN = 16.0 (arrangement_seek.py:22) plays 16 qn = 7.62 s before every region and trims it afterwards. Now 2 passes instead of 4, so 15.25 s instead of 30.5 s. NOT recommended as a blind cut: pre-roll is musical settling time for reverb tails, delays and sidechain envelopes. Shortening it changes what the capture sounds like and would corrupt evidence. The minimum safe value is an empirical question."
+    },
+    "2_ableton_rpc": {
+      "cost_s": 89.54,
+      "count": 191,
+      "detail": "Still the largest single category. set_device_parameter (tap arm/disarm) and the get_track_* family dominate; most of the reads re-fetch fields the topology snapshot already holds."
+    },
+    "3_astra": {
+      "cost_s": 54.56,
+      "detail": "Provider-bound. p50 50.3 s over 86 recorded runs. No local lever."
+    }
+  }
+}

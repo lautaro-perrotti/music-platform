@@ -203,6 +203,14 @@ DSP DETERMINISM (same WAV) is `FIXTURE_VERIFIED` only.
 
 ---
 
+## Producer Runtime
+
+`PRODUCER_RUNTIME_V1` — one high-level call `producer.analyze_project(project)`.
+Canonical `producer-analyze` remains callable. Capture source batching frozen at 2.
+Next: RPC_OPTIMIZATION_V2 (Ableton round trips) and ROADMAP_100.
+
+---
+
 ## Next dependency
 
 **REAL SESSION DIAGNOSIS** — 3–5 real musical regions, frozen DSP thresholds,

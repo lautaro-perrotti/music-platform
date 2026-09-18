@@ -19,6 +19,8 @@ TERMINAL = {
     TransactionStatus.FAILED.value,
     TransactionStatus.ROLLED_BACK.value,
     TransactionStatus.ROLLBACK_CONFLICT.value,
+    TransactionStatus.CANCELLED.value,
+    TransactionStatus.SUPERSEDED.value,
 }
 
 
@@ -38,6 +40,11 @@ def classify_journal(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         kind = str(last.get("kind") or "")
         if status == TransactionStatus.VERIFIED.value:
             recovery = RecoveryStatus.VERIFIED
+        elif status in {
+            TransactionStatus.CANCELLED.value,
+            TransactionStatus.SUPERSEDED.value,
+        }:
+            recovery = RecoveryStatus.VERIFIED
         elif status == TransactionStatus.ROLLBACK_CONFLICT.value:
             recovery = RecoveryStatus.ROLLBACK_CONFLICT
         elif status == TransactionStatus.IN_DOUBT.value or (
@@ -49,10 +56,15 @@ def classify_journal(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 recovery = RecoveryStatus.VERIFIED
             else:
                 recovery = RecoveryStatus.ROLLBACK_REQUIRED
-        elif status == TransactionStatus.PLANNED.value:
+        elif status in {
+            TransactionStatus.PLANNED.value,
+            TransactionStatus.PREPARED.value,
+        }:
             recovery = RecoveryStatus.RECOVERY_REQUIRED
         elif status == TransactionStatus.APPLIED.value:
             recovery = RecoveryStatus.RECOVERY_REQUIRED
+        elif status == TransactionStatus.PARTIAL_FAILURE.value:
+            recovery = RecoveryStatus.ROLLBACK_REQUIRED
         elif status in TERMINAL:
             recovery = RecoveryStatus.VERIFIED
         else:
@@ -71,8 +83,17 @@ def classify_journal(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _known(status: str, kind: str) -> str:
-    if status == TransactionStatus.PLANNED.value:
-        return "Intent was persisted; command was not marked sent."
+    if status in {
+        TransactionStatus.PLANNED.value,
+        TransactionStatus.PREPARED.value,
+    }:
+        return "Intent and durable pre-state were persisted; command was not marked sent."
+    if status == TransactionStatus.CANCELLED.value:
+        return "Work was cancelled before an unknown remote outcome."
+    if status == TransactionStatus.SUPERSEDED.value:
+        return "Plan was replaced by a newer plan before dispatch."
+    if status == TransactionStatus.PARTIAL_FAILURE.value:
+        return "Some steps applied; later steps failed with a known outcome."
     if status == TransactionStatus.SENT.value:
         return "Command was handed to the transport."
     if status == TransactionStatus.APPLIED.value:
@@ -85,8 +106,18 @@ def _known(status: str, kind: str) -> str:
 
 
 def _unknown(status: str, kind: str) -> str:
-    if status == TransactionStatus.PLANNED.value:
+    if status in {
+        TransactionStatus.PLANNED.value,
+        TransactionStatus.PREPARED.value,
+    }:
         return "Whether the process died before send."
+    if status in {
+        TransactionStatus.CANCELLED.value,
+        TransactionStatus.SUPERSEDED.value,
+    }:
+        return "Nothing beyond the last journal record."
+    if status == TransactionStatus.PARTIAL_FAILURE.value:
+        return "Whether remaining inverses would restore applied steps."
     if status == TransactionStatus.SENT.value or status == TransactionStatus.IN_DOUBT.value:
         return "Whether Live applied the mutation."
     if status == TransactionStatus.APPLIED.value:

@@ -275,9 +275,18 @@ class AbletonMCP(ControlSurface):
                         "device.set_parameter",
                         "device.load",
                         "audio.capture_master",
+                        "compound.temporary_mutation",
                     ],
                     "bind": "127.0.0.1",
                     "transport_primitive_version": "arrangement-start-at-qn-1",
+                    "compound_mutation_version": "1",
+                    "compound_supported_operations": [
+                        "SET_TRACK_MONITORING",
+                        "SET_TRACK_INPUT_ROUTING",
+                        "SET_TRACK_OUTPUT_ROUTING",
+                        "SET_DEVICE_PARAMETER",
+                        "SET_SEND_LEVEL",
+                    ],
                 }
             elif command_type == "health_check":
                 response["result"] = self._health_check()
@@ -290,6 +299,24 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_track_info(track_index)
             elif command_type == "get_tracks_info":
                 response["result"] = self._get_tracks_info(params.get("indices"))
+            elif command_type == "get_capture_hosts_state":
+                response["result"] = self._get_tracks_info(
+                    params.get("indices") or params.get("track_ids") or params.get("host_ids")
+                )
+            elif command_type == "get_tracks_sends":
+                payload = self._get_tracks_info(params.get("indices") or params.get("track_ids"))
+                response["result"] = {
+                    "tracks": [
+                        {
+                            "track_index": int(item["index"]),
+                            "sends": list(item.get("sends") or []),
+                        }
+                        for item in payload.get("tracks") or []
+                        if "index" in item
+                    ]
+                }
+            elif command_type == "get_tracks_state":
+                response["result"] = self._get_tracks_info(params.get("indices") or params.get("track_ids"))
             elif command_type == "get_capture_topology":
                 response["result"] = self._get_capture_topology()
             elif command_type == "get_device_parameter":
@@ -703,7 +730,9 @@ class AbletonMCP(ControlSurface):
                                  "quantize_clip", "deselect_all_notes", "duplicate_clip_loop",
                                  "set_clip_notes", "move_clip_notes",
                                  # Scrub
-                                 "scrub_by"]:
+                                 "scrub_by",
+                                 "set_device_parameters",
+                                 "execute_mutation_batch"]:
                 # Use a thread-safe approach with a response queue
                 # maxsize=10 prevents unbounded memory growth
                 response_queue = queue.Queue(maxsize=10)
@@ -990,15 +1019,22 @@ class AbletonMCP(ControlSurface):
                             result = self._delete_locator(locator_index)
                         # Routing control
                         elif command_type == "set_track_input_routing":
-                            track_index = params.get("track_index", 0)
-                            routing_type = params.get("routing_type", "")
-                            routing_channel = params.get("routing_channel", "")
-                            result = self._set_track_input_routing(track_index, routing_type, routing_channel)
+                            result = self._set_track_input_routing(
+                                params.get("track_index", 0),
+                                params.get("routing_type", ""),
+                                params.get("routing_channel", ""),
+                                params.get("target_name"),
+                                params.get("preferred_channel"),
+                            )
                         elif command_type == "set_track_output_routing":
-                            track_index = params.get("track_index", 0)
-                            routing_type = params.get("routing_type", "")
-                            routing_channel = params.get("routing_channel", "")
-                            result = self._set_track_output_routing(track_index, routing_type, routing_channel)
+                            result = self._set_track_output_routing(
+                                params.get("track_index", 0),
+                                params.get("routing_type", ""),
+                                params.get("routing_channel", ""),
+                                params.get("routing_candidates"),
+                            )
+                        elif command_type == "execute_mutation_batch":
+                            result = self._execute_mutation_batch(params)
                         # Metronome control
                         elif command_type == "set_metronome":
                             enabled = params.get("enabled", True)
@@ -3856,18 +3892,22 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting available outputs: " + str(e))
             raise
 
-    def _set_track_input_routing(self, track_index, routing_type, routing_channel):
+    def _set_track_input_routing(self, track_index, routing_type, routing_channel, target_name=None, preferred_channel=None):
         """Set the input routing of a track"""
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
 
             track = self._song.tracks[track_index]
+            if (not routing_type) and target_name:
+                routing_type = target_name
             matched_type = self._match_routing(
                 track.available_input_routing_types, routing_type
             )
             if matched_type is not None:
                 track.input_routing_type = matched_type
+            if (not routing_channel) and preferred_channel:
+                routing_channel = preferred_channel
             matched_channel = None
             if routing_channel:
                 matched_channel = self._match_routing(
@@ -3888,7 +3928,7 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting track input routing: " + str(e))
             raise
 
-    def _set_track_output_routing(self, track_index, routing_type, routing_channel):
+    def _set_track_output_routing(self, track_index, routing_type, routing_channel, routing_candidates=None):
         """Set the output routing of a track"""
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
@@ -3898,6 +3938,13 @@ class AbletonMCP(ControlSurface):
             matched_type = self._match_routing(
                 track.available_output_routing_types, routing_type
             )
+            if matched_type is None and routing_candidates:
+                for candidate in routing_candidates:
+                    matched_type = self._match_routing(
+                        track.available_output_routing_types, candidate
+                    )
+                    if matched_type is not None:
+                        break
             if matched_type is not None:
                 track.output_routing_type = matched_type
             matched_channel = None
@@ -3919,6 +3966,137 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting track output routing: " + str(e))
             raise
+
+    def _execute_mutation_batch(self, params):
+        """Whitelisted ordered mutations. Per-step results. No hidden rollback."""
+        batch_id = params.get("batch_id") or ""
+        project_identity = params.get("project_identity") or ""
+        expected_path = params.get("expected_project_path") or ""
+        expected_name = params.get("expected_project_name") or ""
+        allowed = set([
+            "SET_TRACK_MONITORING",
+            "SET_TRACK_INPUT_ROUTING",
+            "SET_TRACK_OUTPUT_ROUTING",
+            "SET_DEVICE_PARAMETER",
+            "SET_SEND_LEVEL",
+        ])
+        if expected_path or expected_name:
+            try:
+                current = self._get_session_path() or {}
+            except Exception:
+                current = {}
+            cur_path = str(current.get("path") or "")
+            cur_name = str(current.get("name") or "")
+            path_mismatch = False
+            if expected_path and cur_path:
+                exp = expected_path.replace("\\", "/").rstrip("/").lower()
+                got = cur_path.replace("\\", "/").rstrip("/").lower()
+                path_mismatch = exp != got and (not got.endswith(exp)) and (not exp.endswith(got))
+            name_mismatch = bool(expected_name and cur_name and expected_name.lower() != cur_name.lower())
+            if path_mismatch or name_mismatch:
+                return {
+                    "batch_id": batch_id,
+                    "project_identity": project_identity,
+                    "batch_status": "FAILED_BEFORE_EXECUTION",
+                    "error": "PROJECT_MISMATCH",
+                    "step_results": [],
+                }
+        steps = params.get("steps") or []
+        results = []
+        stop = False
+        for step in steps:
+            step_id = step.get("step_id") or ""
+            operation = str(step.get("operation") or "")
+            args = step.get("arguments") or {}
+            independent = bool(step.get("independent"))
+            target = step.get("target_ref") or {}
+            row = {
+                "step_id": step_id,
+                "target": target,
+                "operation": operation,
+                "requested_value": args,
+                "host_id": step.get("host_id") or "",
+                "purpose": step.get("purpose") or "",
+                "observed": None,
+                "error": None,
+                "status": "NOT_ATTEMPTED",
+            }
+            if stop and not independent:
+                row["error"] = "not_attempted_after_failure"
+                results.append(row)
+                continue
+            if operation not in allowed:
+                row["status"] = "FAILED"
+                row["error"] = "UNWHITELISTED_OPERATION"
+                stop = True
+                results.append(row)
+                continue
+            try:
+                if operation == "SET_TRACK_MONITORING":
+                    observed = self._set_track_monitoring(
+                        int(args.get("track_index", 0)),
+                        str(args.get("monitoring") or "in"),
+                    )
+                elif operation == "SET_TRACK_INPUT_ROUTING":
+                    observed = self._set_track_input_routing(
+                        int(args.get("track_index", 0)),
+                        args.get("routing_type") or "",
+                        args.get("routing_channel") or "",
+                        args.get("target_name"),
+                        args.get("preferred_channel"),
+                    )
+                    if observed.get("type_matched") is False:
+                        raise Exception("input routing type not matched")
+                elif operation == "SET_TRACK_OUTPUT_ROUTING":
+                    observed = self._set_track_output_routing(
+                        int(args.get("track_index", 0)),
+                        args.get("routing_type") or "",
+                        args.get("routing_channel") or "",
+                        args.get("routing_candidates"),
+                    )
+                    if observed.get("type_matched") is False:
+                        raise Exception("output routing type not matched")
+                elif operation == "SET_DEVICE_PARAMETER":
+                    observed = self._set_device_parameter(
+                        int(args.get("track_index", 0)),
+                        int(args.get("device_index", 0)),
+                        int(args.get("parameter_index", 0)),
+                        float(args.get("value", 0.0)),
+                    )
+                elif operation == "SET_SEND_LEVEL":
+                    observed = self._set_send_level(
+                        int(args.get("track_index", 0)),
+                        int(args.get("send_index", 0)),
+                        float(args.get("level", 0.0)),
+                    )
+                else:
+                    raise Exception("UNWHITELISTED_OPERATION")
+                row["status"] = "APPLIED"
+                row["observed"] = observed
+            except Exception as exc:
+                row["status"] = "FAILED"
+                row["error"] = str(exc)
+                stop = True
+            results.append(row)
+        applied = [r for r in results if r.get("status") == "APPLIED"]
+        failed = [r for r in results if r.get("status") == "FAILED"]
+        unknown = [r for r in results if r.get("status") == "UNKNOWN"]
+        if unknown:
+            batch_status = "IN_DOUBT"
+        elif failed:
+            batch_status = "PARTIAL_FAILURE"
+        elif applied and len(applied) == len(results):
+            batch_status = "COMPLETE"
+        elif not results:
+            batch_status = "COMPLETE"
+        else:
+            batch_status = "PARTIAL_FAILURE"
+        return {
+            "batch_id": batch_id,
+            "project_identity": project_identity,
+            "batch_status": batch_status,
+            "step_results": results,
+        }
 
     # ==================== PERFORMANCE & SESSION ====================
 

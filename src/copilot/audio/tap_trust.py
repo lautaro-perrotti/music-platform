@@ -30,7 +30,9 @@ from copilot.audio.live_capture import (
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
 
-SLOT_STAGING = {0: STAGING_NAME, 1: STAGING_KICK, 2: STAGING_BASS}
+from copilot.audio.capture_scalability_v2 import slot_staging_map
+
+SLOT_STAGING = slot_staging_map()
 UDP_REMOVED_PROTOCOL = 3
 JOURNAL_DIR = Path("logs") / "capture_journal"
 
@@ -99,6 +101,7 @@ def _taps_from_info(
                 "device_index": device_index,
                 "device_name": name,
                 "device_on": None if not on else float(on.get("value") or 0.0),
+                "device_on_param_index": None if not on else on.get("index"),
                 "rec": None if not rec else float(rec.get("value") or 0.0),
                 "rec_param_index": None if not rec else rec.get("index"),
                 "slot": None

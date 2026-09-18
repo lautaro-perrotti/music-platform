@@ -36,6 +36,9 @@ def test_ensure_m4l_runtime_installs_and_is_idempotent(tmp_path: Path) -> None:
     assert Path(second["installed"]) == dest
     copies = list(library.rglob("Copilot Audio Tap.amxd"))
     assert len(copies) == 1
+    alias = dest.with_name("Copilot Audio Tap 4.amxd")
+    assert alias.is_file()
+    assert hashlib.sha256(alias.read_bytes()).hexdigest() == hashlib.sha256(dest.read_bytes()).hexdigest()
 
 
 def test_ensure_m4l_runtime_blocks_unmanaged_conflict(tmp_path: Path) -> None:
@@ -52,6 +55,7 @@ def test_ensure_m4l_runtime_blocks_unmanaged_conflict(tmp_path: Path) -> None:
 def test_canonical_tap_match_is_exact() -> None:
     assert item_is_canonical_tap({"name": "Copilot Audio Tap", "is_loadable": True}) is True
     assert item_is_canonical_tap({"name": "Copilot Audio Tap.amxd", "is_loadable": True}) is True
+    assert item_is_canonical_tap({"name": "Copilot Audio Tap 4", "is_loadable": True}) is True
     assert item_is_canonical_tap({"name": "Copilot Audio Tap", "is_loadable": False}) is False
     assert item_is_canonical_tap({"name": "Not Copilot Audio Tap", "is_loadable": True}) is False
     assert item_is_canonical_tap({"name": "Audio Tap", "is_loadable": True}) is False

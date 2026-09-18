@@ -1,0 +1,510 @@
+{
+  "artifact": "wait_inventory_v1",
+  "generated_by": "architecture + performance audit v1",
+  "method": "AST scan of every time.sleep/asyncio.sleep in src/, classified against the traced call graph.",
+  "totals": {
+    "sleep_call_sites": 37,
+    "fixed_literal_delays": 33,
+    "fixed_delay_seconds_if_all_fired": 15.91,
+    "by_classification": {
+      "ARBITRARY_DELAY": 25,
+      "BACKOFF": 1,
+      "POLLING_INEFFICIENCY": 5,
+      "REQUIRED_EXTERNAL_LATENCY": 1,
+      "RESOURCE_LOCK": 2,
+      "UNKNOWN_REQUIRES_TEST": 3
+    }
+  },
+  "headline": "The hypothesis that the hot path is full of arbitrary sleeps is NOT supported. Of the fixed-literal sleeps, the large ones are in lab runners (--lab) or in one-time tap-install paths guarded by an existing-device check. On a warm producer-analyze the fixed-sleep budget is near zero; the capture finalization waits are already condition-driven with typed timeouts. The genuine offenders are the Ableton launch path (6.5s of unconditional sleep) and the PROBE_BACKOFF overshoot (up to 8s).",
+  "arbitrary_delays_on_supported_paths": [
+    {
+      "site": "src/copilot/importing/ableton_launcher_v1.py:244",
+      "delay_s": 3.0,
+      "workflow": "import-project / project launch",
+      "recommendation": "Poll for the prefs/crash file becoming openable, bounded at 3s. Typical release is far below 3s."
+    },
+    {
+      "site": "src/copilot/importing/ableton_launcher_v1.py:211",
+      "delay_s": 2.0,
+      "workflow": "import-project / controlled relaunch",
+      "recommendation": "Same treatment as line 73. Only fires on the relaunch path."
+    },
+    {
+      "site": "src/copilot/importing/ableton_launcher_v1.py:73",
+      "delay_s": 1.5,
+      "workflow": "import-project / project launch",
+      "recommendation": "Replace with a bounded wait on the crash flag file actually being absent."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:764",
+      "delay_s": 1.0,
+      "workflow": "one-time tap install (project-bootstrap)",
+      "recommendation": "Poll Browser resolution instead; bounded. Low priority: cold path only."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:777",
+      "delay_s": 0.8,
+      "workflow": "one-time tap install (project-bootstrap)",
+      "recommendation": "Poll for the device appearing on the track; bounded."
+    },
+    {
+      "site": "src/copilot/audio/batch_capture.py:128",
+      "delay_s": 0.6,
+      "workflow": "one-time host tap install",
+      "recommendation": "Poll for the device; bounded."
+    },
+    {
+      "site": "src/copilot/audio/batch_capture.py:114",
+      "delay_s": 0.4,
+      "workflow": "one-time host tap install",
+      "recommendation": "Poll Browser resolution; bounded. Cold path only."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:1805",
+      "delay_s": 0.15,
+      "workflow": "lab capture teardown",
+      "recommendation": "Lab path; the production path waits on the file instead."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:1761",
+      "delay_s": 0.1,
+      "workflow": "lab capture arm sequence",
+      "recommendation": "Lab path. Replace with a Rec-parameter readback if promoted to production."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:1777",
+      "delay_s": 0.08,
+      "workflow": "lab capture arm sequence",
+      "recommendation": "Lab path."
+    },
+    {
+      "site": "src/copilot/audio/live_capture.py:1148",
+      "delay_s": 0.02,
+      "workflow": "arrangement probe",
+      "recommendation": "Low impact."
+    }
+  ],
+  "no_timeout_blocking_waits": [
+    {
+      "site": "src/copilot/importing/ableton_launcher_v1.py:32",
+      "detail": "launch_working_copy default deadline_s = 12*60 (720s).",
+      "classification": "SAFETY_DEADLINE",
+      "problem": "Nested budgets do not compose: project_folder_import_v1.py:117 waits 120s, the launcher waits up to 720s in 20s chunks, and each probe carries its own 2s connect / 8s read timeout. One user action can block for 12 minutes with no aggregate budget and no cancellation."
+    },
+    {
+      "site": "vendor/abletonmcp_remote_script/AbletonMCP/__init__.py:1468",
+      "detail": "response_queue.get(timeout=10.0) inside the Remote Script.",
+      "classification": "SAFETY_DEADLINE",
+      "problem": "The server-side cap (10s) is shorter than several client-side read timeouts (30s large_operation), so the client can wait 30s for a reply the server abandoned at 10s."
+    }
+  ],
+  "sites": [
+    {
+      "file": "src/copilot/audio/arrangement_seek.py",
+      "line": 345,
+      "delay_s": 1.0,
+      "expr": "1.0",
+      "source": "time.sleep(1.0)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: arrangement seek trust probe",
+      "why_it_exists": "Fixed 1.0s of playback to observe transport movement.",
+      "recommendation": "Lab only; could poll the position instead."
+    },
+    {
+      "file": "src/copilot/audio/arrangement_seek.py",
+      "line": 480,
+      "delay_s": 1.0,
+      "expr": "1.0",
+      "source": "time.sleep(1.0)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: arrangement seek trust probe",
+      "why_it_exists": "Fixed 1.0s per probe position.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/batch_capture.py",
+      "line": 114,
+      "delay_s": 0.4,
+      "expr": "0.4",
+      "source": "time.sleep(0.4)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "one-time host tap install",
+      "why_it_exists": "0.4s after install_audio_tap_device(). Guarded by an existing-device check.",
+      "recommendation": "Poll Browser resolution; bounded. Cold path only."
+    },
+    {
+      "file": "src/copilot/audio/batch_capture.py",
+      "line": 128,
+      "delay_s": 0.6,
+      "expr": "0.6",
+      "source": "time.sleep(0.6)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "one-time host tap install",
+      "why_it_exists": "0.6s after the load call. Cold path only.",
+      "recommendation": "Poll for the device; bounded."
+    },
+    {
+      "file": "src/copilot/audio/batch_capture.py",
+      "line": 818,
+      "delay_s": 0.02,
+      "expr": "0.02",
+      "source": "time.sleep(0.02)",
+      "classification": "UNKNOWN_REQUIRES_TEST",
+      "workflow": "unclassified",
+      "why_it_exists": "Not reached by the traced workflows.",
+      "recommendation": "Classify before changing."
+    },
+    {
+      "file": "src/copilot/audio/batch_capture.py",
+      "line": 920,
+      "delay_s": 0.02,
+      "expr": "0.02",
+      "source": "time.sleep(0.02)",
+      "classification": "UNKNOWN_REQUIRES_TEST",
+      "workflow": "unclassified",
+      "why_it_exists": "Not reached by the traced workflows.",
+      "recommendation": "Classify before changing."
+    },
+    {
+      "file": "src/copilot/audio/batch_capture.py",
+      "line": 942,
+      "delay_s": null,
+      "expr": "remaining",
+      "source": "time.sleep(remaining)",
+      "classification": "UNKNOWN_REQUIRES_TEST",
+      "workflow": "unclassified",
+      "why_it_exists": "Not reached by the traced workflows.",
+      "recommendation": "Classify before changing."
+    },
+    {
+      "file": "src/copilot/audio/live22.py",
+      "line": 624,
+      "delay_s": 0.05,
+      "expr": "0.05",
+      "source": "time.sleep(0.05)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab runner",
+      "why_it_exists": "50ms between tempo writes.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/live22.py",
+      "line": 661,
+      "delay_s": 0.05,
+      "expr": "0.05",
+      "source": "time.sleep(0.05)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab runner",
+      "why_it_exists": "50ms between signature writes.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/live3r_trust.py",
+      "line": 252,
+      "delay_s": 0.5,
+      "expr": "0.5",
+      "source": "time.sleep(0.5)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab runner",
+      "why_it_exists": "0.5s settle after disarming every tap.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 446,
+      "delay_s": null,
+      "expr": "interval_s",
+      "source": "time.sleep(interval_s)",
+      "classification": "POLLING_INEFFICIENCY",
+      "workflow": "capture finalization",
+      "why_it_exists": "50ms poll until each staged WAV is shared-readable, bounded by timeout_s=12 and failing as CAPTURE_FINALIZATION_TIMEOUT. Correct shape: condition-driven, typed timeout.",
+      "recommendation": "Keep."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 486,
+      "delay_s": 0.15,
+      "expr": "0.15",
+      "source": "time.sleep(0.15)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: verify_rec_close_releases_handles",
+      "why_it_exists": "0.15s of a 1.2s fixed arm/disarm settle sequence. Called only from live3r-perf3 and live3r-trust.",
+      "recommendation": "Lab only. Not on the supported envelope."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 491,
+      "delay_s": 0.45,
+      "expr": "0.45",
+      "source": "time.sleep(0.45)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: verify_rec_close_releases_handles",
+      "why_it_exists": "0.45s settle.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 496,
+      "delay_s": 0.6,
+      "expr": "0.6",
+      "source": "time.sleep(0.6)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: verify_rec_close_releases_handles",
+      "why_it_exists": "0.6s settle.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 560,
+      "delay_s": 0.15,
+      "expr": "0.15",
+      "source": "time.sleep(0.15)",
+      "classification": "RESOURCE_LOCK",
+      "workflow": "capture finalization",
+      "why_it_exists": "150ms retry on a Windows sharing violation while copying the staged WAV.",
+      "recommendation": "Keep; bounded by the enclosing retry count."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 583,
+      "delay_s": 0.15,
+      "expr": "0.15",
+      "source": "time.sleep(0.15)",
+      "classification": "RESOURCE_LOCK",
+      "workflow": "capture finalization",
+      "why_it_exists": "150ms retry on a Windows sharing violation (second copy site).",
+      "recommendation": "Keep."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 764,
+      "delay_s": 1.0,
+      "expr": "1.0",
+      "source": "time.sleep(1.0)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "one-time tap install (project-bootstrap)",
+      "why_it_exists": "1.0s after writing the Max device to disk, before the Browser is asked to resolve it. Guarded by an existing-device check, so it does not fire on a warm project.",
+      "recommendation": "Poll Browser resolution instead; bounded. Low priority: cold path only."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 777,
+      "delay_s": 0.8,
+      "expr": "0.8",
+      "source": "time.sleep(0.8)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "one-time tap install (project-bootstrap)",
+      "why_it_exists": "0.8s after load_instrument_or_effect before the device is inspected. Cold path only.",
+      "recommendation": "Poll for the device appearing on the track; bounded."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1148,
+      "delay_s": 0.02,
+      "expr": "0.02",
+      "source": "time.sleep(0.02)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "arrangement probe",
+      "why_it_exists": "20ms between transport probe positions.",
+      "recommendation": "Low impact."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1444,
+      "delay_s": 0.05,
+      "expr": "0.05",
+      "source": "time.sleep(0.05)",
+      "classification": "POLLING_INEFFICIENCY",
+      "workflow": "capture finalization",
+      "why_it_exists": "50ms retry after a transient decode error while the writer still owns the file.",
+      "recommendation": "Keep."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1458,
+      "delay_s": 0.05,
+      "expr": "0.05",
+      "source": "time.sleep(0.05)",
+      "classification": "POLLING_INEFFICIENCY",
+      "workflow": "capture finalization",
+      "why_it_exists": "50ms poll for frame-count stability before reading the WAV. Condition-driven with a typed SHORT_CAPTURE failure.",
+      "recommendation": "Keep."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1761,
+      "delay_s": 0.1,
+      "expr": "0.1",
+      "source": "time.sleep(0.1)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab capture arm sequence",
+      "why_it_exists": "0.1s settle after arming.",
+      "recommendation": "Lab path. Replace with a Rec-parameter readback if promoted to production."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1777,
+      "delay_s": 0.08,
+      "expr": "0.08",
+      "source": "time.sleep(0.08)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab capture arm sequence",
+      "why_it_exists": "0.08s settle.",
+      "recommendation": "Lab path."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1789,
+      "delay_s": 0.02,
+      "expr": "0.02",
+      "source": "time.sleep(0.02)",
+      "classification": "POLLING_INEFFICIENCY",
+      "workflow": "lab capture / transport start",
+      "why_it_exists": "20ms poll for transport start, bounded at 2.0s.",
+      "recommendation": "Keep."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1794,
+      "delay_s": null,
+      "expr": "max(0.0, wait_s - (time.time() - t_play))",
+      "source": "time.sleep(max(0.0, wait_s - (time.time() - t_play)))",
+      "classification": "REQUIRED_EXTERNAL_LATENCY",
+      "workflow": "lab capture / region playback",
+      "why_it_exists": "Real-time region playback (legacy path). INTRINSIC_AUDIO_DURATION.",
+      "recommendation": "Not a bug."
+    },
+    {
+      "file": "src/copilot/audio/live_capture.py",
+      "line": 1805,
+      "delay_s": 0.15,
+      "expr": "0.15",
+      "source": "time.sleep(0.15)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab capture teardown",
+      "why_it_exists": "0.15s settle after stopping recording.",
+      "recommendation": "Lab path; the production path waits on the file instead."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 460,
+      "delay_s": 0.15,
+      "expr": "0.15",
+      "source": "time.sleep(0.15)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: tap exclusivity probe",
+      "why_it_exists": "0.15s settle.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 465,
+      "delay_s": 0.12,
+      "expr": "0.12",
+      "source": "time.sleep(0.12)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: tap exclusivity probe",
+      "why_it_exists": "0.12s settle per tap.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 476,
+      "delay_s": 0.08,
+      "expr": "0.08",
+      "source": "time.sleep(0.08)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: tap exclusivity probe",
+      "why_it_exists": "0.08s settle per tap.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 487,
+      "delay_s": 0.2,
+      "expr": "0.2",
+      "source": "time.sleep(0.2)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: UDP crosstalk probe",
+      "why_it_exists": "0.2s settle.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 500,
+      "delay_s": 0.7,
+      "expr": "0.7",
+      "source": "time.sleep(0.7)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: UDP crosstalk probe",
+      "why_it_exists": "0.7s recording window.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/audio/tap_trust.py",
+      "line": 502,
+      "delay_s": 0.35,
+      "expr": "0.35",
+      "source": "time.sleep(0.35)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "lab: UDP crosstalk probe",
+      "why_it_exists": "0.35s settle.",
+      "recommendation": "Lab only."
+    },
+    {
+      "file": "src/copilot/importing/ableton_launcher_v1.py",
+      "line": 73,
+      "delay_s": 1.5,
+      "expr": "1.5",
+      "source": "time.sleep(1.5)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "import-project / project launch",
+      "why_it_exists": "Fixed 1.5s between clearing the crash flag and starting Live. No condition.",
+      "recommendation": "Replace with a bounded wait on the crash flag file actually being absent."
+    },
+    {
+      "file": "src/copilot/importing/ableton_launcher_v1.py",
+      "line": 211,
+      "delay_s": 2.0,
+      "expr": "2.0",
+      "source": "time.sleep(2.0)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "import-project / controlled relaunch",
+      "why_it_exists": "Fixed 2.0s before the single permitted relaunch.",
+      "recommendation": "Same treatment as line 73. Only fires on the relaunch path."
+    },
+    {
+      "file": "src/copilot/importing/ableton_launcher_v1.py",
+      "line": 244,
+      "delay_s": 3.0,
+      "expr": "3.0",
+      "source": "time.sleep(3.0)",
+      "classification": "ARBITRARY_DELAY",
+      "workflow": "import-project / project launch",
+      "why_it_exists": "Fixed 3.0s after taskkill confirms the process is gone. Hedge for Windows file-handle release on the prefs/crash files; no condition is checked.",
+      "recommendation": "Poll for the prefs/crash file becoming openable, bounded at 3s. Typical release is far below 3s."
+    },
+    {
+      "file": "src/copilot/importing/ableton_launcher_v1.py",
+      "line": 246,
+      "delay_s": 0.4,
+      "expr": "0.4",
+      "source": "time.sleep(0.4)",
+      "classification": "POLLING_INEFFICIENCY",
+      "workflow": "import-project / project launch",
+      "why_it_exists": "0.4s poll interval while waiting for the Live process to exit.",
+      "recommendation": "Fine. 0.4s against a multi-second process teardown is proportionate."
+    },
+    {
+      "file": "src/copilot/importing/m4l_runtime_v1.py",
+      "line": 248,
+      "delay_s": null,
+      "expr": "delay",
+      "source": "time.sleep(delay)",
+      "classification": "BACKOFF",
+      "workflow": "m4l runtime resolution",
+      "why_it_exists": "Escalating delays while waiting for the Browser to index a freshly written device.",
+      "recommendation": "Bounded and condition-checked between attempts. Keep, but give it an explicit deadline."
+    }
+  ]
+}

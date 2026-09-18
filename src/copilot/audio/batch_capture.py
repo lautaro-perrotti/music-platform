@@ -59,10 +59,12 @@ from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
 from copilot.schemas.observation import CaptureView, ObservationSource, SignalPoint
 
+from copilot.audio.capture_scalability_v2 import slot_staging_map
+
 CAPTURE_HOST = "Copilot Capture"
 CAPTURE_KICK = "Copilot Capture Kick"
 CAPTURE_BASS = "Copilot Capture Bass"
-SLOT_FILES = {0: STAGING_NAME, 1: STAGING_KICK, 2: STAGING_BASS}
+SLOT_FILES = slot_staging_map()
 
 
 def mixer_fingerprint(daw: AbletonTcpAdapter) -> list[dict[str, object]]:
@@ -128,7 +130,7 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
     time.sleep(0.6)
     from copilot.audio.live_capture import find_taps_on_track
 
-    found = find_taps_on_track(daw, track_index)
+    found = find_taps_on_track(daw, track_index, refresh=True)
     slotted = None
     for device in found:
         params = daw.get_device_parameters(track_index, int(device["index"]))
@@ -136,6 +138,29 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
         if "slot" in names:
             slotted = device
             break
+    if slotted is None:
+        from copilot.importing.m4l_runtime_v1 import DEVICE_ALIAS_V4, find_canonical_tap_uri
+
+        alt = find_canonical_tap_uri(daw)
+        if alt and alt != uri:
+            for device in found:
+                try:
+                    daw.delete_device(track_index, int(device["index"]))
+                except DawError:
+                    pass
+            time.sleep(0.3)
+            loaded = daw.load_instrument_or_effect(track_index, alt)
+            if loaded.get("error"):
+                loaded = daw.load_browser_item(track_index, alt)
+            time.sleep(0.6)
+            found = find_taps_on_track(daw, track_index, refresh=True)
+            for device in found:
+                params = daw.get_device_parameters(track_index, int(device["index"]))
+                names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
+                if "slot" in names:
+                    slotted = device
+                    loaded = {**loaded, "uncached_alias": DEVICE_ALIAS_V4, "uri": alt}
+                    break
     if slotted is None:
         if existing is not None:
             for device in found:
@@ -159,7 +184,7 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
             daw.delete_device(track_index, int(existing["index"]))
         except DawError:
             pass
-        found = find_taps_on_track(daw, track_index)
+        found = find_taps_on_track(daw, track_index, refresh=True)
         for device in found:
             params = daw.get_device_parameters(track_index, int(device["index"]))
             names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
@@ -174,19 +199,24 @@ def route_host_post_mixer(
     host_index: int,
     target_name: str,
 ) -> dict[str, object]:
-    before = {
-        "input": daw.get_track_input_routing(host_index),
-        "output": daw.get_track_output_routing(host_index),
-    }
+    from copilot.runtime.host_state import read_capture_host_state
+
+    try:
+        before_state = read_capture_host_state(daw, host_index, fresh=False)
+        before = {
+            "input": dict(before_state.get("input") or {}),
+            "output": dict(before_state.get("output") or {}),
+        }
+    except KeyError:
+        before = {
+            "input": daw.get_track_input_routing(host_index),
+            "output": daw.get_track_output_routing(host_index),
+        }
     routed = route_capture_from_track(daw, host_index, target_name, "Post Mixer")
     try:
         daw.set_track_monitoring(host_index, "in")
     except DawError:
         pass
-    try:
-        monitor = daw.get_track_monitoring(host_index)
-    except DawError:
-        monitor = {}
     outs = list(daw.get_available_outputs(host_index).get("available_outputs") or [])
     off = _pick_output(outs, "No Output", "Sends Only")
     if not off:
@@ -195,7 +225,16 @@ def route_host_post_mixer(
             f"capture host cannot leave Main; outputs={outs}",
         )
     set_out = daw.set_track_output_routing(host_index, off, "")
-    check = daw.get_track_output_routing(host_index)
+    try:
+        after = read_capture_host_state(daw, host_index, fresh=True)
+        monitor = after.get("monitoring") or {}
+        check = after.get("output") or {}
+    except KeyError:
+        try:
+            monitor = daw.get_track_monitoring(host_index)
+        except DawError:
+            monitor = {}
+        check = daw.get_track_output_routing(host_index)
     out_type = str(check.get("output_routing_type") or set_out.get("output_routing_type") or "")
     through_main = out_type.lower() in {"main", "master"}
     return {
@@ -760,6 +799,7 @@ def capture_parallel_pass(
 ) -> dict[str, Any]:
     """One transport start/stop. Several taps record at once."""
     timings: dict[str, Any] = {}
+    transport_stopped = False
     t_all = time.perf_counter()
     from uuid import uuid4
 
@@ -960,6 +1000,7 @@ def capture_parallel_pass(
         stop_rtt = time.perf_counter() - t_stop
         t0 = time.perf_counter()
         daw.stop_playback()
+        transport_stopped = True
         stop_bd["stop_playback"] = {"s": time.perf_counter() - t0}
         t0 = time.perf_counter()
         stop_post = _stop_session_clips(daw, fire_tracks)
@@ -1122,6 +1163,13 @@ def capture_parallel_pass(
                     )
                 except (DawError, AudioCaptureError):
                     pass
+        if not transport_stopped:
+            # The longest window in this function is the real-time region
+            # sleep. An interrupt there would otherwise leave Live playing.
+            try:
+                daw.stop_playback()
+            except BaseException:  # noqa: BLE001 — cleanup must not mask the cancel
+                pass
 
 
 def assets_from_wav_card(

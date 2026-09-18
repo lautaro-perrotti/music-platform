@@ -116,6 +116,62 @@ class TransactionManager:
         logger.error("in_doubt %s: %s", txn.transaction_id, error)
         return txn
 
+    def mark_prepared(self) -> None:
+        if self._open is not None:
+            self._open.status = TransactionStatus.PREPARED
+        self._journal(kind="prepared", status=TransactionStatus.PREPARED)
+
+    def mark_cancelled(self, error: str) -> AgentTransaction:
+        if self._open is None:
+            raise DawError("No open transaction")
+        if self._open.status in {
+            TransactionStatus.SENT,
+            TransactionStatus.IN_DOUBT,
+        }:
+            return self.mark_in_doubt(error)
+        self._open.status = TransactionStatus.CANCELLED
+        self._open.error = error
+        txn = self._open
+        self.history.append(txn)
+        self._open = None
+        self._journal(kind="cancel", status=TransactionStatus.CANCELLED, error=error)
+        logger.info("cancelled %s: %s", txn.transaction_id, error)
+        return txn
+
+    def mark_superseded(self, error: str) -> AgentTransaction:
+        if self._open is None:
+            raise DawError("No open transaction")
+        if self._open.status in {
+            TransactionStatus.SENT,
+            TransactionStatus.APPLIED,
+            TransactionStatus.IN_DOUBT,
+        }:
+            raise DawError("in-flight transaction cannot be superseded")
+        self._open.status = TransactionStatus.SUPERSEDED
+        self._open.error = error
+        txn = self._open
+        self.history.append(txn)
+        self._open = None
+        self._journal(
+            kind="supersede", status=TransactionStatus.SUPERSEDED, error=error
+        )
+        logger.info("superseded %s: %s", txn.transaction_id, error)
+        return txn
+
+    def mark_partial_failure(self, error: str) -> AgentTransaction:
+        if self._open is None:
+            raise DawError("No open transaction")
+        self._open.status = TransactionStatus.PARTIAL_FAILURE
+        self._open.error = error
+        txn = self._open
+        self.history.append(txn)
+        self._open = None
+        self._journal(
+            kind="write", status=TransactionStatus.PARTIAL_FAILURE, error=error
+        )
+        logger.error("partial_failure %s: %s", txn.transaction_id, error)
+        return txn
+
     def record(
         self,
         *,

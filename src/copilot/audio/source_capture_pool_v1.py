@@ -169,3 +169,131 @@ def capture_source_post_mixer_ref(
         "identity_restored": session.project_identity == identity_before["project_identity"],
     }
     return result
+
+
+def capture_sources_post_mixer_batch_refs(
+    daw: AbletonTcpAdapter,
+    *,
+    session: SessionState,
+    preflight: dict[str, Any],
+    target_refs: list[PersistentObjectRef | dict[str, Any]],
+    start_qn: float,
+    end_qn: float,
+    region_id: str,
+    tempo: float,
+    dest_root: Path,
+    ready_names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Batched sibling of capture_source_post_mixer_ref.
+
+    Resolves every PersistentObjectRef, then records the group in ONE playback
+    pass. Identity is restored afterwards exactly as in the single-source path:
+    frozen isolation calls attach_tokens(session) without a path and would
+    otherwise switch identity from the live-set path to a structural
+    fingerprint.
+    """
+    from copilot.audio.source_capture_batch_v1 import (
+        MILESTONE as BATCH_MILESTONE,
+        capture_sources_post_mixer_batch,
+    )
+
+    retain_tokens(session)
+    refs = [
+        item
+        if isinstance(item, PersistentObjectRef)
+        else PersistentObjectRef.model_validate(item)
+        for item in target_refs
+    ]
+    tracks: list[Any] = []
+    failures: list[dict[str, Any]] = []
+    for ref in refs:
+        resolved = resolve_track(session, ref)
+        if resolved.status is not ResolveStatus.RESOLVED or resolved.track_index is None:
+            failures.append(
+                {
+                    "ok": False,
+                    "signal_status": "CAPTURE_FAILED",
+                    "error": f"resolve_{resolved.status.value}",
+                    "ref": ref.model_dump(mode="json"),
+                    "milestone": BATCH_MILESTONE,
+                }
+            )
+            continue
+        track = next(
+            (item for item in session.tracks if item.index == resolved.track_index), None
+        )
+        if track is None:
+            failures.append(
+                {
+                    "ok": False,
+                    "signal_status": "CAPTURE_FAILED",
+                    "error": "resolved_index_missing",
+                    "ref": ref.model_dump(mode="json"),
+                    "milestone": BATCH_MILESTONE,
+                }
+            )
+            continue
+        tracks.append(track)
+    # A batch is only meaningful if every member resolved: a partially prepared
+    # group would leave one host routed with nothing recording it.
+    if failures:
+        return [
+            {
+                "ok": False,
+                "signal_status": "CAPTURE_FAILED",
+                "error": "BATCH_TARGET_UNRESOLVED",
+                "ref": ref.model_dump(mode="json"),
+                "milestone": BATCH_MILESTONE,
+                "batch_failed_closed": True,
+                "resolve_failures": failures,
+            }
+            for ref in refs
+        ]
+
+    saved_path = session.project_path
+    saved_name = session.project_name
+    identity_before = {
+        "project_identity": session.project_identity,
+        "project_token": session.project_token,
+        "audible_token": session.audible_token,
+        "project_path": saved_path,
+        "track_count": len(session.tracks),
+    }
+    try:
+        results = capture_sources_post_mixer_batch(
+            daw,
+            session=session,
+            preflight=preflight,
+            tracks=tracks,
+            start_qn=start_qn,
+            end_qn=end_qn,
+            region_id=region_id,
+            tempo=tempo,
+            dest_root=dest_root,
+            ready_names=ready_names,
+        )
+    finally:
+        attach_tokens(session, path=saved_path, name=saved_name)
+
+    audit = {
+        "before": identity_before,
+        "after_restore": {
+            "project_identity": session.project_identity,
+            "project_token": session.project_token,
+            "audible_token": session.audible_token,
+            "project_path": session.project_path,
+            "track_count": len(session.tracks),
+        },
+        "path_restored": session.project_path == saved_path,
+        "identity_restored": session.project_identity
+        == identity_before["project_identity"],
+    }
+    for result, ref in zip(results, refs):
+        result["ref"] = ref.model_dump(mode="json")
+        result["identity_audit"] = audit
+        result["pool"] = {
+            "milestone": BATCH_MILESTONE,
+            "batched": True,
+            "infra_hosts": list(INFRA_HOSTS),
+        }
+    return results

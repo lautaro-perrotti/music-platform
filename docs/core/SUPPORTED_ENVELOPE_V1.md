@@ -20,7 +20,7 @@ It does **not** mean every Ableton or music-production feature exists.
 | Astra | One structured call via `reason()`. Statuses stay distinct. |
 | MusicPlan | `SET_TRACK_VOLUME` only. Freshness gate. Canonical execute/rollback on the development set. |
 | Rollback / State Trust | Unchanged frozen layers. IN_DOUBT is not success. |
-| Read-only producer | `python -m copilot.cli producer-analyze` |
+| Read-only producer | `python -m copilot.cli analyze-project "<folder>"` (one high-level call). `producer-analyze` remains for debug. |
 | Autonomous | `python -m copilot.cli producer-run --mode autonomous` reuses analyze, then the frozen FAMI runner **only** on the development working copy. External-project writes stay `ACTION_NOT_AVAILABLE` until a second real song is validated. |
 | Health | `python -m copilot.cli doctor`. Live is ready only after `SESSION_READY` (`LIVE_SESSION_READINESS_V1` **FROZEN**). A listening port is not ready. |
 | Onboard | `python -m copilot.cli onboard-project` (alias `project-ready`) |

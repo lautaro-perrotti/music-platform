@@ -1,0 +1,77 @@
+{
+  "artifact": "physical_dsp_v2",
+  "measured_at": "2026-09-18T05:40:56.648873+00:00",
+  "capability_id": "PHYSICAL_DSP_V2",
+  "analyzer_version": "2.0.0",
+  "environment": {
+    "note": "Synthetic 2 s stereo mixture + impulse train. Not a Live capture measurement.",
+    "sample_rate": 44100,
+    "duration_s": 2.0,
+    "providers": [
+      {
+        "provider_id": "numpy",
+        "available": true,
+        "version": "2.4.4",
+        "limitation": null
+      },
+      {
+        "provider_id": "scipy",
+        "available": true,
+        "version": "1.17.1",
+        "limitation": null
+      },
+      {
+        "provider_id": "pyloudnorm",
+        "available": true,
+        "version": "0.2.0",
+        "limitation": null
+      },
+      {
+        "provider_id": "soundfile",
+        "available": true,
+        "version": "0.14.0",
+        "limitation": null
+      },
+      {
+        "provider_id": "librosa",
+        "available": false,
+        "version": "missing",
+        "limitation": "LIBROSA_NOT_INSTALLED"
+      },
+      {
+        "provider_id": "essentia",
+        "available": false,
+        "version": "license-blocked",
+        "limitation": "ESSENTIA_LICENSE_BLOCKED"
+      }
+    ]
+  },
+  "measurements": {
+    "first_pass_cache_miss": {
+      "wall_s": 0.5168285000036121,
+      "cpu_s": 0.46875,
+      "cache_hits": 0,
+      "cache_misses": 7,
+      "observation_count": 7
+    },
+    "second_pass_cache_hit": {
+      "wall_s": 0.004625699999451172,
+      "cpu_s": 0.0,
+      "cache_hits": 7,
+      "cache_misses": 0,
+      "observation_count": 7
+    },
+    "region_plus_beat_granularity": {
+      "wall_s": 1.0858420000004116,
+      "cpu_s": 0.96875,
+      "observation_count": 35
+    },
+    "relational_pair": {
+      "wall_s": 0.06447430000116583,
+      "cpu_s": 0.0625,
+      "observation_count": 1
+    }
+  },
+  "repeats": 2,
+  "third_pass": null
+}

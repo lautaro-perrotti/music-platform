@@ -289,7 +289,7 @@
 							"parameter_initial" : [ 0 ],
 							"parameter_initial_enable" : 1,
 							"parameter_longname" : "Slot",
-							"parameter_mmax" : 2.0,
+							"parameter_mmax" : 8.0,
 							"parameter_mmin" : 0.0,
 							"parameter_shortname" : "Slot",
 							"parameter_type" : 1,
@@ -315,7 +315,7 @@
 					"presentation_rect" : [ 124.0, 32.0, 36.0, 15.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_initial" : [ 3 ],
+							"parameter_initial" : [ 4 ],
 							"parameter_initial_enable" : 1,
 							"parameter_longname" : "TapProtocol",
 							"parameter_mmax" : 16.0,
@@ -348,10 +348,10 @@
 					"id" : "obj-slotsel",
 					"maxclass" : "newobj",
 					"numinlets" : 3,
-					"numoutlets" : 4,
-					"outlettype" : [ "bang", "bang", "bang", "" ],
-					"patching_rect" : [ 200.0, 112.0, 73.0, 22.0 ],
-					"text" : "sel 0 1 2"
+					"numoutlets" : 10,
+					"outlettype" : [ "bang", "bang", "bang", "bang", "bang", "bang", "bang", "bang", "bang", "" ],
+					"patching_rect" : [ 200.0, 112.0, 160.0, 22.0 ],
+					"text" : "sel 0 1 2 3 4 5 6 7 8"
 				}
 
 			}
@@ -376,6 +376,78 @@
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 192.0, 270.0, 22.0 ],
 					"text" : "open D:/MusicCopilot/captures/_next_bass.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open3",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 216.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s3.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open4",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 240.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s4.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open5",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 264.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s5.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open6",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 288.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s6.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open7",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 312.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s7.wav"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-open8",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 56.0, 336.0, 290.0, 22.0 ],
+					"text" : "open D:/MusicCopilot/captures/_next_s8.wav"
 				}
 
 			}
@@ -559,6 +631,90 @@
 				"patchline" : 				{
 					"destination" : [ "obj-rec", 0 ],
 					"source" : [ "obj-wave", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open3", 0 ],
+					"source" : [ "obj-slotsel", 3 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open3", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open4", 0 ],
+					"source" : [ "obj-slotsel", 4 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open4", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open5", 0 ],
+					"source" : [ "obj-slotsel", 5 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open5", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open6", 0 ],
+					"source" : [ "obj-slotsel", 6 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open6", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open7", 0 ],
+					"source" : [ "obj-slotsel", 7 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open7", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-open8", 0 ],
+					"source" : [ "obj-slotsel", 8 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-rec", 0 ],
+					"source" : [ "obj-open8", 0 ]
 				}
 
 			}

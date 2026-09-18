@@ -143,7 +143,30 @@ def analyze_source_event(
     }
 
 
-def _snapshot_host(daw: AbletonTcpAdapter, host_index: int) -> dict[str, Any]:
+def _host_snapshot_from_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "input": dict(state.get("input") or {}),
+        "output": dict(state.get("output") or {}),
+        "monitoring": dict(state.get("monitoring") or {}),
+        "sends": list(state.get("sends") or []),
+        "info": dict(state.get("info") or {}),
+        "devices": list(state.get("devices") or []),
+        "taps": list(state.get("taps") or []),
+        "provenance": dict(state.get("provenance") or {}),
+    }
+
+
+def _snapshot_host(
+    daw: AbletonTcpAdapter, host_index: int, *, fresh: bool = False
+) -> dict[str, Any]:
+    from copilot.runtime.host_state import read_capture_host_state
+
+    try:
+        return _host_snapshot_from_state(
+            read_capture_host_state(daw, int(host_index), fresh=fresh)
+        )
+    except KeyError:
+        pass
     info = daw.get_track_info(host_index)
     try:
         monitoring = daw.get_track_monitoring(host_index)
@@ -162,34 +185,76 @@ def _snapshot_host(daw: AbletonTcpAdapter, host_index: int) -> dict[str, Any]:
     }
 
 
-def _restore_host_full(
+def _snapshot_hosts(
+    daw: AbletonTcpAdapter, indices: list[int], *, fresh: bool = False
+) -> dict[int, dict[str, Any]]:
+    from copilot.runtime.host_state import read_capture_hosts_state
+
+    wanted = [int(i) for i in indices]
+    try:
+        states = read_capture_hosts_state(daw, wanted, fresh=fresh)
+        if len(states) == len(wanted):
+            return {idx: _host_snapshot_from_state(state) for idx, state in states.items()}
+    except Exception:
+        states = {}
+    assembled: dict[int, dict[str, Any]] = {}
+    for idx in wanted:
+        if idx in states:
+            assembled[idx] = _host_snapshot_from_state(states[idx])
+            continue
+        try:
+            assembled[idx] = _snapshot_host(daw, idx, fresh=fresh)
+        except TypeError:
+            assembled[idx] = _snapshot_host(daw, idx)
+    return assembled
+
+
+def _apply_host_restore(
     daw: AbletonTcpAdapter,
     host_index: int,
     before: dict[str, Any],
-) -> dict[str, Any]:
+) -> list[str]:
     errors = restore_host_routing(daw, host_index, before)
     try:
-        mon = str((before.get("monitoring") or {}).get("monitoring") or (before.get("monitoring") or {}).get("value") or "")
+        mon = str(
+            (before.get("monitoring") or {}).get("monitoring")
+            or (before.get("monitoring") or {}).get("value")
+            or ""
+        )
         if mon:
             daw.set_track_monitoring(host_index, mon)
     except DawError:
         errors.append("host monitoring unrestored")
-    # Restore send levels if we zeroed them.
     for row in before.get("sends") or []:
         try:
             idx = int(row.get("send_index", 0))
-            level = float(row.get("value") if row.get("value") is not None else row.get("level") or 0.0)
+            level = float(
+                row.get("value") if row.get("value") is not None else row.get("level") or 0.0
+            )
             daw.set_send_level(host_index, idx, level)
         except Exception:
             errors.append(f"send:{row.get('send_index')} unrestored")
-    after = _snapshot_host(daw, host_index)
+    return errors
+
+
+def _restore_matches(before: dict[str, Any], after: dict[str, Any], errors: list[str]) -> bool:
     prev_in = str((before.get("input") or {}).get("input_routing_type") or "")
     now_in = str((after.get("input") or {}).get("input_routing_type") or "")
     prev_ch = str((before.get("input") or {}).get("input_routing_channel") or "")
     now_ch = str((after.get("input") or {}).get("input_routing_channel") or "")
     prev_out = str((before.get("output") or {}).get("output_routing_type") or "")
     now_out = str((after.get("output") or {}).get("output_routing_type") or "")
-    ok = prev_in == now_in and prev_ch == now_ch and prev_out == now_out and not errors
+    return prev_in == now_in and prev_ch == now_ch and prev_out == now_out and not errors
+
+
+def _restore_host_full(
+    daw: AbletonTcpAdapter,
+    host_index: int,
+    before: dict[str, Any],
+) -> dict[str, Any]:
+    errors = _apply_host_restore(daw, host_index, before)
+    after = _snapshot_host(daw, host_index, fresh=True)
+    ok = _restore_matches(before, after, errors)
     return {
         "ok": ok,
         "errors": errors,
@@ -210,9 +275,24 @@ def _silence_sends(daw: AbletonTcpAdapter, host_index: int) -> list[str]:
     return mutations
 
 
-def _verify_off_mix_graph(daw: AbletonTcpAdapter, host_index: int, target_name: str) -> dict[str, Any]:
-    info = daw.get_track_info(host_index)
-    sends = list(info.get("sends") or []) or daw.get_track_sends(host_index)
+def _verify_off_mix_graph(
+    daw: AbletonTcpAdapter,
+    host_index: int,
+    target_name: str,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if state is None:
+        from copilot.runtime.host_state import read_capture_host_state
+
+        try:
+            packed = read_capture_host_state(daw, host_index, fresh=True)
+            state = _host_snapshot_from_state(packed)
+        except KeyError:
+            state = None
+    info = (state or {}).get("info") or daw.get_track_info(host_index)
+    sends = list((state or {}).get("sends") or info.get("sends") or []) or daw.get_track_sends(
+        host_index
+    )
     claim = routing_claim(
         input_type=str(info.get("input_routing_type") or ""),
         input_channel=str(info.get("input_routing_channel") or ""),

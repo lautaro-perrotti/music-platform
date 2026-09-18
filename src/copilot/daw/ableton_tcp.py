@@ -21,6 +21,7 @@ from copilot.daw.protocol import (
 from copilot.daw.state_hash import ObservedRevision
 from copilot.daw.timeouts import DEFAULT_TIMEOUTS, TimeoutPolicy
 from copilot.daw.write import WriteInDoubt
+from copilot.runtime.freshness import FreshnessClock, FreshnessDomain
 from copilot.schemas.session import (
     ClipState,
     DeviceState,
@@ -36,6 +37,19 @@ from copilot.schemas.session import (
 
 DEFAULT_HOST = os.environ.get("ABLETON_MCP_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABLETON_MCP_PORT", "9877"))
+
+_RICH_TRACK_FIELDS = ("sends", "taps", "devices", "clip_slots")
+
+
+def _merge_track_info(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    """Preserve richer topology fields when a narrower get_track_info overwrites."""
+    merged = dict(existing or {})
+    merged.update(incoming)
+    for key in _RICH_TRACK_FIELDS:
+        if key not in incoming and existing is not None and key in existing:
+            merged[key] = existing[key]
+    return merged
+
 
 
 def _is_transport_failure(exc: BaseException) -> bool:
@@ -68,6 +82,8 @@ class AbletonTcpAdapter(DawAdapter):
         self.observed = ObservedRevision()
         self.session_incarnation_id = f"sess_{uuid4().hex[:12]}"
         self.capabilities: set[str] = set()
+        self.compound_mutation_version: str | None = None
+        self.compound_supported_operations: list[str] = []
         self.handshake_info: dict[str, Any] = {}
         self.strict_capabilities = True
         self._recv_buf = ""
@@ -84,6 +100,7 @@ class AbletonTcpAdapter(DawAdapter):
         self.profile_track_info = False
         self.track_info_sites: Counter[str] = Counter()
         self.batch_control_live: bool | None = None
+        self.freshness = FreshnessClock()
 
     def reset_tcp_stats(self) -> None:
         self.tcp_counts = Counter()
@@ -119,6 +136,11 @@ class AbletonTcpAdapter(DawAdapter):
             hello = self._command("protocol_hello", side_effect=False)
             self.handshake_info = hello
             self.capabilities = set(hello.get("capabilities") or [])
+            version = hello.get("compound_mutation_version")
+            self.compound_mutation_version = str(version) if version else None
+            self.compound_supported_operations = list(
+                hello.get("compound_supported_operations") or []
+            )
         except DawError as exc:
             if isinstance(exc, ProtocolError) or _is_transport_failure(exc):
                 self.disconnect()
@@ -200,13 +222,29 @@ class AbletonTcpAdapter(DawAdapter):
         self.last_project = self._project_cached
         return self.last_project
 
-    def snapshot(self, *, include_notes: bool = True) -> SessionState:
+    def snapshot(self, *, include_notes: bool = True, fresh: bool = False) -> SessionState:
         self.snapshot_calls += 1
+        if (
+            not include_notes
+            and not fresh
+            and isinstance(self.last_topology, dict)
+            and isinstance(self.last_topology.get("tracks"), list)
+            and self.freshness.snapshot_reusable()
+        ):
+            self.snapshot_source = "reused_topology"
+            return self._session_from_topology(self.last_topology, include_notes=False)
         topology = self._safe_command("get_capture_topology", default=None)
         if isinstance(topology, dict) and isinstance(topology.get("tracks"), list):
             self.snapshot_source = "topology"
             self.last_topology = topology
-            return self._session_from_topology(topology, include_notes=include_notes)
+            session = self._session_from_topology(topology, include_notes=include_notes)
+            tracks = [
+                int(item["index"])
+                for item in topology.get("tracks") or []
+                if "index" in item
+            ]
+            self.freshness.mark_topology_read(tracks)
+            return session
         batched = self._safe_command("get_tracks_info", default=None)
         session = self._command("get_session_info")
         playback = self._command("get_playback_position")
@@ -473,6 +511,10 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
+    def execute_mutation_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Whitelisted compound temporary mutations. Handshake-gated."""
+        return self._command("execute_mutation_batch", payload, side_effect=True)
+
     def set_device_parameters(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         return self._command(
             "set_device_parameters",
@@ -521,18 +563,46 @@ class AbletonTcpAdapter(DawAdapter):
             site = f"{Path(frame.filename).name}:{frame.lineno}:{frame.function}"
             self.track_info_sites[site] += 1
         info = self._command("get_track_info", {"track_index": track_index})
-        self.last_track_infos[int(track_index)] = info
-        return info
+        index = int(track_index)
+        merged = _merge_track_info(self.last_track_infos.get(index), info)
+        self.last_track_infos[index] = merged
+        return merged
 
-    def get_tracks_info(self, indices: list[int] | None = None) -> dict[str, Any]:
+    def get_tracks_info(
+        self, indices: list[int] | None = None, *, fresh: bool = False
+    ) -> dict[str, Any]:
+        del fresh  # wrapper uses this flag; the adapter always round-trips
         params: dict[str, Any] = {}
         if indices is not None:
             params["indices"] = [int(index) for index in indices]
         result = self._command("get_tracks_info", params)
         for item in result.get("tracks") or []:
             if "index" in item:
-                self.last_track_infos[int(item["index"])] = item
+                idx = int(item["index"])
+                self.last_track_infos[idx] = _merge_track_info(
+                    self.last_track_infos.get(idx), item
+                )
         return result
+
+    def get_capture_hosts_state(
+        self, indices: list[int] | None = None, *, fresh: bool = False
+    ) -> dict[str, Any]:
+        """READ_CAPTURE_HOSTS_STATE. Same payload as get_tracks_info on current Live."""
+        return self.get_tracks_info(indices, fresh=fresh)
+
+    def get_tracks_sends(self, indices: list[int]) -> dict[str, Any]:
+        batched = self.get_tracks_info([int(i) for i in indices])
+        rows = []
+        for item in batched.get("tracks") or []:
+            if "index" not in item:
+                continue
+            rows.append(
+                {
+                    "track_index": int(item["index"]),
+                    "sends": list(item.get("sends") or []),
+                }
+            )
+        return {"tracks": rows}
 
     def get_capture_topology(self) -> dict[str, Any]:
         result = self._command("get_capture_topology")
@@ -722,9 +792,10 @@ class AbletonTcpAdapter(DawAdapter):
         )
 
     def get_track_sends(self, track_index: int, *, limit: int = 16) -> list[dict[str, Any]]:
-        cached = self.last_track_infos.get(int(track_index))
-        if cached and isinstance(cached.get("sends"), list):
-            return list(cached["sends"])
+        if self.freshness.is_fresh(FreshnessDomain.SEND_STATE, int(track_index)):
+            cached = self.last_track_infos.get(int(track_index))
+            if cached and isinstance(cached.get("sends"), list):
+                return list(cached["sends"])
         batched = self._safe_command(
             "get_track_sends", {"track_index": track_index}, default=None
         )
@@ -970,6 +1041,9 @@ class AbletonTcpAdapter(DawAdapter):
         if response.get("status") == "error":
             raise DawError(response.get("message", "Unknown Ableton error"))
         result = response.get("result", {})
+        if side_effect:
+            self.freshness.apply_mutation(command_type, params or {})
+            self._last_freshness_mutation = command_type
         if not isinstance(result, dict):
             return {"value": result}
         return result

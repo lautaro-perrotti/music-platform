@@ -99,6 +99,7 @@ COMMAND_CAPABILITY = {
     "create_audio_clip": "clip.create",
     "set_clip_warping": "clip.write_notes",
     "set_clip_loop": "clip.write_notes",
+    "execute_mutation_batch": "compound.temporary_mutation",
 }
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
