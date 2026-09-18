@@ -84,6 +84,8 @@ COMMAND_CAPABILITY = {
     "get_track_available_input_types": "session.read",
     "get_track_available_output_types": "session.read",
     "get_session_automation_record": "session.read",
+    "get_arrangement_length": "session.read",
+    "get_current_song_time": "session.read",
     "get_clip_automation": "session.read",
     "set_track_input_routing": "track.mute",
     "set_track_output_routing": "track.mute",
@@ -104,6 +106,7 @@ COMMAND_CAPABILITY = {
     "get_clip_warp_info": "session.read",
     "set_clip_warp_mode": "clip.write_notes",
     "create_audio_clip": "clip.create",
+    "duplicate_clip_to_arrangement": "clip.create",
     "set_clip_warping": "clip.write_notes",
     "set_clip_loop": "clip.write_notes",
 }

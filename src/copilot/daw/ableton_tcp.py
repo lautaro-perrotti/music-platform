@@ -867,6 +867,24 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
+    def duplicate_clip_to_arrangement(
+        self,
+        track_index: int,
+        clip_index: int,
+        destination_time: float,
+        length: float | None = None,
+    ) -> dict[str, Any]:
+        return self._command(
+            "duplicate_clip_to_arrangement",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "destination_time": destination_time,
+                "length": length,
+            },
+            side_effect=True,
+        )
+
     def fire_clip(self, track_index: int, clip_index: int) -> dict[str, Any]:
         return self._command(
             "fire_clip",

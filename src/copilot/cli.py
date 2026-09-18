@@ -2993,6 +2993,20 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     else:
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
     ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
+    # End-to-end finalization: arrangement timeline + mix/master, before save.
+    if ok and leave:
+        from copilot.musicplan.arrangement_builder import build_arrangement
+        from copilot.musicplan.mix_tweaks import apply_mix
+
+        final_session = daw.snapshot()
+        arr = build_arrangement(daw, session=final_session)
+        print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")
+        for e in arr["errors"][:6]:
+            print(f"  ! {e}")
+        mix = apply_mix(daw, session=final_session)
+        print(f"MIX/MASTER: {mix['volumes']} volúmenes · {mix['master_devices']} dispositivos master · {mix['master_tweaks']} tweaks · {len(mix['errors'])} errores")
+        for e in mix["errors"][:6]:
+            print(f"  ! {e}")
     # Post-build: persist the set, then run the structured critique.
     if ok and leave:
         try:

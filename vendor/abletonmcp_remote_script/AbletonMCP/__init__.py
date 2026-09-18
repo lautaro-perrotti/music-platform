@@ -621,7 +621,7 @@ class AbletonMCP(ControlSurface):
                                  "set_track_volume", "set_track_pan",
                                  "delete_track", "duplicate_track", "set_track_color",
                                  "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
-                                 "duplicate_clip", "set_clip_color", "set_clip_loop",
+                                 "duplicate_clip", "duplicate_clip_to_arrangement", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item", "load_browser_item_by_path",
@@ -908,6 +908,14 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             result = self._duplicate_clip(track_index, clip_index)
+                        elif command_type == "duplicate_clip_to_arrangement":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            destination_time = params.get("destination_time", 0.0)
+                            length = params.get("length", None)
+                            result = self._duplicate_clip_to_arrangement(
+                                track_index, clip_index, destination_time, length
+                            )
                         elif command_type == "set_clip_color":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -3097,6 +3105,54 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error duplicating clip: " + str(e))
+            raise
+
+    def _duplicate_clip_to_arrangement(self, track_index, clip_index, destination_time, length=None):
+        """Duplicate a session clip into the Arrangement at destination_time (beats).
+
+        Optionally extend the resulting arrangement clip to `length` beats and
+        enable looping so it spans the full section.
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+            bar_beats = 4.0
+            if length is not None and float(length) > bar_beats:
+                # per-bar duplication: place one copy every bar (source clip is a
+                # 1-bar loop, so copies tile the section exactly). Avoids relying
+                # on Clip.end_time (read-only) / duplicate_loop (MIDI-only).
+                n = int(round(float(length) / bar_beats))
+                names = []
+                dst = float(destination_time)
+                for i in range(n):
+                    arr_clip = track.duplicate_clip_to_arrangement(clip, dst + i * bar_beats)
+                    names.append(arr_clip.name)
+                return {
+                    "duplicated": True,
+                    "copies": n,
+                    "start_time": dst,
+                    "length": n * bar_beats,
+                    "looping": True,
+                    "names": names,
+                }
+            arr_clip = track.duplicate_clip_to_arrangement(clip, float(destination_time))
+            return {
+                "duplicated": True,
+                "name": arr_clip.name,
+                "start_time": arr_clip.start_time,
+                "end_time": arr_clip.end_time,
+                "length": arr_clip.length,
+                "looping": bool(getattr(arr_clip, "looping", False)),
+            }
+        except Exception as e:
+            self.log_message("Error duplicating clip to arrangement: " + str(e))
             raise
 
     def _set_clip_color(self, track_index, clip_index, color):
