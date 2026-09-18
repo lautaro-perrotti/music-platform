@@ -888,8 +888,11 @@ class AbletonTcpAdapter(DawAdapter):
         if not uri.startswith("query:"):
             name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
             if name not in self._device_uri_cache:
-                sr = self.search_browser(name, "all")
+                sr = self.search_browser(name, "audio_effects")
                 results = sr.get("results", []) if isinstance(sr, dict) else []
+                if not results:
+                    sr = self.search_browser(name, "all")
+                    results = sr.get("results", []) if isinstance(sr, dict) else []
                 device = next((r for r in results if r.get("is_device")), None)
                 self._device_uri_cache[name] = device.get("uri", uri) if device else uri
             uri = self._device_uri_cache[name]
