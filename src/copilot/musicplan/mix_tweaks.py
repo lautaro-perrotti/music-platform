@@ -9,6 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from copilot.producer.parameter_registry import (
+    get_device_spec,
+    limiter_ceiling_db_to_normalized,
+    resolve_parameter_index,
+    track_volume_db_to_linear,
+)
+
 # Static balance (dB). Kick is the anchor; everything else sits under it.
 # Target premaster peak ~-6 dBFS (loudness is the LAST priority).
 TRACK_VOLUMES: dict[str, float] = {
@@ -34,19 +41,7 @@ MASTER_CHAIN: list[str] = ["EQ Eight", "Glue Compressor", "Saturator", "Limiter"
 
 MASTER_LIMITER_CEILING = -0.3  # dB
 
-# Ableton volume.value is LINEAR 0-1 (0.85 = 0 dB unity, 1.0 = +6 dB),
-# NOT dB. Negative dB values get clamped to 0.0 = silence.
-UNITY_LINEAR = 0.85
-
-
-def _db_to_linear(db: float) -> float:
-    """Convert a dB level to Ableton's linear volume.value (0-1)."""
-    return max(0.0, min(1.0, UNITY_LINEAR * (10 ** (db / 20))))
-
-
-
-# Candidate names (EN + ES) for the limiter ceiling parameter.
-_CEILING_CANDIDATES = ("ceiling", "techo", "output", "salida", "peak", "out")
+# Parameter aliases/scales are centralized in producer.parameter_registry.
 
 
 def _set_master_limiter(daw, report: dict[str, Any]) -> None:
@@ -56,18 +51,19 @@ def _set_master_limiter(daw, report: dict[str, Any]) -> None:
             params = daw.get_device_parameters(-1, di)
         except Exception:  # noqa: BLE001
             continue
-        name = (params.get("device_name") or "").lower()
-        if "limiter" not in name and "limitador" not in name:
+        spec = get_device_spec(str(params.get("device_name") or ""))
+        if spec is None or "ceiling" not in spec.parameters:
             continue
-        for p in params.get("parameters") or []:
-            pn = (p.get("name") or "").lower()
-            if any(c in pn for c in _CEILING_CANDIDATES):
-                # Ceiling is normalized 0-1 (0 = -36 dB, 1 = 0 dB). Map the dB
-                # ceiling to the normalized value so we don't clamp to silence.
-                value = max(0.0, min(1.0, 1.0 + MASTER_LIMITER_CEILING / 36.0))
-                daw.set_device_parameter(-1, di, int(p["index"]), value)
-                report["master_tweaks"] += 1
-                return
+        pidx = resolve_parameter_index(
+            params.get("parameters") or [],
+            spec.parameters["ceiling"].aliases,
+        )
+        if pidx is None:
+            continue
+        value = limiter_ceiling_db_to_normalized(MASTER_LIMITER_CEILING)
+        daw.set_device_parameter(-1, di, pidx, value)
+        report["master_tweaks"] += 1
+        return
 
 
 def apply_mix(daw, *, session) -> dict[str, Any]:
@@ -86,7 +82,7 @@ def apply_mix(daw, *, session) -> dict[str, Any]:
         if t is None:
             continue
         try:
-            daw.set_mixer_volume(int(t.index), _db_to_linear(vol))
+            daw.set_mixer_volume(int(t.index), track_volume_db_to_linear(vol))
             report["volumes"] += 1
         except Exception as exc:  # noqa: BLE001
             report["errors"].append(f"volume {name}: {exc}")
