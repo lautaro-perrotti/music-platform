@@ -366,3 +366,105 @@ def apply_patch(
         "events": post.get("events", []),
         "event_count": int(post.get("count", 0)),
     }
+
+
+
+def _normalized_from_param(value_native: float, p: dict[str, Any]) -> float:
+    lo = float(p.get("min", 0.0))
+    hi = float(p.get("max", 1.0))
+    if hi <= lo:
+        return 0.0
+    return max(0.0, min(1.0, (float(value_native) - lo) / (hi - lo)))
+
+
+def apply_patch_contract(
+    daw,
+    *,
+    session: SessionState,
+    contract: dict[str, Any],
+    throttle_ms: int = 40,
+) -> dict[str, Any]:
+    """High-level autonomous patch wrapper with musical constraints.
+
+    Contract shape:
+    {
+      "track": "Bass",
+      "device": "Compressor",
+      "writes": [{"index"|"name":..., "value":0..1}],
+      "constraints": {
+        "max_delta_norm": 0.35,
+        "max_writes": 8,
+        "forbid_device_on_toggle": true
+      }
+    }
+    """
+    track = str(contract.get("track") or "")
+    device = str(contract.get("device") or "")
+    writes = list(contract.get("writes") or [])
+    constraints = dict(contract.get("constraints") or {})
+
+    if not track or not device or not writes:
+        return {"ok": False, "error": "invalid_contract", "contract": contract}
+
+    max_delta = float(constraints.get("max_delta_norm", 0.35))
+    max_writes = int(constraints.get("max_writes", 8))
+    forbid_device_on_toggle = bool(constraints.get("forbid_device_on_toggle", True))
+
+    schema = read_vst_schema(
+        daw,
+        session=session,
+        track_name=track,
+        device_name=device,
+        filter_midi_passthrough=False,
+    )
+    resolved = _resolve_patch_indices(schema.get("parameters") or [], writes)
+    resolved = coalesce_writes(resolved)
+
+    violations: list[str] = []
+    if len(resolved) > max_writes:
+        violations.append(f"write_count>{max_writes}; truncated")
+        resolved = resolved[:max_writes]
+
+    by_idx = {int(p.get("index", -1)): p for p in schema.get("parameters") or []}
+    adjusted: list[dict[str, float]] = []
+
+    for w in resolved:
+        idx = int(w["index"])
+        target = max(0.0, min(1.0, float(w["value"])))
+        p = by_idx.get(idx)
+        if p is None:
+            violations.append(f"unknown_param_index:{idx}")
+            continue
+        pname = _normalize_name(str(p.get("name") or ""))
+
+        if forbid_device_on_toggle and (idx == 0 or pname == "device on"):
+            violations.append(f"blocked_device_on_toggle:{idx}")
+            continue
+
+        current_norm = _normalized_from_param(float(p.get("value", 0.0)), p)
+        if abs(target - current_norm) > max_delta:
+            step = max_delta if target > current_norm else -max_delta
+            target = current_norm + step
+            violations.append(f"delta_clamped:{idx}")
+
+        adjusted.append({"index": idx, "value": target})
+
+    patch = apply_patch(
+        daw,
+        session=session,
+        track_name=track,
+        device_name=device,
+        writes=adjusted,
+        throttle_ms=throttle_ms,
+        filter_midi_passthrough=False,
+    )
+
+    return {
+        "ok": bool(patch.get("ok", False)),
+        "track": track,
+        "device": device,
+        "requested": len(writes),
+        "applied": len(adjusted),
+        "violations": violations,
+        "patch": patch,
+    }

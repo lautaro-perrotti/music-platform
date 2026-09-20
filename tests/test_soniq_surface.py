@@ -8,6 +8,7 @@ from copilot.producer.soniq_surface import (
     read_vst_schema,
     set_vst_params_batch,
     apply_patch,
+    apply_patch_contract,
 )
 
 
@@ -140,3 +141,27 @@ def test_apply_patch_name_based_flow_includes_events() -> None:
     rb = report["write"]["readback"][0]
     assert rb["index"] == 0
     assert rb["actual"] == 0.77
+
+
+
+def test_apply_patch_contract_enforces_write_count_and_device_on_guard() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    report = apply_patch_contract(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [
+                {"index": 0, "value": 0.0},  # should be blocked (Device On guard by index)
+                {"index": 1, "value": 0.1},
+                {"index": 1, "value": 0.2},
+                {"index": 1, "value": 0.3},
+            ],
+            "constraints": {"max_writes": 2, "max_delta_norm": 0.5, "forbid_device_on_toggle": True},
+        },
+        throttle_ms=0,
+    )
+    assert report["ok"] is True
+    assert report["applied"] == 1
+    assert any("blocked_device_on_toggle" in v for v in report["violations"])
