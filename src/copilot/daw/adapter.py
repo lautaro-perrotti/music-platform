@@ -102,3 +102,12 @@ class DawAdapter(ABC):
     def delete_device(
         self, track_index: int, device_index: int
     ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def bridge_command(
+        self,
+        command_type: str,
+        params: dict[str, Any] | None = None,
+        *,
+        side_effect: bool | None = None,
+    ) -> dict[str, Any]: ...

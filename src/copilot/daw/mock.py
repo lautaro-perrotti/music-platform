@@ -375,6 +375,26 @@ class MockAbletonAdapter(DawAdapter):
             {"deleted": True, "device_index": device_index, "device_name": name},
         )
 
+    def bridge_command(
+        self,
+        command_type: str,
+        params: dict[str, Any] | None = None,
+        *,
+        side_effect: bool | None = None,
+    ) -> dict[str, Any]:
+        params = params or {}
+        if command_type == "get_session_info":
+            return self.get_session_info()
+        if command_type == "get_track_info":
+            return self.get_track_info(int(params.get("track_index", 0)))
+        if command_type == "set_tempo":
+            return self.set_tempo(float(params.get("tempo", 120.0)))
+        if command_type == "set_track_mute":
+            return self.set_track_mute(int(params.get("track_index", 0)), bool(params.get("mute", False)))
+        if command_type == "set_track_volume":
+            return self.set_mixer_volume(int(params.get("track_index", 0)), float(params.get("volume", 0.85)))
+        raise DawError(f"Mock bridge_command unsupported: {command_type}")
+
     def load_browser_item(
         self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]:
