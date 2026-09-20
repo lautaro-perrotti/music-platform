@@ -68,3 +68,27 @@ class DawAdapter(ABC):
         parameter_index: int,
         value: float,
     ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def load_instrument_or_effect(
+        self, track_index: int, uri: str
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def load_browser_item(
+        self, track_index: int, item_uri: str, clip_index: int | None = None
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def delete_device(
+        self, track_index: int, device_index: int
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def bridge_command(
+        self,
+        command_type: str,
+        params: dict[str, Any] | None = None,
+        *,
+        side_effect: bool | None = None,
+    ) -> dict[str, Any]: ...

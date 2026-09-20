@@ -936,6 +936,20 @@ class AbletonTcpAdapter(DawAdapter):
     def stop_clips(self, clips: list[dict[str, Any]]) -> dict[str, Any]:
         return self._command("stop_clips", {"clips": clips}, side_effect=True)
 
+    def bridge_command(
+        self,
+        command_type: str,
+        params: dict[str, Any] | None = None,
+        *,
+        side_effect: bool | None = None,
+    ) -> dict[str, Any]:
+        if side_effect is None:
+            side_effect = not (
+                command_type.startswith("get_")
+                or command_type in {"health_check", "protocol_hello"}
+            )
+        return self._command(command_type, params or {}, side_effect=bool(side_effect))
+
     def search_browser(self, query: str, category: str = "all") -> dict[str, Any]:
         return self._command(
             "search_browser", {"query": query, "category": category}
