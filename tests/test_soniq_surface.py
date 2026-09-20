@@ -7,6 +7,7 @@ from copilot.producer.soniq_surface import (
     read_vst_params,
     read_vst_schema,
     set_vst_params_batch,
+    apply_patch,
 )
 
 
@@ -119,3 +120,23 @@ def test_vst_param_watcher_reports_param_changed_events() -> None:
     assert ev["events"][0]["event"] == "param_changed"
     assert ev["events"][0]["index"] == 1
     assert ev["events"][0]["value"] == 0.9
+
+
+
+def test_apply_patch_name_based_flow_includes_events() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    report = apply_patch(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        writes=[{"name": "cutoff", "value": 0.66}, {"name": "cutoff", "value": 0.77}],
+        throttle_ms=0,
+        filter_midi_passthrough=False,
+    )
+    assert report["ok"] is True
+    assert report["resolved"] == 1  # coalesced
+    assert report["event_count"] >= 1
+    rb = report["write"]["readback"][0]
+    assert rb["index"] == 0
+    assert rb["actual"] == 0.77
