@@ -4,6 +4,7 @@ from copilot.audio.reference_analysis_v1 import (
     REFERENCE_WINDOW_BEATS,
     build_reference_analysis_pack,
     reference_window_spans,
+    pack_from_fullmix_observation,
 )
 
 
@@ -42,3 +43,25 @@ def test_reference_pack_rejects_extra_measurements():
 def test_invalid_window_inputs_fail_closed():
     with pytest.raises(ValueError):
         reference_window_spans(-1)
+
+
+def test_fullmix_projection_aggregates_factual_frames():
+    class Frame:
+        t_s = 1.0
+        relative_db = -10.0
+
+    class Dynamic:
+        window_start_s = 1.0
+        crest_factor = 3.0
+
+    class Observation:
+        duration_s = 1.5
+        energy_frames = [Frame()]
+        dynamics = [Dynamic()]
+        spectral_trajectory = []
+
+    pack = pack_from_fullmix_observation(
+        Observation(), reference_state_token="r", target_state_token="t", tempo_bpm=120
+    )
+    assert pack.windows[0].energy_db == -10.0
+    assert pack.windows[0].crest_factor_db == 3.0

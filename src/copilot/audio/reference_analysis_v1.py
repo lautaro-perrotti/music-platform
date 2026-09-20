@@ -20,6 +20,55 @@ REFERENCE_WINDOW_BARS = 32
 REFERENCE_WINDOW_BEATS = BEATS_PER_BAR * REFERENCE_WINDOW_BARS
 
 
+def pack_from_fullmix_observation(
+    observation: Any,
+    *,
+    reference_state_token: str,
+    target_state_token: str,
+    tempo_bpm: float,
+    window_beats: float = REFERENCE_WINDOW_BEATS,
+) -> ReferenceAnalysisPack:
+    """Project frozen FullMix frames into musical windows.
+
+    The FullMix analyzer remains the measurement authority. This adapter only
+    aggregates its factual frames; it performs no diagnosis and no writes.
+    """
+    if tempo_bpm <= 0:
+        raise ValueError("tempo_bpm must be positive")
+    total_beats = float(observation.duration_s) * tempo_bpm / 60.0
+    spans = reference_window_spans(total_beats, window_beats=window_beats)
+    rows: list[dict[str, Any]] = []
+    seconds_per_beat = 60.0 / tempo_bpm
+    for start_beat, end_beat in spans:
+        start_s, end_s = start_beat * seconds_per_beat, end_beat * seconds_per_beat
+        frames = [
+            frame for frame in observation.energy_frames
+            if start_s <= float(frame.t_s) < end_s
+        ]
+        dynamics = [
+            item for item in observation.dynamics
+            if start_s <= float(item.window_start_s) < end_s
+        ]
+        spectral = [
+            item for item in observation.spectral_trajectory
+            if start_s <= float(item.t_s) < end_s
+        ]
+        bands = [point.bands for point in spectral if "LOW" in point.bands or "SUB" in point.bands]
+        low_values = [float(b.get("LOW", b.get("SUB", 0.0))) for b in bands]
+        rows.append({
+            "energy_db": (sum(float(f.relative_db) for f in frames) / len(frames)) if frames else None,
+            "crest_factor_db": (sum(float(d.crest_factor or 0.0) for d in dynamics) / len(dynamics)) if dynamics else None,
+            "low_band_energy": (sum(low_values) / len(low_values)) if low_values else None,
+        })
+    return build_reference_analysis_pack(
+        reference_state_token=reference_state_token,
+        target_state_token=target_state_token,
+        total_beats=total_beats,
+        measurements=rows,
+        window_beats=window_beats,
+    )
+
+
 def reference_window_spans(
     total_beats: float,
     *,
