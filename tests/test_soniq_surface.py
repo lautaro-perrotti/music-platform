@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from copilot.daw.mock import MockAbletonAdapter
-from copilot.producer.soniq_surface import read_vst_params, read_vst_schema, set_vst_params_batch
+from copilot.producer.soniq_surface import (
+    VstParamWatcher,
+    coalesce_writes,
+    read_vst_params,
+    read_vst_schema,
+    set_vst_params_batch,
+)
 
 
 def _seed_session_with_serum_like_device() -> tuple[MockAbletonAdapter, object]:
@@ -66,3 +72,50 @@ def test_set_vst_params_batch_writes_and_verifies() -> None:
     by_idx = {r["index"]: r for r in report["readback"]}
     assert by_idx[0]["actual"] == 0.7
     assert by_idx[1]["actual"] == 0.2
+
+
+
+def test_coalesce_writes_last_value_wins_per_index() -> None:
+    out = coalesce_writes([
+        {"index": 0, "value": 0.1},
+        {"index": 1, "value": 0.2},
+        {"index": 0, "value": 0.7},
+    ])
+    assert out == [{"index": 0, "value": 0.7}, {"index": 1, "value": 0.2}]
+
+
+def test_set_vst_params_batch_coalesces_before_write() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    report = set_vst_params_batch(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        writes=[{"index": 0, "value": 0.1}, {"index": 0, "value": 0.8}],
+    )
+    assert report["ok"] is True
+    assert report["writes"] == 1
+    assert report["readback"][0]["actual"] == 0.8
+
+
+def test_vst_param_watcher_reports_param_changed_events() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    watcher = VstParamWatcher(track_name="Synth", device_name="Serum 2", indices=[0, 1])
+    boot = watcher.bootstrap(daw, session=session)
+    assert boot["ok"] is True
+
+    # mutate one param
+    set_vst_params_batch(
+        daw,
+        session=daw.snapshot(),
+        track_name="Synth",
+        device_name="Serum 2",
+        writes=[{"index": 1, "value": 0.9}],
+    )
+
+    ev = watcher.poll(daw, session=daw.snapshot())
+    assert ev["ok"] is True
+    assert ev["count"] == 1
+    assert ev["events"][0]["event"] == "param_changed"
+    assert ev["events"][0]["index"] == 1
+    assert ev["events"][0]["value"] == 0.9

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from copilot.daw.adapter import DawError
@@ -120,6 +121,7 @@ def set_vst_params_batch(
     ti = _resolve_track_index(session, track_name)
     di = _resolve_device_index(session, ti, device_name)
 
+    writes = coalesce_writes(writes)
     items = [
         {
             "track_index": ti,
@@ -164,3 +166,66 @@ def set_vst_params_batch(
         "writes": len(writes),
         "readback": readback,
     }
+
+
+def coalesce_writes(writes: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Soniq-style write coalescing: last value wins per parameter index."""
+    by_idx: dict[int, float] = {}
+    order: list[int] = []
+    for w in writes or []:
+        idx = int(w["index"])
+        if idx not in by_idx:
+            order.append(idx)
+        by_idx[idx] = float(w["value"])
+    return [{"index": i, "value": by_idx[i]} for i in order]
+
+
+@dataclass
+class VstParamWatcher:
+    """Polling-based param change notifications (param_changed events model).
+
+    Bridge push-notifications do not exist yet in our stack; this provides the same
+    consumer contract by diffing successive reads.
+    """
+
+    track_name: str
+    device_name: str
+    indices: list[int]
+    _last: dict[int, float] = field(default_factory=dict)
+
+    def bootstrap(self, daw, *, session: SessionState) -> dict[str, Any]:
+        snap = read_vst_params(
+            daw,
+            session=session,
+            track_name=self.track_name,
+            device_name=self.device_name,
+            indices=self.indices,
+        )
+        self._last = {int(p["index"]): float(p["value"]) for p in snap.get("params", [])}
+        return {"ok": True, "tracked": len(self._last)}
+
+    def poll(self, daw, *, session: SessionState, tolerance: float = 1e-6) -> dict[str, Any]:
+        snap = read_vst_params(
+            daw,
+            session=session,
+            track_name=self.track_name,
+            device_name=self.device_name,
+            indices=self.indices,
+        )
+        changed: list[dict[str, Any]] = []
+        for p in snap.get("params", []):
+            idx = int(p["index"])
+            val = float(p["value"])
+            prev = self._last.get(idx)
+            if prev is None or abs(val - prev) > tolerance:
+                changed.append(
+                    {
+                        "event": "param_changed",
+                        "index": idx,
+                        "name": p.get("name", ""),
+                        "previous": prev,
+                        "value": val,
+                    }
+                )
+            self._last[idx] = val
+        return {"ok": True, "events": changed, "count": len(changed)}
