@@ -343,6 +343,46 @@ class MockAbletonAdapter(DawAdapter):
             },
         )
 
+    def set_device_parameters(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        self._before_write("set_device_parameters")
+        results: list[dict[str, Any]] = []
+        for item in items or []:
+            ti = int(item["track_index"])
+            di = int(item["device_index"])
+            pi = int(item["parameter_index"])
+            val = float(item["value"])
+            track = self._track(ti)
+            if di < 0 or di >= len(track["devices"]):
+                raise DawError("Device index out of range")
+            dev = track["devices"][di]
+            if pi < 0 or pi >= len(dev["parameters"]):
+                raise DawError("Parameter index out of range")
+            p = dev["parameters"][pi]
+            p["value"] = max(p["min"], min(p["max"], val))
+            results.append(
+                {
+                    "track_index": ti,
+                    "device_index": di,
+                    "parameter_index": pi,
+                    "value": p["value"],
+                }
+            )
+        return self._after_write("set_device_parameters", {"ok": True, "results": results})
+
+    def get_device_parameters(self, track_index: int, device_index: int) -> dict[str, Any]:
+        track = self._track(track_index)
+        if device_index < 0 or device_index >= len(track["devices"]):
+            raise DawError("Device index out of range")
+        dev = track["devices"][device_index]
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "device_name": dev.get("name", ""),
+            "device_class": dev.get("class_name", ""),
+            "parameter_count": len(dev.get("parameters", [])),
+            "parameters": deepcopy(dev.get("parameters", [])),
+        }
+
     def load_instrument_or_effect(self, track_index: int, uri: str) -> dict[str, Any]:
         self._before_write("load_instrument_or_effect")
         track = self._track(track_index)

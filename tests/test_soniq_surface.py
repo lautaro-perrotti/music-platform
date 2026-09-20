@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+from copilot.daw.mock import MockAbletonAdapter
+from copilot.producer.soniq_surface import read_vst_params, read_vst_schema, set_vst_params_batch
+
+
+def _seed_session_with_serum_like_device() -> tuple[MockAbletonAdapter, object]:
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_midi_track("Synth", 0)
+    # add a "Serum 2"-named device with params including MIDI passthrough style
+    track = daw.tracks[0]
+    track["devices"].append(
+        {
+            "name": "Serum 2",
+            "class_name": "Serum2",
+            "enabled": True,
+            "parameters": [
+                {"index": 0, "name": "Cutoff", "value": 0.25, "min": 0.0, "max": 1.0},
+                {"index": 1, "name": "Resonance", "value": 0.5, "min": 0.0, "max": 1.0},
+                {"index": 2, "name": "CC74 Chan 1", "value": 0.0, "min": 0.0, "max": 1.0},
+            ],
+        }
+    )
+    session = daw.snapshot()
+    return daw, session
+
+
+def test_read_vst_schema_filters_midi_passthrough_params() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    schema = read_vst_schema(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        filter_midi_passthrough=True,
+    )
+    names = [p["name"] for p in schema["parameters"]]
+    assert "CC74 Chan 1" not in names
+    assert "Cutoff" in names and "Resonance" in names
+
+
+def test_read_vst_params_reads_specific_indices() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    out = read_vst_params(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        indices=[1, 999],
+    )
+    assert len(out["params"]) == 1
+    assert out["params"][0]["name"] == "Resonance"
+
+
+def test_set_vst_params_batch_writes_and_verifies() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    report = set_vst_params_batch(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        writes=[{"index": 0, "value": 0.7}, {"index": 1, "value": 0.2}],
+    )
+    assert report["ok"] is True
+    by_idx = {r["index"]: r for r in report["readback"]}
+    assert by_idx[0]["actual"] == 0.7
+    assert by_idx[1]["actual"] == 0.2
