@@ -2967,6 +2967,7 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
 
     astra_arrangement = meta.get("arrangement")
     plan._astra_arrangement = astra_arrangement
+    plan._astra_patch_contracts = meta.get("patch_contracts") or []
     from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
     plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
     if leave:
@@ -2999,8 +3000,29 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     if ok and leave:
         from copilot.musicplan.arrangement_builder import build_arrangement
         from copilot.musicplan.mix_tweaks import apply_mix
+        from copilot.producer.soniq_surface import apply_patch_contract
 
         final_session = daw.snapshot()
+
+        # ASTRAL planner integration: execute patch contracts before arrangement/mix.
+        patch_contracts = getattr(plan, "_astra_patch_contracts", []) or []
+        if patch_contracts:
+            applied = 0
+            failed = 0
+            print(f"\nASTRAL PATCH CONTRACTS: {len(patch_contracts)}")
+            for c in patch_contracts:
+                try:
+                    rep = apply_patch_contract(daw, session=daw.snapshot(), contract=c, throttle_ms=40)
+                    if rep.get("ok"):
+                        applied += 1
+                    else:
+                        failed += 1
+                    print(f"  - {c.get('track')} / {c.get('device')} -> ok={rep.get('ok')} applied={rep.get('applied')} viol={len(rep.get('violations', []))}")
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    print(f"  - {c.get('track')} / {c.get('device')} -> error ({exc})")
+            print(f"ASTRAL PATCH RESULT: applied={applied} failed={failed}")
+
         arrangement = getattr(plan, "_astra_arrangement", None) or None
         arr = build_arrangement(daw, session=final_session, arrangement=arrangement)
         print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")

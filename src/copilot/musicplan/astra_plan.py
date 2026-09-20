@@ -77,13 +77,22 @@ def build_astra_prompt(
     {"name": "<section name>", "bars": <int>, "active": ["TrackName", ...]},
     ...
   ],
-  "reasoning": "short producer reasoning"
+  "reasoning": "short producer reasoning",
+  "patch_contracts": [
+    {
+      "track": "<TrackName>",
+      "device": "<device name on that track>",
+      "writes": [{"name": "<param name>", "value": <0..1>}],
+      "constraints": {"max_delta_norm": 0.35, "max_writes": 8, "forbid_device_on_toggle": true}
+    }
+  ]
 }""",
         "",
         "Arrangement rules: 5-8 sections; Kick must be active in at least the backbone sections;",
         "build up (drums/percussion first), reach a DROP, and return subdued at the end (DJ exit);",
         "subtract by omission across sections, never stack everything.",
         "If you omit 'arrangement', the deterministic structure is used.",
+        "Patch contracts must be conservative: few params, small deltas, no power toggles.",
     ]
     return "\n".join(lines)
 
@@ -127,6 +136,64 @@ def validate_arrangement(raw_sections: list) -> list | None:
     return cleaned
 
 
+
+
+def validate_patch_contracts(raw_contracts: list, *, known_tracks: set[str]) -> list[dict] | None:
+    """Validate Astra patch contracts (shape + conservative bounds)."""
+    if not raw_contracts or not isinstance(raw_contracts, list):
+        return None
+    cleaned: list[dict] = []
+    for c in raw_contracts:
+        try:
+            track = str(c.get("track", ""))
+            device = str(c.get("device", ""))
+            writes = list(c.get("writes") or [])
+            constraints = dict(c.get("constraints") or {})
+        except Exception:  # noqa: BLE001
+            continue
+        if not track or track not in known_tracks:
+            continue
+        if not device or not writes:
+            continue
+        w_clean = []
+        for w in writes[:12]:
+            if not isinstance(w, dict):
+                continue
+            row = {}
+            if "index" in w:
+                try:
+                    row["index"] = int(w["index"])
+                except Exception:
+                    continue
+            elif "name" in w:
+                row["name"] = str(w["name"])
+            else:
+                continue
+            try:
+                row["value"] = float(w["value"])
+            except Exception:
+                continue
+            row["value"] = max(0.0, min(1.0, row["value"]))
+            w_clean.append(row)
+        if not w_clean:
+            continue
+        max_delta = float(constraints.get("max_delta_norm", 0.35))
+        max_writes = int(constraints.get("max_writes", 8))
+        cleaned.append(
+            {
+                "track": track,
+                "device": device,
+                "writes": w_clean,
+                "constraints": {
+                    "max_delta_norm": max(0.05, min(0.5, max_delta)),
+                    "max_writes": max(1, min(16, max_writes)),
+                    "forbid_device_on_toggle": bool(constraints.get("forbid_device_on_toggle", True)),
+                },
+            }
+        )
+    return cleaned or None
+
+
 def build_plan_from_prompt(
     *,
     index: LibraryIndex,
@@ -162,6 +229,11 @@ def build_plan_from_prompt(
         selections = data.get("selections", {})
         arrangement_raw = data.get("arrangement")
         arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
+        patch_contracts_raw = data.get("patch_contracts")
+        patch_contracts = validate_patch_contracts(
+            patch_contracts_raw,
+            known_tracks=set(candidates.keys()),
+        ) if patch_contracts_raw else None
         sample_map: dict[str, str] = {}
         for track_name, num in selections.items():
             cands = candidates.get(track_name, [])
@@ -177,6 +249,7 @@ def build_plan_from_prompt(
             "selections": selections,
             "sample_map": sample_map,
             "arrangement": arrangement,
+            "patch_contracts": patch_contracts,
         }
     except Exception as exc:  # noqa: BLE001
         plan = build_tech_house_plan(index=index, session=session, plan_id=plan_id)
