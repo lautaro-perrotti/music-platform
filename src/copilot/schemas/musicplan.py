@@ -27,6 +27,12 @@ class PlanStatus(StrEnum):
 
 class ActionType(StrEnum):
     SET_TRACK_VOLUME = "SET_TRACK_VOLUME"
+
+
+class ProductionActionKind(StrEnum):
+    """Producer intent vocabulary; certification is owned by the runtime."""
+
+    SET_TRACK_VOLUME = "SET_TRACK_VOLUME"
     DEVICE_TWEAK = "DEVICE_TWEAK"
     DEVICE_LOAD = "DEVICE_LOAD"
     SAMPLE_SWAP = "SAMPLE_SWAP"
@@ -210,7 +216,7 @@ ActionParams = Annotated[
 
 class PlanAction(BaseModel):
     action_id: str
-    action_type: ActionType
+    action_type: ProductionActionKind
     target: ActionTarget
     params: ActionParams
     reason: str

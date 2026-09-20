@@ -99,6 +99,25 @@ class TransactionManager:
             operation=operation,
         )
 
+    def mark_prepared(self) -> None:
+        """Persist the durable-prestate boundary before any musical write."""
+        if self._open is None:
+            raise DawError("No open transaction")
+        self._open.status = TransactionStatus.PREPARED
+        self._journal(kind="prepare", status=TransactionStatus.PREPARED)
+
+    def mark_superseded(self, reason: str = "") -> AgentTransaction:
+        """Close a prepared transaction without applying its write."""
+        if self._open is None:
+            raise DawError("No open transaction")
+        self._open.status = TransactionStatus.SUPERSEDED
+        self._open.error = reason
+        txn = self._open
+        self.history.append(txn)
+        self._open = None
+        self._journal(kind="supersede", status=TransactionStatus.SUPERSEDED, error=reason)
+        return txn
+
     def mark_in_doubt(self, error: str, command_id: str = "") -> AgentTransaction:
         if self._open is None:
             raise DawError("No open transaction")

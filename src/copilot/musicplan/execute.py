@@ -26,7 +26,7 @@ from copilot.musicplan import (
 )
 from copilot.schemas.musicplan import (
     SCHEMA_VERSION,
-    ActionType,
+    ProductionActionKind as ActionType,
     CompiledExecutionEnvelope,
     MusicPlan,
     PlanIntentClass,

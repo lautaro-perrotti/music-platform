@@ -22,7 +22,7 @@ from copilot.schemas.musicplan import (
     SCHEMA_VERSION,
     ActionPrecondition,
     ActionTarget,
-    ActionType,
+    ProductionActionKind as ActionType,
     CompiledExecutionEnvelope,
     CreateTrackActionParams,
     DeviceLoadActionParams,
