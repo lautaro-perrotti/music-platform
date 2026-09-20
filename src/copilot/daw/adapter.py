@@ -70,6 +70,14 @@ class DawAdapter(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def set_device_parameters(self, items: list[dict[str, Any]]) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def get_device_parameters(
+        self, track_index: int, device_index: int
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     def load_instrument_or_effect(
         self, track_index: int, uri: str
     ) -> dict[str, Any]: ...
