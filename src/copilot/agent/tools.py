@@ -121,6 +121,52 @@ class AgentTools:
             )
             return created
 
+    def create_audio_track(
+        self, name: str, index: int = -1, expected_revision: int | None = None
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write(
+                "create_audio_track", expected_revision=expected_revision
+            )
+            command_id = self._command_id()
+            before = {"exists": False, "name": name, "track_count": len(before_state.tracks)}
+            expected_after = {"exists": True, "name": name, "track_count": len(before_state.tracks) + 1}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="create_audio_track",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_name_at_apply=name,
+            )
+            created = self._execute_write(
+                "create_audio_track",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.create_audio_track(name, index),
+            )
+            track = self._track_at(int(created["index"]))
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="create_audio_track",
+                before=before,
+                after=created,
+                expected_after=expected_after,
+                inverse_operation="delete_track",
+                inverse_params={},
+                asset_id=track.stable_id,
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            self._log_write(
+                "create_audio_track", command_id, track, before_state.revision, "APPLIED"
+            )
+            return created
+
     def create_midi_clip(
         self, track_index: int, clip_index: int, length_beats: float, name: str = ""
     ) -> dict[str, Any]:
@@ -214,7 +260,7 @@ class AgentTools:
         with self.lock.write():
             before_state = self._pre_write("set_mixer_volume")
             command_id = self._command_id()
-            track = self._track_at(track_index)
+            track = self._track_from(before_state, track_index)
             before_volume = track.mixer.volume
             before = {"volume": before_volume}
             expected_after = {"volume": volume}
@@ -245,6 +291,135 @@ class AgentTools:
                 expected_after=expected_after,
                 inverse_operation="set_mixer_volume",
                 inverse_params={"volume": before_volume},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
+    def set_track_mute(self, track_index: int, mute: bool) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_track_mute")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before_mute = bool(track.mixer.mute)
+            before = {"mute": before_mute}
+            expected_after = {"mute": bool(mute)}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_track_mute",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_track_mute",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_track_mute(track_index, bool(mute)),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_track_mute",
+                before=before,
+                after={"mute": bool(mute)},
+                expected_after=expected_after,
+                inverse_operation="set_track_mute",
+                inverse_params={"mute": before_mute},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
+    def set_track_output_routing(
+        self, track_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_track_output_routing")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before = {"output_type": track.routing.output_type, "output_channel": track.routing.output_channel}
+            expected_after = {"output_type": routing_type, "output_channel": routing_channel}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_track_output_routing",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_track_output_routing",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_track_output_routing(track_index, routing_type, routing_channel),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(track_index=track.index),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_track_output_routing",
+                before=before,
+                after={"output_type": routing_type, "output_channel": routing_channel},
+                expected_after=expected_after,
+                inverse_operation="set_track_output_routing",
+                inverse_params={"output_type": before["output_type"], "output_channel": before["output_channel"]},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("set_device_input_routing")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before = {"input_type": "No Input", "input_channel": ""}
+            expected_after = {"input_type": routing_type, "input_channel": routing_channel}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="set_device_input_routing",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "set_device_input_routing",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.set_device_input_routing(
+                    track_index, device_index, routing_type, routing_channel
+                ),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, device_index=device_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="set_device_input_routing",
+                before=before,
+                after=expected_after,
+                expected_after=expected_after,
+                inverse_operation="set_device_input_routing",
+                inverse_params={
+                    "input_type": before["input_type"],
+                    "input_channel": before["input_channel"],
+                },
                 command_id=command_id,
                 expected_revision=before_state.revision,
             )
@@ -308,6 +483,209 @@ class AgentTools:
             )
             return result
 
+    def load_instrument_or_effect(self, track_index: int, uri: str) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_instrument_or_effect")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before = {"device_count": len(track.devices)}
+            expected_after = {"device_count": len(track.devices) + 1}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_instrument_or_effect",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_instrument_or_effect",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_instrument_or_effect(track_index, uri),
+            )
+            track = self._track_at(track_index)
+            new_device_index = len(track.devices) - 1
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, device_index=new_device_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="load_instrument_or_effect",
+                before=before,
+                after={"device_count": len(track.devices),
+                       "device_name": result.get("device_name", uri)},
+                expected_after=expected_after,
+                inverse_operation="delete_device",
+                inverse_params={},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
+    def load_browser_item(
+        self,
+        track_index: int,
+        item_uri: str,
+        previous_item_uri: str | None = None,
+        clip_index: int | None = None,
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_browser_item")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before = {"sample": previous_item_uri or ""}
+            expected_after = {"sample": item_uri}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_browser_item",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_browser_item",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_browser_item(
+                    track_index, item_uri, clip_index=clip_index
+                ),
+            )
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, clip_index=clip_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="load_browser_item",
+                before=before,
+                after={"sample": item_uri},
+                expected_after=expected_after,
+                inverse_operation="load_browser_item",
+                inverse_params={"item_uri": previous_item_uri or ""},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
+    def load_sample(
+        self, track_index: int, clip_index: int, sample_uri: str
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("load_sample")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            is_midi = track.role == "midi"
+            before = {"clip_exists": False, "clip_index": clip_index}
+            expected_after = {"clip_exists": True, "sample_uri": sample_uri}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="load_sample",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+            result = self._execute_write(
+                "load_sample",
+                command_id,
+                before,
+                expected_after,
+                lambda: self.daw.load_browser_item(track_index, sample_uri, clip_index=clip_index),
+            )
+            track = self._track_at(track_index)
+            if is_midi:
+                # sample landed in a Simpler device, not a clip slot
+                device_index = len(track.devices) - 1
+                self.transactions.record(
+                    target_stable_id=track.stable_id,
+                    target_locator_at_apply=TargetLocator(
+                        track_index=track.index, device_index=device_index
+                    ),
+                    target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    target_name_at_apply=track.name,
+                    operation="load_sample",
+                    before=before,
+                    after={"sample_uri": sample_uri, "device_index": device_index},
+                    expected_after=expected_after,
+                    inverse_operation="delete_device",
+                    inverse_params={},
+                    command_id=command_id,
+                    expected_revision=before_state.revision,
+                )
+            else:
+                self.transactions.record(
+                    target_stable_id=track.stable_id,
+                    target_locator_at_apply=TargetLocator(
+                        track_index=track.index, clip_index=clip_index
+                    ),
+                    target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    target_name_at_apply=track.name,
+                    operation="load_sample",
+                    before=before,
+                    after={"sample_uri": sample_uri},
+                    expected_after=expected_after,
+                    inverse_operation="delete_clip",
+                    inverse_params={},
+                    command_id=command_id,
+                    expected_revision=before_state.revision,
+                )
+            return result
+
+    def create_pattern(
+        self,
+        track_index: int,
+        clip_index: int,
+        length_beats: float,
+        notes: list[MidiNote],
+    ) -> dict[str, Any]:
+        with self.lock.write():
+            before_state = self._pre_write("create_pattern")
+            command_id = self._command_id()
+            track = self._track_from(before_state, track_index)
+            before = {"clip_exists": False, "clip_index": clip_index}
+            expected_after = {"clip_exists": True, "note_count": len(notes)}
+            self.transactions.plan_write(
+                command_id=command_id,
+                operation="create_pattern",
+                expected_revision=before_state.revision,
+                before=before,
+                expected_after=expected_after,
+                target_stable_id=track.stable_id,
+            )
+
+            def _do() -> dict[str, Any]:
+                self.daw.create_midi_clip(track_index, clip_index, length_beats)
+                self.daw.replace_clip_notes(track_index, clip_index, notes)
+                return {"clip_index": clip_index, "note_count": len(notes)}
+
+            result = self._execute_write("create_pattern", command_id, before, expected_after, _do)
+            track = self._track_at(track_index)
+            self.transactions.record(
+                target_stable_id=track.stable_id,
+                target_locator_at_apply=TargetLocator(
+                    track_index=track.index, clip_index=clip_index
+                ),
+                target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                target_name_at_apply=track.name,
+                operation="create_pattern",
+                before=before,
+                after={"note_count": len(notes)},
+                expected_after=expected_after,
+                inverse_operation="delete_clip",
+                inverse_params={},
+                command_id=command_id,
+                expected_revision=before_state.revision,
+            )
+            return result
+
     def _pre_write(
         self, operation: str, expected_revision: int | None = None
     ) -> SessionState:
@@ -320,6 +698,10 @@ class AgentTools:
             "replace_clip_notes": "add_notes_to_clip",
             "set_mixer_volume": "set_track_volume",
             "set_device_parameter": "set_device_parameter",
+            "load_sample": "load_browser_item",
+            "load_instrument_or_effect": "load_instrument_or_effect",
+            "load_browser_item": "load_browser_item",
+            "create_pattern": "create_clip",
             "delete_track": "delete_track",
             "delete_clip": "delete_clip",
             "set_track_name": "set_track_name",
@@ -387,6 +769,11 @@ class AgentTools:
 
     def _track_at(self, track_index: int) -> TrackState:
         state = self.get_session_snapshot()
+        if track_index < 0 or track_index >= len(state.tracks):
+            raise DawError("Track index out of range after mutation")
+        return state.tracks[track_index]
+
+    def _track_from(self, state: SessionState, track_index: int) -> TrackState:
         if track_index < 0 or track_index >= len(state.tracks):
             raise DawError("Track index out of range after mutation")
         return state.tracks[track_index]

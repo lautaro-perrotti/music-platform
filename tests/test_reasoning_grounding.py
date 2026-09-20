@@ -376,6 +376,8 @@ def test_persist_window_range_is_session_state_not_ungrounded_measurement() -> N
         EvidenceItem,
         EvidenceKind,
         EvidencePack,
+        EvidenceRequest,
+        EvidenceRequestKind,
         ObservationLimitation,
     )
 
@@ -447,6 +449,7 @@ def test_persist_window_range_is_session_state_not_ungrounded_measurement() -> N
         evidence_refs=["ev.persist.energy", "ev.persist.window"],
         contradicting_evidence_refs=[],
         limitations=[
+            "ALIGNMENT_LIMITED",
             "ev.persist.energy is normalized energy in the 50.0–200.0 ms analysis window "
             "defined by ev.persist.window, not a measured decay duration.",
         ],
@@ -458,6 +461,15 @@ def test_persist_window_range_is_session_state_not_ungrounded_measurement() -> N
                 expected_effect="none",
                 risk="none",
                 evidence_refs=["ev.persist.energy"],
+            )
+        ],
+        requested_evidence=[
+            EvidenceRequest(
+                request_kind=EvidenceRequestKind.READ_MIDI,
+                why_needed="Distinguish intentional rest from missing notes.",
+                target="main",
+                region="32->64qn",
+                expected_information_gain="Whether MIDI is present during the low-energy window.",
             )
         ],
     )

@@ -184,13 +184,20 @@ class OpenAICompatibleProvider(ReasoningProvider):
         try:
             with urlopen(request, timeout=timeout_s) as response:
                 return json.loads(response.read().decode("utf-8"))
-        except TimeoutError as exc:
-            raise ProviderError(ReasoningFailure.MODEL_TIMEOUT, str(exc)) from exc
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:400]
+            if exc.code == 429:
+                raise ProviderError(
+                    ReasoningFailure.MODEL_RATE_LIMITED, f"http 429: {detail}"
+                ) from exc
             raise ProviderError(ReasoningFailure.MODEL_UNAVAILABLE, f"http {exc.code}: {detail}") from exc
+        except TimeoutError as exc:
+            raise ProviderError(ReasoningFailure.MODEL_TIMEOUT, str(exc)) from exc
         except URLError as exc:
-            raise ProviderError(ReasoningFailure.MODEL_UNAVAILABLE, str(exc.reason)) from exc
+            reason = str(exc.reason)
+            if "timed out" in reason.lower() or "timeout" in reason.lower():
+                raise ProviderError(ReasoningFailure.MODEL_TIMEOUT, reason) from exc
+            raise ProviderError(ReasoningFailure.MODEL_UNAVAILABLE, reason) from exc
 
 
 def configured_http_provider() -> OpenAICompatibleProvider | None:

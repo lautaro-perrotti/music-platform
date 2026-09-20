@@ -4,7 +4,23 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
+from copilot.reasoning.claims import (
+    capture_failed_as_silence,
+    certain_key_claim,
+    command_hits,
+    invented_percentage,
+    is_overbroad_request,
+    muddy_as_measurement,
+    ungrounded_device_cause,
+)
 from copilot.reasoning.errors import ReasoningFailure
+from copilot.reasoning.evidence_input import (
+    fusion_statuses,
+    known_evidence_ids,
+    limitation_codes_from_scoped,
+    scoped_evidence,
+    view_node_index,
+)
 from copilot.reasoning.schema import ReasoningOutput
 from copilot.schemas.diagnosis import CandidateActionType, Confidence, DiagnosisStatus, FindingType
 from copilot.schemas.evidence import (
@@ -153,16 +169,31 @@ def observation_fact_problems(observation: MusicObservation) -> list[str]:
     return problems
 
 
-def validate_reasoning(output: ReasoningOutput, pack: EvidencePack) -> GroundingReport:
+def validate_reasoning(
+    output: ReasoningOutput,
+    pack: EvidencePack,
+    view: object | None = None,
+) -> GroundingReport:
     issues: list[ValidationIssue] = []
+    scoped = scoped_evidence(pack, view)
+    known = known_evidence_ids(pack, scoped)
     index = pack.by_id()
-    _check_refs(output, index, issues)
-    _check_hypotheses(output, index, issues)
+    nodes = view_node_index(scoped)
+    _check_refs(output, index, issues, known=known)
+    _check_hypotheses(output, index, issues, known=known)
     _check_measurements(output, pack, issues)
+    _check_numeric_refs(output, pack, issues)
     _check_entities(output, pack, issues)
     _check_precision(output, pack, issues)
     _check_actions(output, pack, issues)
     _check_contradiction_contract(output, issues)
+    _check_commands(output, issues)
+    _check_limitation_propagation(output, pack, scoped, issues)
+    _check_stale_and_identity(output, pack, nodes, issues)
+    _check_fusion_contradictions(output, scoped, issues)
+    _check_status_and_requests(output, issues)
+    _check_dsp_discipline(output, pack, scoped, issues)
+    _check_confidence_contract(output, issues)
     decisions = decide_evidence_requests(output.requested_evidence, pack)
     capped = cap_confidence(output, pack)
     accepted = not issues
@@ -263,17 +294,27 @@ def _check_refs(
     output: ReasoningOutput,
     index: dict[str, EvidenceItem],
     issues: list[ValidationIssue],
+    *,
+    known: set[str] | None = None,
 ) -> None:
+    allowed = known if known is not None else set(index)
     for ref in output.evidence_refs + output.contradicting_evidence_refs:
-        if ref not in index:
+        if ref not in allowed:
             issues.append(ValidationIssue(ReasoningFailure.UNKNOWN_EVIDENCE_REF, ref))
+    for strategy in output.candidate_strategies:
+        for ref in strategy.evidence_refs:
+            if ref not in allowed:
+                issues.append(ValidationIssue(ReasoningFailure.UNKNOWN_EVIDENCE_REF, ref))
 
 
 def _check_hypotheses(
     output: ReasoningOutput,
     index: dict[str, EvidenceItem],
     issues: list[ValidationIssue],
+    *,
+    known: set[str] | None = None,
 ) -> None:
+    allowed = known if known is not None else set(index)
     for hypo in output.hypotheses:
         if not hypo.evidence_refs:
             issues.append(
@@ -284,7 +325,7 @@ def _check_hypotheses(
             )
             continue
         for ref in hypo.evidence_refs + hypo.contradicting_evidence_refs:
-            if ref not in index:
+            if ref not in allowed:
                 issues.append(ValidationIssue(ReasoningFailure.UNKNOWN_EVIDENCE_REF, ref))
 
 
@@ -550,6 +591,24 @@ def _check_actions(
                     f"unknown action_type {action.action_type}",
                 )
             )
+    for strategy in output.candidate_strategies:
+        blob = f"{strategy.strategy} {strategy.reason}"
+        if ABLETON_OP_RE.search(blob):
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    f"raw Ableton command in strategy {strategy.strategy[:80]}",
+                )
+            )
+        for match in PARAM_RE.finditer(blob):
+            val = float(match.group("val"))
+            if not _in_catalog(catalog, val, None):
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"strategy parameter value not in evidence: {match.group(0)}",
+                    )
+                )
 
 
 def _check_contradiction_contract(
@@ -730,13 +789,33 @@ def _ms_in_capability(pack: EvidencePack, value: float) -> bool:
 
 
 def _text_blobs(output: ReasoningOutput) -> list[str]:
-    blobs = [output.summary]
+    blobs = [output.summary, output.question, output.scope]
     for hypo in output.hypotheses:
-        blobs.extend([hypo.claim, hypo.reasoning_summary, *hypo.alternatives_considered])
+        blobs.extend(
+            [
+                hypo.claim,
+                hypo.reasoning_summary,
+                *hypo.alternatives_considered,
+                *hypo.missing_evidence,
+                *hypo.limitations,
+            ]
+        )
     for action in output.candidate_actions:
         blobs.extend([action.reason, action.expected_effect, action.risk])
+    for strategy in output.candidate_strategies:
+        blobs.extend([strategy.strategy, strategy.reason])
     blobs.extend(output.limitations)
-    return blobs
+    for request in output.requested_evidence:
+        blobs.extend(
+            [
+                request.why_needed,
+                request.expected_information_gain,
+                request.goal,
+                request.target,
+                request.region,
+            ]
+        )
+    return [item for item in blobs if item]
 
 
 def _has_timing_claim(output: ReasoningOutput) -> bool:
@@ -768,3 +847,317 @@ def _region_too_expensive(requested: str, current: str) -> bool:
     if not match:
         return False
     return float(match.group("span")) > 64.0
+
+
+def _cited_ids(output: ReasoningOutput) -> list[str]:
+    refs: list[str] = list(output.evidence_refs) + list(output.contradicting_evidence_refs)
+    for hypo in output.hypotheses:
+        refs.extend(hypo.evidence_refs)
+        refs.extend(hypo.contradicting_evidence_refs)
+    for action in output.candidate_actions:
+        refs.extend(action.evidence_refs)
+    for strategy in output.candidate_strategies:
+        refs.extend(strategy.evidence_refs)
+    return list(dict.fromkeys(refs))
+
+
+def _catalog_for_ids(pack: EvidencePack, ids: list[str]) -> list[tuple[float, str | None]]:
+    wanted = set(ids)
+    out: list[tuple[float, str | None]] = []
+    for item in pack.items:
+        if item.evidence_id not in wanted:
+            continue
+        out.extend(_iter_numeric(item.value, item.unit))
+        out.extend(_iter_numeric(item.name, item.unit))
+    return out
+
+
+def _check_numeric_refs(
+    output: ReasoningOutput,
+    pack: EvidencePack,
+    issues: list[ValidationIssue],
+) -> None:
+    """Quantitative facts must map to cited EvidenceRefs, not the whole pack dump."""
+    cited = _catalog_for_ids(pack, _cited_ids(output))
+    session_catalog = _numeric_catalog(pack, kinds=SESSION_STATE_KINDS)
+    measurement_catalog = _numeric_catalog(pack, kinds={EvidenceKind.MEASUREMENT})
+    for blob in _text_blobs(output):
+        for match in DB_RE.finditer(blob):
+            val = float(match.group("val"))
+            if _in_catalog(session_catalog, val, {"dB", "db"}):
+                continue
+            if _in_catalog(measurement_catalog, val, {"dB", "db"}) and not _in_catalog(
+                cited, val, {"dB", "db"}
+            ):
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"numeric value {match.group(0)} is not in cited EvidenceRefs",
+                    )
+                )
+        for match in HZ_RE.finditer(blob):
+            raw = match.group(0).lower()
+            val = float(match.group("val"))
+            if "khz" in raw:
+                val *= 1000.0
+            if _in_catalog(session_catalog, val, {"Hz", "hz"}):
+                continue
+            if _in_catalog(measurement_catalog, val, {"Hz", "hz"}) and not _in_catalog(
+                cited, val, {"Hz", "hz"}
+            ):
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"numeric value {match.group(0)} is not in cited EvidenceRefs",
+                    )
+                )
+
+
+def _check_commands(output: ReasoningOutput, issues: list[ValidationIssue]) -> None:
+    for blob in _text_blobs(output):
+        hits = command_hits(blob)
+        if hits:
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    f"manual command sequencing is forbidden: {hits[0]}",
+                )
+            )
+
+
+def _limitation_declared(code: str, declared: str) -> bool:
+    if not code:
+        return True
+    if code in declared:
+        return True
+    aliases = {
+        "MIDI_UNREAD": "MIDI_UNAVAILABLE",
+        "MIDI_UNAVAILABLE": "MIDI_UNREAD",
+        "ROUTING_UNKNOWN": "ROUTING_UNRESOLVED",
+        "ROUTING_UNRESOLVED": "ROUTING_UNKNOWN",
+        "DEVICE_PARAMS_UNREAD": "AUTOMATION_UNREAD",
+        "AUTOMATION_UNREAD": "DEVICE_PARAMS_UNREAD",
+    }
+    other = aliases.get(code)
+    return bool(other and other in declared)
+
+
+def _check_limitation_propagation(
+    output: ReasoningOutput,
+    pack: EvidencePack,
+    scoped: dict,
+    issues: list[ValidationIssue],
+) -> None:
+    declared = " ".join(
+        [
+            *output.limitations,
+            *[item for hypo in output.hypotheses for item in hypo.limitations],
+        ]
+    )
+    for code in limitation_codes_from_scoped(pack, scoped):
+        if not _limitation_declared(code, declared):
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    f"limitation dropped: {code}",
+                )
+            )
+
+
+QN_REGION_RE = re.compile(
+    r"(?P<a>\d+(?:\.\d+)?)\s*->\s*(?P<b>\d+(?:\.\d+)?)\s*qn",
+    re.IGNORECASE,
+)
+
+
+def _regions_compatible(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return True
+    if left == right:
+        return True
+    if left in right or right in left:
+        return True
+    left_qn = QN_REGION_RE.search(str(left))
+    right_qn = QN_REGION_RE.search(str(right))
+    if left_qn and right_qn:
+        return (
+            left_qn.group("a") == right_qn.group("a")
+            and left_qn.group("b") == right_qn.group("b")
+        )
+    return True
+
+
+def _check_stale_and_identity(
+    output: ReasoningOutput,
+    pack: EvidencePack,
+    nodes: dict[str, dict],
+    issues: list[ValidationIssue],
+) -> None:
+    entities = pack.entity_by_id()
+    pack_region = pack.region
+    for ref in _cited_ids(output):
+        node = nodes.get(ref)
+        item = pack.by_id().get(ref)
+        validity = str((node or {}).get("validity") or "VALID")
+        if validity in {"STALE", "REJECTED"}:
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    f"fact derived from stale evidence: {ref}",
+                )
+            )
+        region = (node or {}).get("region") or (None if item is None else item.region)
+        if region and not _regions_compatible(str(region), pack_region):
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    f"region mismatch for {ref}: {region} vs {pack_region}",
+                )
+            )
+        subject = str((node or {}).get("subject_identity") or "")
+        if subject in entities:
+            declared = set(output.entity_refs)
+            for hypo in output.hypotheses:
+                declared.update(hypo.entity_refs)
+            if declared and subject not in declared:
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"subject mismatch for {ref}: {subject}",
+                    )
+                )
+
+
+def _check_fusion_contradictions(
+    output: ReasoningOutput,
+    scoped: dict,
+    issues: list[ValidationIssue],
+) -> None:
+    contradicting = set(output.contradicting_evidence_refs)
+    for hypo in output.hypotheses:
+        contradicting.update(hypo.contradicting_evidence_refs)
+    for fusion in fusion_statuses(scoped):
+        status = str(fusion.get("status") or "")
+        node_ids = [str(item) for item in (fusion.get("node_ids") or [])]
+        if status == "CONTRADICT":
+            missing = [item for item in node_ids if item not in contradicting]
+            if output.status is DiagnosisStatus.SUPPORTED:
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        "CONTRADICT fusion cannot be treated as a supported fact",
+                    )
+                )
+            if missing and output.confidence is Confidence.HIGH:
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"HIGH confidence ignored contradictory evidence {missing}",
+                    )
+                )
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        f"unresolved contradiction not surfaced: {missing}",
+                    )
+                )
+
+
+def _check_status_and_requests(
+    output: ReasoningOutput,
+    issues: list[ValidationIssue],
+) -> None:
+    if output.status is DiagnosisStatus.INSUFFICIENT_EVIDENCE:
+        if not output.requested_evidence:
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    "INSUFFICIENT_EVIDENCE requires a minimal next EvidenceRequest",
+                )
+            )
+        for request in output.requested_evidence:
+            blob = f"{request.why_needed} {request.expected_information_gain} {request.goal}"
+            if is_overbroad_request(blob) or is_overbroad_request(request.target):
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        "next evidence request is over-broad",
+                    )
+                )
+            if not request.target or not request.region or not request.why_needed:
+                issues.append(
+                    ValidationIssue(
+                        ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                        "next evidence request missing target/region/reason",
+                    )
+                )
+    if (
+        output.status is DiagnosisStatus.NO_ACTION_REQUIRED
+        and output.category is FindingType.INSUFFICIENT_EVIDENCE
+        and not output.candidate_actions
+    ):
+        issues.append(
+            ValidationIssue(
+                ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                "NO_ACTION_REQUIRED is not INSUFFICIENT_EVIDENCE",
+            )
+        )
+
+
+def _check_dsp_discipline(
+    output: ReasoningOutput,
+    pack: EvidencePack,
+    scoped: dict,
+    issues: list[ValidationIssue],
+) -> None:
+    text = " ".join(_text_blobs(output))
+    codes = set(limitation_codes_from_scoped(pack, scoped))
+    values = []
+    for item in pack.items:
+        values.append(str(item.value))
+        values.append(item.name)
+    blob_values = " ".join(values)
+    if "POTENTIAL_OVERLAP" in blob_values or "POTENTIAL_OVERLAP_IS_MEASURED_RELATIONSHIP" in codes:
+        if muddy_as_measurement(text) and output.status is DiagnosisStatus.SUPPORTED:
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    "POTENTIAL_OVERLAP cannot become muddy-as-measurement",
+                )
+            )
+    if "CAPTURE_FAILED" in codes and capture_failed_as_silence(text):
+        issues.append(
+            ValidationIssue(
+                ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                "CAPTURE_FAILED is not measured silence",
+            )
+        )
+    if "KEY_IS_CANDIDATE_SET_NOT_CERTAIN" in codes and certain_key_claim(text):
+        issues.append(
+            ValidationIssue(
+                ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                "KEY_IS_CANDIDATE_SET_NOT_CERTAIN forbids a certain key",
+            )
+        )
+    if ungrounded_device_cause(text):
+        issues.append(
+            ValidationIssue(
+                ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                "ungrounded device-causal measurement",
+            )
+        )
+
+
+def _check_confidence_contract(
+    output: ReasoningOutput,
+    issues: list[ValidationIssue],
+) -> None:
+    for blob in _text_blobs(output):
+        if invented_percentage(blob):
+            issues.append(
+                ValidationIssue(
+                    ReasoningFailure.LLM_GROUNDING_VIOLATION,
+                    "combined confidence percentage is forbidden",
+                )
+            )

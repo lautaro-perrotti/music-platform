@@ -402,7 +402,7 @@ def output_ambiguous() -> ReasoningOutput:
         ],
         evidence_refs=["ev.kick.count", "ev.overlap.count", "ev.persist", "ev.band", "ev.drop"],
         contradicting_evidence_refs=[],
-        limitations=["MIDI_UNREAD", "DEVICE_PARAMS_UNREAD", "ROUTING_UNKNOWN", "ALIGNMENT_LIMITED"],
+        limitations=["MIDI_UNREAD", "DEVICE_PARAMS_UNREAD", "ROUTING_UNKNOWN", "MISSING_ISOLATE", "ALIGNMENT_LIMITED"],
         candidate_actions=[
             ReasoningCandidate(
                 action_type=CandidateActionType.NO_CHANGE,

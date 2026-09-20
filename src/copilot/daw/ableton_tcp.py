@@ -21,7 +21,6 @@ from copilot.daw.protocol import (
 from copilot.daw.state_hash import ObservedRevision
 from copilot.daw.timeouts import DEFAULT_TIMEOUTS, TimeoutPolicy
 from copilot.daw.write import WriteInDoubt
-from copilot.runtime.freshness import FreshnessClock, FreshnessDomain
 from copilot.schemas.session import (
     ClipState,
     DeviceState,
@@ -37,19 +36,6 @@ from copilot.schemas.session import (
 
 DEFAULT_HOST = os.environ.get("ABLETON_MCP_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABLETON_MCP_PORT", "9877"))
-
-_RICH_TRACK_FIELDS = ("sends", "taps", "devices", "clip_slots")
-
-
-def _merge_track_info(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
-    """Preserve richer topology fields when a narrower get_track_info overwrites."""
-    merged = dict(existing or {})
-    merged.update(incoming)
-    for key in _RICH_TRACK_FIELDS:
-        if key not in incoming and existing is not None and key in existing:
-            merged[key] = existing[key]
-    return merged
-
 
 
 def _is_transport_failure(exc: BaseException) -> bool:
@@ -76,14 +62,13 @@ class AbletonTcpAdapter(DawAdapter):
         require_local_host(host)
         self.host = host
         self.port = port
+        self._device_uri_cache: dict[str, str] = {}
         self.timeouts = timeouts or DEFAULT_TIMEOUTS
         self._sock: socket.socket | None = None
         self.ids = IdentityRegistry()
         self.observed = ObservedRevision()
         self.session_incarnation_id = f"sess_{uuid4().hex[:12]}"
         self.capabilities: set[str] = set()
-        self.compound_mutation_version: str | None = None
-        self.compound_supported_operations: list[str] = []
         self.handshake_info: dict[str, Any] = {}
         self.strict_capabilities = True
         self._recv_buf = ""
@@ -100,7 +85,6 @@ class AbletonTcpAdapter(DawAdapter):
         self.profile_track_info = False
         self.track_info_sites: Counter[str] = Counter()
         self.batch_control_live: bool | None = None
-        self.freshness = FreshnessClock()
 
     def reset_tcp_stats(self) -> None:
         self.tcp_counts = Counter()
@@ -136,11 +120,6 @@ class AbletonTcpAdapter(DawAdapter):
             hello = self._command("protocol_hello", side_effect=False)
             self.handshake_info = hello
             self.capabilities = set(hello.get("capabilities") or [])
-            version = hello.get("compound_mutation_version")
-            self.compound_mutation_version = str(version) if version else None
-            self.compound_supported_operations = list(
-                hello.get("compound_supported_operations") or []
-            )
         except DawError as exc:
             if isinstance(exc, ProtocolError) or _is_transport_failure(exc):
                 self.disconnect()
@@ -222,29 +201,13 @@ class AbletonTcpAdapter(DawAdapter):
         self.last_project = self._project_cached
         return self.last_project
 
-    def snapshot(self, *, include_notes: bool = True, fresh: bool = False) -> SessionState:
+    def snapshot(self, *, include_notes: bool = True) -> SessionState:
         self.snapshot_calls += 1
-        if (
-            not include_notes
-            and not fresh
-            and isinstance(self.last_topology, dict)
-            and isinstance(self.last_topology.get("tracks"), list)
-            and self.freshness.snapshot_reusable()
-        ):
-            self.snapshot_source = "reused_topology"
-            return self._session_from_topology(self.last_topology, include_notes=False)
         topology = self._safe_command("get_capture_topology", default=None)
         if isinstance(topology, dict) and isinstance(topology.get("tracks"), list):
             self.snapshot_source = "topology"
             self.last_topology = topology
-            session = self._session_from_topology(topology, include_notes=include_notes)
-            tracks = [
-                int(item["index"])
-                for item in topology.get("tracks") or []
-                if "index" in item
-            ]
-            self.freshness.mark_topology_read(tracks)
-            return session
+            return self._session_from_topology(topology, include_notes=include_notes)
         batched = self._safe_command("get_tracks_info", default=None)
         session = self._command("get_session_info")
         playback = self._command("get_playback_position")
@@ -308,7 +271,7 @@ class AbletonTcpAdapter(DawAdapter):
             name = info.get("name") or f"Track {index}"
             tracks.append(
                 TrackState(
-                    stable_id="",
+                    stable_id=name,
                     index=index,
                     name=name,
                     role=role,
@@ -361,6 +324,7 @@ class AbletonTcpAdapter(DawAdapter):
                         length_beats=float(clip.get("length", 0.0)),
                         is_midi=bool(info.get("is_midi_track")),
                         notes=notes,
+                        sample_uri=clip.get("sample_uri") or clip.get("sample_path") or None,
                     )
                 )
             devices[index] = [
@@ -511,10 +475,6 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
-    def execute_mutation_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Whitelisted compound temporary mutations. Handshake-gated."""
-        return self._command("execute_mutation_batch", payload, side_effect=True)
-
     def set_device_parameters(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         return self._command(
             "set_device_parameters",
@@ -563,46 +523,18 @@ class AbletonTcpAdapter(DawAdapter):
             site = f"{Path(frame.filename).name}:{frame.lineno}:{frame.function}"
             self.track_info_sites[site] += 1
         info = self._command("get_track_info", {"track_index": track_index})
-        index = int(track_index)
-        merged = _merge_track_info(self.last_track_infos.get(index), info)
-        self.last_track_infos[index] = merged
-        return merged
+        self.last_track_infos[int(track_index)] = info
+        return info
 
-    def get_tracks_info(
-        self, indices: list[int] | None = None, *, fresh: bool = False
-    ) -> dict[str, Any]:
-        del fresh  # wrapper uses this flag; the adapter always round-trips
+    def get_tracks_info(self, indices: list[int] | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if indices is not None:
             params["indices"] = [int(index) for index in indices]
         result = self._command("get_tracks_info", params)
         for item in result.get("tracks") or []:
             if "index" in item:
-                idx = int(item["index"])
-                self.last_track_infos[idx] = _merge_track_info(
-                    self.last_track_infos.get(idx), item
-                )
+                self.last_track_infos[int(item["index"])] = item
         return result
-
-    def get_capture_hosts_state(
-        self, indices: list[int] | None = None, *, fresh: bool = False
-    ) -> dict[str, Any]:
-        """READ_CAPTURE_HOSTS_STATE. Same payload as get_tracks_info on current Live."""
-        return self.get_tracks_info(indices, fresh=fresh)
-
-    def get_tracks_sends(self, indices: list[int]) -> dict[str, Any]:
-        batched = self.get_tracks_info([int(i) for i in indices])
-        rows = []
-        for item in batched.get("tracks") or []:
-            if "index" not in item:
-                continue
-            rows.append(
-                {
-                    "track_index": int(item["index"]),
-                    "sends": list(item.get("sends") or []),
-                }
-            )
-        return {"tracks": rows}
 
     def get_capture_topology(self) -> dict[str, Any]:
         result = self._command("get_capture_topology")
@@ -710,6 +642,27 @@ class AbletonTcpAdapter(DawAdapter):
     def get_track_output_routing(self, track_index: int) -> dict[str, Any]:
         return self._command("get_track_output_routing", {"track_index": track_index})
 
+    def get_track_available_input_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_input_types", {"track_index": track_index})
+
+    def get_track_available_output_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_output_types", {"track_index": track_index})
+
+    def get_session_automation_record(self) -> dict[str, Any]:
+        return self._command("get_session_automation_record", {})
+
+    def get_clip_automation(
+        self, track_index: int, clip_index: int, parameter_name: str
+    ) -> dict[str, Any]:
+        return self._command(
+            "get_clip_automation",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+            },
+        )
+
     def set_track_input_routing(
         self,
         track_index: int,
@@ -736,6 +689,23 @@ class AbletonTcpAdapter(DawAdapter):
             "set_track_output_routing",
             {
                 "track_index": track_index,
+                "routing_type": routing_type,
+                "routing_channel": routing_channel,
+            },
+            side_effect=True,
+        )
+
+    def save_session(self) -> dict[str, Any]:
+        return self._command("save", {}, side_effect=True)
+
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        return self._command(
+            "set_device_input_routing",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
                 "routing_type": routing_type,
                 "routing_channel": routing_channel,
             },
@@ -792,10 +762,9 @@ class AbletonTcpAdapter(DawAdapter):
         )
 
     def get_track_sends(self, track_index: int, *, limit: int = 16) -> list[dict[str, Any]]:
-        if self.freshness.is_fresh(FreshnessDomain.SEND_STATE, int(track_index)):
-            cached = self.last_track_infos.get(int(track_index))
-            if cached and isinstance(cached.get("sends"), list):
-                return list(cached["sends"])
+        cached = self.last_track_infos.get(int(track_index))
+        if cached and isinstance(cached.get("sends"), list):
+            return list(cached["sends"])
         batched = self._safe_command(
             "get_track_sends", {"track_index": track_index}, default=None
         )
@@ -961,18 +930,49 @@ class AbletonTcpAdapter(DawAdapter):
     def load_instrument_or_effect(
         self, track_index: int, uri: str
     ) -> dict[str, Any]:
+        # The live bridge needs a browser query URI (e.g. "query:AudioFx#EQ%20Eight").
+        # Accept a bare name ("EQ Eight") OR a mock-style path ("devices/audio-effects/EQ Eight"):
+        # extract the device name and resolve via search_browser, CACHED so a 52-device
+        # build does not re-search the browser for every load.
+        if not uri.startswith("query:"):
+            name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+            if name not in self._device_uri_cache:
+                sr = self.search_browser(name, "audio_effects")
+                results = sr.get("results", []) if isinstance(sr, dict) else []
+                if not results:
+                    sr = self.search_browser(name, "all")
+                    results = sr.get("results", []) if isinstance(sr, dict) else []
+                device = next((r for r in results if r.get("is_device")), None)
+                self._device_uri_cache[name] = device.get("uri", uri) if device else uri
+            uri = self._device_uri_cache[name]
         return self._command(
             "load_instrument_or_effect",
             {"track_index": track_index, "uri": uri},
             side_effect=True,
         )
 
-    def load_browser_item(self, track_index: int, item_uri: str) -> dict[str, Any]:
-        return self._command(
-            "load_browser_item",
-            {"track_index": track_index, "item_uri": item_uri},
-            side_effect=True,
-        )
+    def load_browser_item(
+        self, track_index: int, item_uri: str, clip_index: int | None = None
+    ) -> dict[str, Any]:
+        # The live bridge loads a BROWSER item, not a file path. Resolve local
+        # sample paths (e.g. /Volumes/Lucas/Samples/.../kick.wav) to a browser URI
+        # by searching the filename stem across all categories (incl. Places).
+        # Non-query URIs are library-relative sample paths: navigate the user Places
+        # by path (O(depth), fast) instead of a full recursive browser search.
+        if item_uri and not item_uri.startswith("query:"):
+            return self._command(
+                "load_browser_item_by_path",
+                {
+                    "track_index": track_index,
+                    "rel_path": item_uri,
+                    "clip_index": clip_index if clip_index is not None else 0,
+                },
+                side_effect=True,
+            )
+        params: dict[str, Any] = {"track_index": track_index, "item_uri": item_uri}
+        if clip_index is not None:
+            params["clip_index"] = clip_index
+        return self._command("load_browser_item", params, side_effect=True)
 
     def delete_device(self, track_index: int, device_index: int) -> dict[str, Any]:
         return self._command(
@@ -1073,9 +1073,6 @@ class AbletonTcpAdapter(DawAdapter):
         if response.get("status") == "error":
             raise DawError(response.get("message", "Unknown Ableton error"))
         result = response.get("result", {})
-        if side_effect:
-            self.freshness.apply_mutation(command_type, params or {})
-            self._last_freshness_mutation = command_type
         if not isinstance(result, dict):
             return {"value": result}
         return result

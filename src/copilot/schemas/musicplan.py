@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
+
+from copilot.schemas.session import MidiNote
 
 SCHEMA_VERSION = "musicplan-v1"
 
@@ -25,6 +27,15 @@ class PlanStatus(StrEnum):
 
 class ActionType(StrEnum):
     SET_TRACK_VOLUME = "SET_TRACK_VOLUME"
+    DEVICE_TWEAK = "DEVICE_TWEAK"
+    DEVICE_LOAD = "DEVICE_LOAD"
+    SAMPLE_SWAP = "SAMPLE_SWAP"
+    CREATE_TRACK = "CREATE_TRACK"
+    SAMPLE_LOAD = "SAMPLE_LOAD"
+    CREATE_PATTERN = "CREATE_PATTERN"
+    SET_TRACK_MUTE = "SET_TRACK_MUTE"
+    SET_TRACK_ROUTING = "SET_TRACK_ROUTING"
+    SET_DEVICE_ROUTING = "SET_DEVICE_ROUTING"
 
 
 class VolumeOperation(StrEnum):
@@ -104,6 +115,7 @@ class RollbackSpec(BaseModel):
 
 
 class VolumeActionParams(BaseModel):
+    kind: Literal["volume"] = "volume"
     operation: VolumeOperation
     unit: Literal["ableton_volume"] = "ableton_volume"
     target_value: float | None = None
@@ -115,11 +127,92 @@ class VolumeActionParams(BaseModel):
     readback_tolerance: float = 0.02
 
 
+class DeviceTweakActionParams(BaseModel):
+    kind: Literal["device_tweak"] = "device_tweak"
+    device_index: int
+    parameter_name: str
+    unit: str = ""
+    expected_before: float
+    intended_after: float
+    allowed_min: float | None = None
+    allowed_max: float | None = None
+    readback_tolerance: float = 0.001
+
+
+class DeviceLoadActionParams(BaseModel):
+    kind: Literal["device_load"] = "device_load"
+    device_name: str
+    device_uri: str | None = None
+    device_index_hint: int = -1
+
+
+class SampleSwapActionParams(BaseModel):
+    kind: Literal["sample_swap"] = "sample_swap"
+    clip_index: int
+    sample_uri: str
+    previous_sample_uri: str | None = None
+
+
+class CreateTrackActionParams(BaseModel):
+    kind: Literal["create_track"] = "create_track"
+    track_name: str
+    track_kind: Literal["audio", "midi"] = "audio"
+    index_hint: int = -1
+
+
+class SampleLoadActionParams(BaseModel):
+    kind: Literal["sample_load"] = "sample_load"
+    clip_index: int
+    sample_uri: str
+
+
+class PatternActionParams(BaseModel):
+    kind: Literal["create_pattern"] = "create_pattern"
+    clip_index: int
+    length_beats: float
+    notes: list[MidiNote] = Field(default_factory=list)
+
+
+class SetTrackMuteActionParams(BaseModel):
+    kind: Literal["set_track_mute"] = "set_track_mute"
+    mute: bool
+
+
+class SetTrackRoutingActionParams(BaseModel):
+    kind: Literal["set_track_routing"] = "set_track_routing"
+    routing_type: str
+    routing_channel: str = ""
+
+
+class SetDeviceRoutingActionParams(BaseModel):
+    kind: Literal["set_device_routing"] = "set_device_routing"
+    device_index: int
+    routing_type: str = "Track"
+    routing_channel: str = ""
+
+
+ActionParams = Annotated[
+    Union[
+        VolumeActionParams,
+        DeviceTweakActionParams,
+        DeviceLoadActionParams,
+        SampleSwapActionParams,
+        CreateTrackActionParams,
+        SampleLoadActionParams,
+        PatternActionParams,
+        SetTrackMuteActionParams,
+        SetTrackRoutingActionParams,
+        SetDeviceRoutingActionParams,
+    ],
+    Field(discriminator="kind"),
+]
+
+
 class PlanAction(BaseModel):
     action_id: str
     action_type: ActionType
     target: ActionTarget
-    params: VolumeActionParams
+    params: ActionParams
     reason: str
     evidence_refs: list[str] = Field(default_factory=list)
     preconditions: list[ActionPrecondition] = Field(default_factory=list)

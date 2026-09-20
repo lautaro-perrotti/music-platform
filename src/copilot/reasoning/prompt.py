@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
+from copilot.reasoning.evidence_input import scoped_evidence, serialize_for_prompt
 from copilot.reasoning.schema import PROMPT_VERSION, SCHEMA_VERSION
 from copilot.schemas.evidence import EvidencePack
 
@@ -14,28 +16,19 @@ CAUSAL_HIERARCHY = (
     "EQ last",
 )
 
+CAUSAL_STANCES = (
+    "COINCIDES_WITH",
+    "COMPATIBLE_WITH",
+    "SUGGESTS",
+    "WEAKLY_SUPPORTS",
+    "STRONGLY_SUPPORTS",
+    "CAUSE_UNRESOLVED",
+)
 
-def build_prompt(pack: EvidencePack) -> str:
-    evidence = [
-        {
-            "evidence_id": item.evidence_id,
-            "kind": item.kind.value,
-            "name": item.name,
-            "value": item.value,
-            "unit": item.unit,
-            "source_ref": item.source_ref,
-            "region": item.region,
-            "view": item.view,
-            "signal_point": item.signal_point,
-            "analysis_version": item.analysis_version,
-            "quality": item.quality.value,
-            "limitations": item.limitations,
-            "project_token": item.project_token,
-            "audible_token": item.audible_token,
-            "target_token": item.target_token,
-        }
-        for item in pack.items
-    ]
+
+def build_prompt(pack: EvidencePack, view: Any | None = None) -> str:
+    scoped = scoped_evidence(pack, view)
+    evidence_view = serialize_for_prompt(scoped)
     entities = [item.model_dump() for item in pack.entities]
     limitations = [
         {
@@ -45,7 +38,19 @@ def build_prompt(pack: EvidencePack) -> str:
         }
         for item in pack.limitations
     ]
+    for row in evidence_view.get("limitations") or []:
+        code = row.get("code") if isinstance(row, dict) else None
+        if code and not any(item["code"] == code for item in limitations):
+            limitations.append(
+                {
+                    "code": code,
+                    "detail": row.get("detail") or "",
+                    "precision_ms": row.get("precision_ms"),
+                }
+            )
     schema = {
+        "question": "string",
+        "scope": "string",
         "category": "FindingType",
         "summary": "string",
         "status": "SUPPORTED|WEAKLY_SUPPORTED|INSUFFICIENT_EVIDENCE|NO_ACTION_REQUIRED|DIAGNOSIS_UNSTABLE",
@@ -59,6 +64,10 @@ def build_prompt(pack: EvidencePack) -> str:
                 "alternatives_considered": ["string"],
                 "contradicting_evidence_refs": ["evidence_id"],
                 "entity_refs": ["entity_id"],
+                "missing_evidence": ["string"],
+                "limitations": ["string"],
+                "status": "SUPPORTED|WEAKLY_SUPPORTED|INSUFFICIENT_EVIDENCE|NO_ACTION_REQUIRED|DIAGNOSIS_UNSTABLE|null",
+                "causal_stance": "COINCIDES_WITH|COMPATIBLE_WITH|SUGGESTS|WEAKLY_SUPPORTS|STRONGLY_SUPPORTS|CAUSE_UNRESOLVED|null",
             }
         ],
         "evidence_refs": ["evidence_id"],
@@ -75,13 +84,24 @@ def build_prompt(pack: EvidencePack) -> str:
                 "evidence_refs": ["evidence_id"],
             }
         ],
+        "candidate_strategies": [
+            {
+                "strategy": "high-level musical strategy, not an executable write",
+                "reason": "string",
+                "evidence_refs": ["evidence_id"],
+                "entity_refs": ["entity_id"],
+            }
+        ],
         "requested_evidence": [
             {
                 "request_kind": "CAPTURE_VIEW|READ_MIDI|READ_DEVICE_PARAMETERS|ANALYZE_REGION|READ_ROUTING",
                 "why_needed": "string",
-                "target": "string",
+                "target": "subject identity",
                 "region": "string",
                 "expected_information_gain": "string",
+                "goal": "string",
+                "required_evidence_kinds": ["MEASUREMENT|FACT|RELATIONSHIP|..."],
+                "priority": "HIGH|NORMAL|LOW",
             }
         ],
         "entity_refs": ["entity_id"],
@@ -98,16 +118,35 @@ def build_prompt(pack: EvidencePack) -> str:
             f"PROJECT_TOKEN:{pack.project_token}",
             f"AUDIBLE_TOKEN:{pack.audible_token}",
             f"TARGET_TOKEN:{pack.target_token or ''}",
+            f"PROJECT_IDENTITY:{evidence_view.get('project_identity') or pack.project_token}",
             "",
             "Hard boundary:",
+            "- You receive a scoped EvidenceView. Do not invent repository history, parent/child packs, or unrelated logs.",
             "- Interpret observations. Do not invent measurements, devices, MIDI, routing, Hz, counts, or plugin settings.",
+            "- You are never measurement authority. pdsp.* and DspObservation facts are MEASUREMENT (relational = RELATIONSHIP).",
             "- Do not claim an action succeeded. Do not call Ableton/LOM. Do not execute shell or Python.",
-            "- All factual claims must quote evidence_id values supplied below.",
+            "- Never output: run capture command, call CLI X, execute Python Y, python -m copilot.",
+            "- All quantitative factual statements must quote evidence_id values that contain those numbers and units.",
             "- Missing evidence cannot be invented. Uncertainty must be explicit.",
             "- NO_ACTION_REQUIRED is valid. INSUFFICIENT_EVIDENCE is valid. Do not force a diagnosis.",
-            "- Candidate actions are strategies, not executable MusicPlans or Ableton commands.",
+            "- INSUFFICIENT_EVIDENCE is not NO_ACTION_REQUIRED. DIAGNOSIS_UNSTABLE is not INSUFFICIENT_EVIDENCE.",
+            "- Candidate actions and candidate_strategies are strategies, not executable MusicPlans or Ableton commands.",
             "- Do not emit parameter mutation values unless that number exists in evidence.",
             "- Durations in ms/s and levels in dB must match evidence values (including fullmix_* fields).",
+            "- Confidence is HIGH/MEDIUM/LOW. Do not invent a combined percentage. combined remains null.",
+            "",
+            "Allowed interpretation example:",
+            "- Measured source energy decreases during the event while MIDI remains present, which is compatible with attenuation somewhere after note generation.",
+            "Not allowed without evidence:",
+            "- The compressor is suppressing the synth by 6 dB.",
+            "",
+            "DSP facts:",
+            "- LEVEL/DYNAMICS, SPECTRAL, TRANSIENT, STEREO, RHYTHM FACTS, TONAL FACTS, TIMBRE FACTS, RELATIONAL DSP are facts.",
+            "- POTENTIAL_OVERLAP is a measured relationship, not 'muddy' and not a 'masking problem'.",
+            "- High spectral overlap MAY be reasoned as 'potential masking is plausible'. Do not conclude 'apply -3 dB at 300 Hz' unless evidence and later action reasoning support it.",
+            "- CAPTURE_FAILED is not measured silence.",
+            "- KEY_IS_CANDIDATE_SET_NOT_CERTAIN means no single key is certain.",
+            "- Non-canonical DSP limitation codes (ITU_LRA_NOT_IMPLEMENTED, TRUE_PEAK_4X_POLYPHASE_APPROXIMATION, etc.) must be copied into limitations, never dropped.",
             "",
             "Measure vs diagnose:",
             "- Evidence items are facts. 'kick is weak' / 'bass is muddy' / 'dropout problem' / 'groove breathing' are interpretations, not observations.",
@@ -118,6 +157,16 @@ def build_prompt(pack: EvidencePack) -> str:
             "Evidence families present may include:",
             "- LowEndObservation (kick/bass temporal/spectral measures; ids without fm. prefix)",
             "- FullMixObservation (Main energy/spectral/transient/stereo/dynamics; ids with fm. prefix)",
+            "- Physical DSP V2 (pdsp.* MEASUREMENT / RELATIONSHIP)",
+            "",
+            "Contradictions:",
+            "- Surface support, counterevidence, and unresolved contradiction.",
+            "- Fusion status CONTRADICT: do not pick one side as fact. PARTIALLY_AGREE and NOT_COMPARABLE stay visible.",
+            "- HIGH confidence cannot ignore strong contradictory evidence.",
+            "",
+            "Causal language (not deep causal diagnosis):",
+            " ".join(CAUSAL_STANCES),
+            "- Temporal coincidence is not causation. Prefer COMPATIBLE_WITH / COINCIDES_WITH / CAUSE_UNRESOLVED.",
             "",
             "Category guidance (hypothesis labels, not automatic truth):",
             "- TEMPORAL_MASKING / SPECTRAL_MASKING / EXCESSIVE_BASS_DECAY / KICK_DECAY_COLLISION: low-end family",
@@ -138,11 +187,14 @@ def build_prompt(pack: EvidencePack) -> str:
             "Low-frequency overlap does not imply bad EQ.",
             "A Main energy dip with high repetition_strength is not automatically a problem.",
             "",
-            "Each hypothesis needs claim, evidence_refs, reasoning_summary, confidence, alternatives_considered.",
-            "Empty evidence_refs is invalid. Unknown evidence_id is invalid.",
-            "Include contradicting_evidence_refs when a phenomenon exists but another reading is possible.",
-            "If causes cannot be distinguished, status=INSUFFICIENT_EVIDENCE and request typed evidence.",
+            "Each hypothesis needs claim, evidence_refs, reasoning_summary, confidence, alternatives_considered,",
+            "contradicting_evidence_refs, missing_evidence, limitations, status.",
+            "Empty evidence_refs is invalid. Unknown evidence_id is invalid. Stale evidence is not a current fact.",
+            "If causes cannot be distinguished, status=INSUFFICIENT_EVIDENCE and request the smallest useful next evidence.",
+            "Good next evidence: READ_DEVICE_PARAMETERS for one named subject in a named region, with why.",
+            "Bad next evidence: analyze everything.",
             "If a measurable overlap or repeating dip is musically acceptable, status=NO_ACTION_REQUIRED is allowed.",
+            "Candidate strategies: inspect attenuation; rebalance kick/bass relationship; reduce competing high-frequency activity; increase section contrast. No ungrounded exact parameter values.",
             "",
             "Return ONLY JSON matching this schema:",
             json.dumps(schema, indent=2),
@@ -153,7 +205,7 @@ def build_prompt(pack: EvidencePack) -> str:
             "LIMITATIONS:",
             json.dumps(limitations, indent=2),
             "",
-            "EVIDENCE:",
-            json.dumps(evidence, indent=2),
+            "EVIDENCE_VIEW:",
+            json.dumps(evidence_view, indent=2),
         ]
     )

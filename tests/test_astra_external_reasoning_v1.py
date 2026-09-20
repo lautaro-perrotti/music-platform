@@ -26,6 +26,7 @@ from copilot.reasoning.pipeline import reason
 from copilot.reasoning.provider import FailingProvider, ScriptedProvider
 from copilot.reasoning.schema import GroundedHypothesis, ReasoningOutput
 from copilot.schemas.diagnosis import CandidateActionType, Confidence, DiagnosisStatus, FindingType
+from copilot.schemas.evidence import EvidenceRequest, EvidenceRequestKind
 
 
 def _ie_output(evidence_id: str) -> ReasoningOutput:
@@ -42,14 +43,29 @@ def _ie_output(evidence_id: str) -> ReasoningOutput:
                 confidence=Confidence.LOW,
                 alternatives_considered=["LEVEL_IMBALANCE", "NO_ACTION_REQUIRED"],
                 contradicting_evidence_refs=[],
+                missing_evidence=["READ_DEVICE_PARAMETERS"],
+                limitations=["ALIGNMENT_LIMITED", "MIDI_UNREAD"],
             )
         ],
         evidence_refs=[evidence_id],
         contradicting_evidence_refs=[],
         limitations=["ALIGNMENT_LIMITED", "MIDI_UNREAD"],
         candidate_actions=[],
-        requested_evidence=[],
+        requested_evidence=[
+            EvidenceRequest(
+                request_kind=EvidenceRequestKind.READ_DEVICE_PARAMETERS,
+                why_needed="MIDI may be present while post-mixer level is unexplained.",
+                target="target source",
+                region="current region",
+                expected_information_gain="Whether gain/dynamics parameters explain the level.",
+                goal="DEVICE_CAUSAL_CONTEXT",
+                required_evidence_kinds=["FACT"],
+                priority="HIGH",
+            )
+        ],
         entity_refs=[],
+        question="Is a mix change warranted from current measurements?",
+        scope="current region",
     )
 
 

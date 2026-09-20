@@ -81,14 +81,16 @@ class MockAbletonAdapter(DawAdapter):
             for slot_index, clip in enumerate(raw["clips"]):
                 if clip is None:
                     continue
+                is_audio = bool(clip.get("is_audio", False))
                 clips[index].append(
                     ClipState(
                         stable_id="",
                         slot_index=slot_index,
                         name=clip["name"],
                         length_beats=clip["length"],
-                        is_midi=True,
-                        notes=[MidiNote(**note) for note in clip["notes"]],
+                        is_midi=not is_audio,
+                        notes=[] if is_audio else [MidiNote(**note) for note in clip["notes"]],
+                        sample_uri=clip.get("sample_uri"),
                     )
                 )
             devices[index] = [
@@ -157,6 +159,40 @@ class MockAbletonAdapter(DawAdapter):
             {"index": new_index, "name": self.tracks[new_index]["name"]},
         )
 
+    def create_audio_track(self, name: str, index: int = -1) -> dict[str, Any]:
+        self._require()
+        track = {
+            "name": name or f"Audio {len(self.tracks) + 1}",
+            "is_midi": False,
+            "mixer": MixerState().model_dump(),
+            "routing": RoutingState(output_type="Main", monitoring="in").model_dump(),
+            "sends": [],
+            "clips": [None] * self.slot_count,
+            "devices": [],
+        }
+        if self._ensure_eq_device:
+            track["devices"].append(
+                {
+                    "name": "EQ Eight",
+                    "class_name": "Eq8",
+                    "enabled": True,
+                    "parameters": [
+                        {"index": 0, "name": "1 Gain A", "value": 0.5, "min": 0.0, "max": 1.0}
+                    ],
+                }
+            )
+        self._before_write("create_audio_track")
+        if index < 0 or index >= len(self.tracks):
+            self.tracks.append(track)
+            new_index = len(self.tracks) - 1
+        else:
+            self.tracks.insert(index, track)
+            new_index = index
+        return self._after_write(
+            "create_audio_track",
+            {"index": new_index, "name": self.tracks[new_index]["name"]},
+        )
+
     def delete_track(self, track_index: int) -> dict[str, Any]:
         self._before_write("delete_track")
         snap = self.snapshot()
@@ -202,6 +238,27 @@ class MockAbletonAdapter(DawAdapter):
         return self._after_write(
             "set_track_output_routing",
             {"output_type": routing_type, "output_channel": routing_channel},
+        )
+
+    def save_session(self) -> dict[str, Any]:
+        self._before_write("save_session")
+        return self._after_write("save_session", {"saved": True, "path": self.session_path})
+
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        self._before_write("set_device_input_routing")
+        track = self._track(track_index)
+        devices = track.setdefault("devices", [])
+        if device_index < 0 or device_index >= len(devices):
+            raise DawError("Device index out of range")
+        dev = devices[device_index]
+        routing = dev.setdefault("routing", {})
+        routing["input_type"] = routing_type
+        routing["input_channel"] = routing_channel
+        return self._after_write(
+            "set_device_input_routing",
+            {"index": track_index, "device_index": device_index, "routing": routing},
         )
 
     def get_session_path(self) -> dict[str, Any]:

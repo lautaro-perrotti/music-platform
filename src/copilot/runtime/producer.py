@@ -289,6 +289,22 @@ class Producer:
 
 
 def _next_evidence(request: AnalyzeProjectRequest, blackboard: dict[str, Any]) -> list[str]:
+    diagnosis = blackboard.get("diagnosis") or {}
+    raw = []
+    if isinstance(diagnosis, dict):
+        raw = list(diagnosis.get("requested_evidence") or [])
+    formatted: list[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            kind = item.get("request_kind") or ""
+            target = item.get("target") or ""
+            region = item.get("region") or ""
+            why = item.get("why_needed") or item.get("reason") or ""
+            formatted.append(f"{kind} for {target} in {region}: {why}".strip(": ").strip())
+        else:
+            formatted.append(str(item))
+    if formatted:
+        return formatted
     have = set(request.goals)
     extra = []
     if "HARMONIC_CONTEXT" not in have:

@@ -71,6 +71,7 @@ CLI: `python -m copilot.cli analyze-project "<folder>"`.
 | `PHYSICAL_DSP_V2` | Factual measurement layer. No mix-quality judgments. |
 | `SAFE_WRITE_FOUNDATION_V2` | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | DSP + Evidence + Safe Write in one repo state. AnalyzeProject stays read-only. |
+| `ASTRA_REASONING_V2` | Evidence-native diagnosis over EvidenceView. Astra interprets; it is never measurement authority. |
 | `PRE_ROLL_QN` | 16 quarter notes. |
 
 Deferred: `RUNTIME_LAUNCH_PATH_OPTIMIZATION`. Do not kill the user's Live session to measure it.

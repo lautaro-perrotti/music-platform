@@ -116,62 +116,6 @@ class TransactionManager:
         logger.error("in_doubt %s: %s", txn.transaction_id, error)
         return txn
 
-    def mark_prepared(self) -> None:
-        if self._open is not None:
-            self._open.status = TransactionStatus.PREPARED
-        self._journal(kind="prepared", status=TransactionStatus.PREPARED)
-
-    def mark_cancelled(self, error: str) -> AgentTransaction:
-        if self._open is None:
-            raise DawError("No open transaction")
-        if self._open.status in {
-            TransactionStatus.SENT,
-            TransactionStatus.IN_DOUBT,
-        }:
-            return self.mark_in_doubt(error)
-        self._open.status = TransactionStatus.CANCELLED
-        self._open.error = error
-        txn = self._open
-        self.history.append(txn)
-        self._open = None
-        self._journal(kind="cancel", status=TransactionStatus.CANCELLED, error=error)
-        logger.info("cancelled %s: %s", txn.transaction_id, error)
-        return txn
-
-    def mark_superseded(self, error: str) -> AgentTransaction:
-        if self._open is None:
-            raise DawError("No open transaction")
-        if self._open.status in {
-            TransactionStatus.SENT,
-            TransactionStatus.APPLIED,
-            TransactionStatus.IN_DOUBT,
-        }:
-            raise DawError("in-flight transaction cannot be superseded")
-        self._open.status = TransactionStatus.SUPERSEDED
-        self._open.error = error
-        txn = self._open
-        self.history.append(txn)
-        self._open = None
-        self._journal(
-            kind="supersede", status=TransactionStatus.SUPERSEDED, error=error
-        )
-        logger.info("superseded %s: %s", txn.transaction_id, error)
-        return txn
-
-    def mark_partial_failure(self, error: str) -> AgentTransaction:
-        if self._open is None:
-            raise DawError("No open transaction")
-        self._open.status = TransactionStatus.PARTIAL_FAILURE
-        self._open.error = error
-        txn = self._open
-        self.history.append(txn)
-        self._open = None
-        self._journal(
-            kind="write", status=TransactionStatus.PARTIAL_FAILURE, error=error
-        )
-        logger.error("partial_failure %s: %s", txn.transaction_id, error)
-        return txn
-
     def record(
         self,
         *,
@@ -499,6 +443,26 @@ class TransactionManager:
         if op == "set_mixer_volume":
             self.daw.set_mixer_volume(locator.track_index, float(params["volume"]))
             return
+        if op == "set_track_mute":
+            self.daw.set_track_mute(locator.track_index, bool(params["mute"]))
+            return
+        if op == "set_track_output_routing":
+            self.daw.set_track_output_routing(
+                locator.track_index,
+                str(params["output_type"]),
+                str(params.get("output_channel", "")),
+            )
+            return
+        if op == "set_device_input_routing":
+            if locator.device_index is None:
+                raise RollbackConflict("Device input routing inverse missing current device locator")
+            self.daw.set_device_input_routing(
+                locator.track_index,
+                locator.device_index,
+                str(params["input_type"]),
+                str(params.get("input_channel", "")),
+            )
+            return
         if op == "set_device_parameter":
             if locator.device_index is None or locator.parameter_index is None:
                 raise RollbackConflict("Device inverse missing current locator")
@@ -507,6 +471,16 @@ class TransactionManager:
                 locator.device_index,
                 locator.parameter_index,
                 float(params["value"]),
+            )
+            return
+        if op == "delete_device":
+            if locator.device_index is None:
+                raise RollbackConflict("Device inverse missing current device locator")
+            self.daw.delete_device(locator.track_index, locator.device_index)
+            return
+        if op == "load_browser_item":
+            self.daw.load_browser_item(
+                locator.track_index, str(params["item_uri"]), clip_index=locator.clip_index
             )
             return
         raise DawError(f"Unsupported inverse: {op}")

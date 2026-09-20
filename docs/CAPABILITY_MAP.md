@@ -47,8 +47,9 @@ reproducible bug.
 
 | ID | Status | Notes |
 |---|---|---|
-| Grounding contract | VERIFIED | No invented measurements/entities. Fail-closed. |
-| Astra on Groove Rider | RUN | Status preserved (`INSUFFICIENT_EVIDENCE`). Provider ~59 s. Quality ≠ grounding. |
+| Grounding contract | VERIFIED / FROZEN | No invented measurements/entities. Fail-closed. |
+| `ASTRA_REASONING_V2` | VERIFIED / FROZEN | EvidenceView in, grounded MusicDiagnosis out. Astra is not measurement authority. |
+| Astra on Groove Rider | RUN (engine) / pack replay BLOCKED | Last Live run stayed `INSUFFICIENT_EVIDENCE`. No persisted pack under `fixtures/frozen/`. |
 | MusicPlan gate | VERIFIED | Closed unless evidence + policy allow. |
 
 ## Portability
@@ -80,5 +81,5 @@ sidecar orchestrator.
 
 ## Physical capture ceiling (honest)
 
-Today: Main + 2 source hosts → up to 2 playback passes for 4 MIDI-active sources.
-Future N-host / 1-pass is an M4L + Live topology milestone, not a runtime hack.
+Today: discovered pool; Groove Rider certified 4 sources + Main in one pass.
+`PRE_ROLL_QN=16`. Alignment `LIMITED ±52 ms`.

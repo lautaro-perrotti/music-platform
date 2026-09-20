@@ -103,10 +103,9 @@ is three parallel foundations that must not mix with capture:
 - ~~`SAFE_WRITE_FOUNDATION_V2`~~ **VERIFIED / FROZEN**
 
 `FOUNDATION_INTEGRATION_CHECKPOINT_V1` consolidates the three into one
-repository state. `ASTRA_REASONING_V2` starts after that commit.
+repository state. ~~`ASTRA_REASONING_V2`~~ **VERIFIED / FROZEN**.
 
-Then `ASTRA_REASONING_V2` (after DSP + Evidence), then
-`DEEP_CAUSAL_DIAGNOSIS_V2`, then `CROSS_PROJECT_CERTIFICATION`.
+Then `DEEP_CAUSAL_DIAGNOSIS_V2`, then `CROSS_PROJECT_CERTIFICATION`.
 Do not start Music Flamingo / CLAP / mix / master until that chain closes.
 
 ## G. Astra / reasoning (separate frontier)

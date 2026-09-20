@@ -17,6 +17,8 @@ compound prepare/restore. Sequential fallback remains for older Remote Scripts.
 `SAFE_WRITE_FOUNDATION_V2` is **VERIFIED / FROZEN** (generic mutation lifecycle;
 `SET_TRACK_VOLUME` only certified musical action).
 `FOUNDATION_INTEGRATION_CHECKPOINT_V1` is **VERIFIED / FROZEN**.
+`ASTRA_REASONING_V2` is **VERIFIED / FROZEN** (EvidenceView diagnosis; Groove Rider
+pack replay not re-seeded).
 Canonical capture/DSP/Astra implementations remain wrapped, not copied.
 
 Constitution: `AGENTS.md`, `docs/CURRENT_STATE.md`, `docs/ROADMAP_100.md`.

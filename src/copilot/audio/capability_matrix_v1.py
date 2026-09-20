@@ -139,6 +139,15 @@ ROWS: tuple[dict[str, Any], ...] = (
         "note": "DspObservation.to_evidence_item(s) ingest into EvidenceGraph. Relational DSP is RELATIONSHIP. SET_TRACK_VOLUME only certified musical action.",
     },
     {
+        "id": "ASTRA_REASONING_V2",
+        "command": None,
+        "claim": "Evidence-native diagnosis over EvidenceView. Grounding stays outside the model.",
+        "status": "VERIFIED",
+        "frozen": True,
+        "writes": False,
+        "note": "Prompt reason-evidence-view-2. CONTRADICT cannot be picked as fact. Groove Rider pack replay not re-seeded (fixtures/frozen empty).",
+    },
+    {
         "id": "PRODUCER_ANALYZE_V1",
         "command": "producer-analyze",
         "claim": "Read-only capture -> evidence pack -> Astra once -> gate. Statuses preserved.",

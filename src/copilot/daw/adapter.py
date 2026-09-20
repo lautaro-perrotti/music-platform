@@ -29,6 +29,9 @@ class DawAdapter(ABC):
     def create_midi_track(self, name: str, index: int = -1) -> dict[str, Any]: ...
 
     @abstractmethod
+    def create_audio_track(self, name: str, index: int = -1) -> dict[str, Any]: ...
+
+    @abstractmethod
     def delete_track(self, track_index: int) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -36,6 +39,22 @@ class DawAdapter(ABC):
 
     @abstractmethod
     def set_mixer_volume(self, track_index: int, volume: float) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def set_track_mute(self, track_index: int, mute: bool) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def set_track_output_routing(
+        self, track_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def save_session(self) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
     def create_midi_clip(

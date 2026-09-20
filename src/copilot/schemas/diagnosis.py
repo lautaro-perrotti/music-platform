@@ -80,6 +80,9 @@ class Hypothesis(BaseModel):
     alternatives_considered: list[str] = Field(default_factory=list)
     contradicting_evidence_refs: list[str] = Field(default_factory=list)
     entity_refs: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    support_status: DiagnosisStatus | None = None
 
 
 class CandidateAction(BaseModel):
@@ -130,3 +133,8 @@ class MusicDiagnosis(BaseModel):
     requested_evidence: list[EvidenceRequest] = Field(default_factory=list)
     acceptance: str | None = None
     reasoning_audit: dict[str, Any] = Field(default_factory=dict)
+    question: str = ""
+    scope: str = ""
+    project_identity: str | None = None
+    candidate_strategies: list[dict[str, Any]] = Field(default_factory=list)
+    confidence_components: dict[str, Any] = Field(default_factory=dict)

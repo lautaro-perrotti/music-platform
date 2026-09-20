@@ -157,6 +157,9 @@ class EvidenceRequest(BaseModel):
     target: str
     region: str
     expected_information_gain: str
+    goal: str = ""
+    required_evidence_kinds: list[str] = Field(default_factory=list)
+    priority: str = "NORMAL"
 
 
 class EvidencePack(BaseModel):

@@ -97,10 +97,22 @@ outcome is `IN_DOUBT` — never `FAILED`, never blind retry. AnalyzeProject
 stays `MUSICAL WRITES = 0`. This is not capture-host
 `ABLETON_MUTATION_PROTOCOL_V1`.
 
+## Astra (evidence-native)
+
+`ASTRA_REASONING_V2` reasons over a scoped EvidenceView. It interprets; it
+does not invent measurements. Fusion `CONTRADICT` cannot be picked as fact.
+`INSUFFICIENT_EVIDENCE` asks for one small next `EvidenceRequest`, not CLI
+or capture commands. Prompt `reason-evidence-view-2`. AnalyzeProject stays
+`MUSICAL WRITES = 0`.
+
+Groove Rider pack replay is **not re-seeded**: `fixtures/frozen/` has no
+pack body (see README there). Truthful abstention is covered by fixtures.
+Do not reopen Live capture to manufacture that pack.
+
 ## Not done
 
-- `ASTRA_REASONING_V2` (after integration checkpoint)
 - `DEEP_CAUSAL_DIAGNOSIS_V2`
+- Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
 - References, Music Flamingo, CLAP, sample search, mix, master
 - `RUNTIME_LAUNCH_PATH_OPTIMIZATION` (unconditional launcher sleep / backoff)
