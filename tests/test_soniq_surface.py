@@ -15,6 +15,9 @@ from copilot.producer.soniq_surface import (
     load_preset,
     detect_surface_completeness,
     apply_patch_contract_auto_mode,
+    load_preset_hybrid,
+    save_preset_hybrid,
+    load_wavetable_hybrid,
 )
 
 
@@ -336,3 +339,77 @@ def test_auto_mode_uses_soniq_on_detector_error(monkeypatch) -> None:
     assert rep["ok"] is True
     assert rep["routing_mode"] == "soniq_full_surface"
     assert rep["detector"]["mode"] == "detector_error"
+
+
+
+def test_stable_plugin_name_fallback_from_none() -> None:
+    assert ss._stable_plugin_name({"pluginName": None, "paramCount": 2623}, "Serum 2") == "Serum 2"
+
+
+def test_load_preset_hybrid_falls_back_to_live(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(ss, "_load_preset_via_soniq_ws", lambda **kwargs: {"ok": False, "error": "not-supported"})
+    rep = load_preset_hybrid(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        preset_uri="query:UserPresets#Serum2#PadA",
+    )
+    assert rep["ok"] is True
+    assert rep["mode"] == "live_mcp"
+
+
+def test_load_wavetable_hybrid_decorates_workflow(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    monkeypatch.setattr(ss, "load_preset_hybrid", lambda *args, **kwargs: {"ok": True, "mode": "soniq_ws", "report": {}})
+    rep = load_wavetable_hybrid(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        wavetable_preset_uri="query:UserPresets#Serum2#WavetableA",
+    )
+    assert rep["ok"] is True
+    assert rep["workflow"] == "wavetable_via_preset"
+
+
+
+def test_save_preset_hybrid_uses_ws_snapshot(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(
+        ss,
+        "_save_preset_snapshot_via_soniq_ws",
+        lambda **kwargs: {"ok": True, "mode": "soniq_ws_snapshot", "snapshot_path": "logs/soniq_presets/test.json"},
+    )
+    rep = save_preset_hybrid(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        preset_uri="snapshot://serum2/a",
+    )
+    assert rep["ok"] is True
+    assert rep["mode"] == "soniq_ws_snapshot"
+
+
+def test_load_preset_hybrid_uses_snapshot_when_native_load_fails(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(ss, "_load_preset_via_soniq_ws", lambda **kwargs: {"ok": False, "error": "missing_method"})
+    monkeypatch.setattr(
+        ss,
+        "_load_preset_snapshot_via_soniq_ws",
+        lambda **kwargs: {"ok": True, "mode": "soniq_ws_snapshot", "readback": []},
+    )
+    rep = load_preset_hybrid(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        preset_uri="snapshot://serum2/a",
+    )
+    assert rep["ok"] is True
+    assert rep["mode"] == "soniq_ws_snapshot"
