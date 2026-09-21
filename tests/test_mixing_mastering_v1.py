@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from copilot.daw.mock import MockAbletonAdapter
-from copilot.integration.mixing_mastering_v1 import execute_lucas_mix_master_iteration
+from copilot.integration.mixing_mastering_v1 import (
+    ActiveRegionSelectionError,
+    execute_lucas_mix_master_iteration,
+    select_capturable_active_region,
+)
 
 
 class MasterMock(MockAbletonAdapter):
@@ -221,3 +225,47 @@ def test_post_apply_failure_fails_closed_and_rolls_back(tmp_path: Path):
     assert report["phases"]["mix"]["post_apply"]["reason"] == "POST_APPLY_FAILED"
     assert report["phases"]["mix"]["rollback_verified"] is True
     assert daw.snapshot().tracks[0].mixer.volume == pytest.approx(0.85)
+
+
+def test_active_region_selector_skips_leading_silence_and_muted_tracks(tmp_path: Path, monkeypatch):
+    daw = MasterMock()
+    daw.connect()
+    daw.create_audio_track("Muted source")
+    daw.create_audio_track("Active source")
+    session = daw.snapshot()
+    session = session.model_copy(update={"project_path": str(tmp_path / "working.als")})
+    Path(session.project_path).write_bytes(b"fixture")
+    muted = session.track_by_name("Muted source")
+    active = session.track_by_name("Active source")
+    assert muted is not None and active is not None
+    muted.mixer.mute = True
+
+    monkeypatch.setattr(
+        "copilot.integration.mixing_mastering_v1.load_arrangement_clips",
+        lambda _path: [
+            {"track": "Muted source", "start_qn": 0.0, "end_qn": 64.0, "kind": "AudioClip"},
+            {"track": "Active source", "start_qn": 40.0, "end_qn": 72.0, "kind": "AudioClip"},
+        ],
+    )
+
+    region = select_capturable_active_region(session)
+
+    assert region["start_beat"] == pytest.approx(40.0)
+    assert region["end_beat"] == pytest.approx(56.0)
+    assert region["coverage_ratio"] == pytest.approx(1.0)
+    assert region["active_tracks"] == ["Active source"]
+
+
+def test_active_region_selector_fails_closed_without_content(tmp_path: Path, monkeypatch):
+    daw = MasterMock()
+    daw.connect()
+    daw.create_audio_track("Empty source")
+    session = daw.snapshot().model_copy(update={"project_path": str(tmp_path / "working.als")})
+    Path(session.project_path).write_bytes(b"fixture")
+    monkeypatch.setattr(
+        "copilot.integration.mixing_mastering_v1.load_arrangement_clips",
+        lambda _path: [],
+    )
+
+    with pytest.raises(ActiveRegionSelectionError, match="NO_ACTIVE_ARRANGEMENT_CLIPS"):
+        select_capturable_active_region(session)

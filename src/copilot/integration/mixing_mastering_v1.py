@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from copilot.daw.state_tokens import attach_tokens
+from copilot.audio.arrangement_activity import load_arrangement_clips
 from copilot.human_eval.store import now_iso
 from copilot.integration.lucas_core_v1 import (
     _single_action_plan,
@@ -41,6 +42,104 @@ from copilot.schemas.session import (
 )
 
 
+class ActiveRegionSelectionError(RuntimeError):
+    """No evidence-backed non-silent arrangement region can be selected."""
+
+    code = "NO_AUDIBLE_PROJECT_CONTENT"
+
+
+def _merge_spans(spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(spans):
+        if end <= start:
+            continue
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return merged
+
+
+def select_capturable_active_region(
+    session: SessionState,
+    *,
+    duration_beats: float = 16.0,
+    minimum_coverage_ratio: float = 0.75,
+) -> dict[str, Any]:
+    """Select a region supported by current arrangement evidence.
+
+    The selector deliberately does not infer audibility from track names or
+    fixed song positions. It uses persisted arrangement clip spans intersected
+    with the authoritative mute/solo state. The capture layer still performs
+    the final Main non-silence check.
+    """
+    if duration_beats <= 0:
+        raise ValueError("duration_beats must be positive")
+    if not session.project_path:
+        raise ActiveRegionSelectionError("PROJECT_PATH_MISSING")
+    project_path = Path(session.project_path)
+    if not project_path.is_file():
+        raise ActiveRegionSelectionError(f"PROJECT_NOT_FOUND: {project_path}")
+
+    tracks = [track for track in session.tracks if track.role in {"midi", "audio", "unknown"}]
+    solo_names = {track.name for track in tracks if track.mixer.solo}
+    if solo_names:
+        allowed_names = solo_names
+    else:
+        allowed_names = {track.name for track in tracks if not track.mixer.mute}
+    rows = [
+        row for row in load_arrangement_clips(project_path)
+        if str(row.get("track") or "") in allowed_names
+    ]
+    if not rows:
+        raise ActiveRegionSelectionError("NO_ACTIVE_ARRANGEMENT_CLIPS")
+
+    candidates = {
+        max(0.0, float(row["start_qn"]))
+        for row in rows
+        if float(row["end_qn"]) > float(row["start_qn"])
+    }
+    candidates.update(
+        max(0.0, float(row["end_qn"]) - duration_beats)
+        for row in rows
+        if float(row["end_qn"]) > float(row["start_qn"])
+    )
+    scored: list[tuple[float, int, float, float, list[str]]] = []
+    for start in sorted(candidates):
+        end = start + duration_beats
+        overlapping = [
+            row for row in rows
+            if float(row["start_qn"]) < end and float(row["end_qn"]) > start
+        ]
+        spans = _merge_spans([
+            (max(start, float(row["start_qn"])), min(end, float(row["end_qn"])))
+            for row in overlapping
+        ])
+        coverage = sum(right - left for left, right in spans)
+        active_tracks = sorted({str(row.get("track") or "") for row in overlapping})
+        scored.append((coverage, len(active_tracks), -start, end, active_tracks))
+    if not scored:
+        raise ActiveRegionSelectionError("NO_ACTIVE_ARRANGEMENT_REGION")
+    coverage, track_count, negative_start, end, active_tracks = max(scored)
+    start = -negative_start
+    ratio = coverage / duration_beats
+    if ratio < minimum_coverage_ratio:
+        raise ActiveRegionSelectionError(
+            f"INSUFFICIENT_ACTIVE_COVERAGE: ratio={ratio:.3f} required={minimum_coverage_ratio:.3f}"
+        )
+    return {
+        "start_beat": float(start),
+        "end_beat": float(end),
+        "duration_beats": float(duration_beats),
+        "coverage_beats": float(coverage),
+        "coverage_ratio": float(ratio),
+        "active_track_count": int(track_count),
+        "active_tracks": active_tracks,
+        "source": "persisted_arrangement_clips_and_authoritative_mixer_state",
+        "project_path": str(project_path),
+    }
+
+
 def capture_and_analyze_master(
     daw,
     session: SessionState,
@@ -55,10 +154,14 @@ def capture_and_analyze_master(
     from copilot.audio.physical_dsp_v2.pipeline import analyze_path
     from copilot.schemas.music_analysis import AudioAnalysisInput
 
+    region = select_capturable_active_region(
+        session,
+        duration_beats=float(end_beat - start_beat),
+    )
     asset = capture_master_segment(
         daw,
-        start_beat=start_beat,
-        end_beat=end_beat,
+        start_beat=float(region["start_beat"]),
+        end_beat=float(region["end_beat"]),
         require_signal=True,
     )
     dsp = analyze_path(asset.file_path, use_cache=False)
@@ -80,7 +183,12 @@ def capture_and_analyze_master(
         "path": str(asset.file_path),
         "dsp": dsp,
         "music_analysis": pack,
+        "rms": float(asset.rms or 0.0),
+        "peak": float(asset.peak or 0.0),
+        "duration": float(asset.duration or 0.0),
+        "sample_rate": int(asset.sample_rate or 0),
         "capture_writes": 0,
+        "region": region,
     }
 
 

@@ -61,18 +61,37 @@ The bounded execution smoke verified:
 - project identity and track count unchanged;
 - working-copy baseline restored.
 
-The real Main capture was silent (`rms=0`, `peak=0`) before and after the
-iteration. Therefore the audio recapture, DSP comparison, and Lucas critique
-could not produce valid evidence in this run. This milestone is not marked
-fully verified until the controlled working copy produces a non-silent Main
-capture and the same bounded loop completes with read-only post-analysis.
+The first validation exposed a concrete bug: the mix/master helper always
+requested `0..16` beats, while the controlled working copy's first active
+arrangement material began later. Live and the tap were healthy; that region
+was simply silent. The fix is a generic evidence-backed active-region selector
+using persisted arrangement clip spans intersected with authoritative mute/solo
+state. It does not use project names or fixed song positions.
+
+After the fix, the selector chose a 16-beat region with 100% clip coverage and
+19 active tracks. Real Main captures were non-silent:
+
+- pre: RMS `0.190420`, peak `0.483027`;
+- after mix: RMS `0.176206`, peak `0.483027`;
+- after master: RMS `0.190414`, peak `0.483027`.
+
+The mix change therefore had a measurable compatible Main consequence
+(`delta RMS=-0.014214`). Master readback and rollback also passed. Physical
+DSP, Music Analyzer, and Advanced Perception all processed the real WAV; CLAP
+was available and returned a read-only observation.
+
+The configured Astra critique provider (`gpt-6-astra`) timed out on the real
+critique request. No verdict was invented and both phases were rolled back.
+The remaining closure blocker is this external provider timeout, not audio
+capture or SafeWrite.
 
 ## Current status
 
 ```text
 MIXING_MASTERING_EXECUTION_V1
-= EXECUTION_BOUNDARY_VERIFIED
-= REAL_AUDIO_VALIDATION_BLOCKED_BY_SILENT_MAIN
+= EXECUTION_VERIFIED
+= REAL_AUDIO_VERIFIED
+= CRITIQUE_BLOCKED_EXTERNAL_PROVIDER_TIMEOUT
 ```
 
 No musical state was intentionally kept by this validation.
