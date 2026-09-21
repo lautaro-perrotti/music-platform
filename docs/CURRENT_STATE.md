@@ -91,6 +91,14 @@ is SESSION_READY / PROJECT_READY after capture-host normalization, but the
 current set is `TARGET_SOURCE_UNSUPPORTED` for a fresh reference capture, so
 this is real-capture validation evidence—not a full MUSIC_ANALYZER_V1 freeze.
 
+`ADVANCED_PERCEPTION_V1` now has a bounded read-only provider boundary. The
+existing Analyzer is exposed as a real local provider, provider availability
+is explicit, EvidenceGraph fusion preserves `CONTRADICT`, and distinct
+reference tokens can form a `ReferenceIntentBundle` without merging facts.
+The real capture run is `PROVIDER_LIMITED`: CLAP and semantic-ear providers
+are unavailable on this host; the non-semantic embedding stub is not counted
+as semantic perception.
+
 ## Physical DSP (factual, not judgment)
 
 `PHYSICAL_DSP_V2` measures. It does not say muddy / professional / needs

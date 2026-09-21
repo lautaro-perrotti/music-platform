@@ -29,6 +29,8 @@ reproducible bug.
 | `RPC_OPTIMIZATION_V2` | VERIFIED / FROZEN | Freshness domains + bulk reads. |
 | `ABLETON_MUTATION_PROTOCOL_V1` | VERIFIED / FROZEN | Live Groove Rider compound prepare/restore. Sequential fallback kept. Not for musical writes. |
 | `PHYSICAL_DSP_V2` | VERIFIED / FROZEN | Factual measurement layer. No mix-quality judgments. FullMix/LowEnd wrapped, not rewritten. |
+| `MUSIC_ANALYZER_V1` | PARTIAL | Real WAV analysis and persisted evidence. Full fresh Ableton reference closure remains blocked by `TARGET_SOURCE_UNSUPPORTED`. |
+| `ADVANCED_PERCEPTION_V1` | PROVIDER_LIMITED | Local Analyzer provider and EvidenceGraph fusion are real/read-only. CLAP and semantic-ear providers are unavailable. |
 
 ## Runtime / agent
 
@@ -37,7 +39,7 @@ reproducible bug.
 | `PRODUCER_RUNTIME_V1` | VERIFIED / FROZEN | `producer.analyze_project`. Agent command count = 1. |
 | `EVIDENCE_SYSTEM_V2` | VERIFIED / FROZEN | Graph above immutable packs. Fusion keeps contradictions. Limitations propagate. |
 | `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
-| `PRODUCER_EXECUTION_V1` | MOCK_VERIFIED / LIVE_PENDING | Additive `MusicPlan → ProductionCompiler → SafeWrite` surface for the six-action minimum. It preserves the frozen foundation contract and requires real Live certification before VERIFIED. |
+| `PRODUCER_EXECUTION_V1` | VERIFIED / FROZEN | `MusicPlan → ProductionCompiler → SafeWrite` six-action minimum passed Live readback/rollback on the controlled working copy. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | VERIFIED | DSP → EvidenceGraph adapter. AnalyzeProject remains read-only. Not a new feature. |
 | `PRODUCER_ANALYZE_V1` | COMMAND_VERIFIED | Debug CLI. Fixture `INSUFFICIENT_EVIDENCE` on empty arrangement. |
 | `PRODUCER_RUN_V1` | COMMAND_VERIFIED | Autonomous volume only on development working copy. |
@@ -75,8 +77,8 @@ Development fixtures and untitled sets are not that test.
 
 EQ, compressor, MIDI editing, arrangement editing, unbounded plugin control,
 web UI, silent mock success, collapsing producer statuses, autonomous writes on
-an unvalidated external song, References, Music Flamingo, CLAP, sample library,
-mix, master.
+an unvalidated external song, Music Flamingo, semantic CLAP similarity, mix,
+master.
 
 Those must register on Producer Runtime when they exist. They do not get a
 sidecar orchestrator.
