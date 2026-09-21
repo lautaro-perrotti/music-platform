@@ -37,6 +37,7 @@ reproducible bug.
 | `PRODUCER_RUNTIME_V1` | VERIFIED / FROZEN | `producer.analyze_project`. Agent command count = 1. |
 | `EVIDENCE_SYSTEM_V2` | VERIFIED / FROZEN | Graph above immutable packs. Fusion keeps contradictions. Limitations propagate. |
 | `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
+| `PRODUCER_EXECUTION_V1` | MOCK_VERIFIED / LIVE_PENDING | Additive `MusicPlan → ProductionCompiler → SafeWrite` surface for the six-action minimum. It preserves the frozen foundation contract and requires real Live certification before VERIFIED. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | VERIFIED | DSP → EvidenceGraph adapter. AnalyzeProject remains read-only. Not a new feature. |
 | `PRODUCER_ANALYZE_V1` | COMMAND_VERIFIED | Debug CLI. Fixture `INSUFFICIENT_EVIDENCE` on empty arrangement. |
 | `PRODUCER_RUN_V1` | COMMAND_VERIFIED | Autonomous volume only on development working copy. |

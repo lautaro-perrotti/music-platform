@@ -18,16 +18,18 @@ class ProductionActionSpec:
 
 
 MINIMUM_PRODUCTION_ACTIONS: tuple[ProductionActionSpec, ...] = (
-    ProductionActionSpec(ProductionActionKind.CREATE_TRACK, "create_track"),
-    ProductionActionSpec(ProductionActionKind.LOAD_SAMPLE, "load_sample"),
+    ProductionActionSpec(ProductionActionKind.CREATE_TRACK, "create_track", certified=True),
+    ProductionActionSpec(ProductionActionKind.LOAD_SAMPLE, "load_sample", certified=True),
     ProductionActionSpec(
         ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
         "duplicate_clip_to_arrangement",
+        certified=True,
     ),
-    ProductionActionSpec(ProductionActionKind.LOAD_DEVICE, "load_device"),
+    ProductionActionSpec(ProductionActionKind.LOAD_DEVICE, "load_device", certified=True),
     ProductionActionSpec(
         "SET_DEVICE_PARAMETER",
         "set_device_parameter",
+        certified=True,
     ),
     ProductionActionSpec(
         ProductionActionKind.SET_TRACK_VOLUME,

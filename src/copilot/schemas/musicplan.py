@@ -175,6 +175,13 @@ class SampleLoadActionParams(BaseModel):
     sample_uri: str
 
 
+class ArrangementDuplicateActionParams(BaseModel):
+    kind: Literal["duplicate_clip_to_arrangement"] = "duplicate_clip_to_arrangement"
+    clip_index: int
+    destination_time: float
+    length: float | None = None
+
+
 class PatternActionParams(BaseModel):
     kind: Literal["create_pattern"] = "create_pattern"
     clip_index: int
@@ -208,6 +215,7 @@ ActionParams = Annotated[
         SampleSwapActionParams,
         CreateTrackActionParams,
         SampleLoadActionParams,
+        ArrangementDuplicateActionParams,
         PatternActionParams,
         SetTrackMuteActionParams,
         SetTrackRoutingActionParams,

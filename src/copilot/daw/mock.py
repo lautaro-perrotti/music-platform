@@ -40,6 +40,7 @@ class MockAbletonAdapter(DawAdapter):
         self._write_ops = 0
         self.session_path: str | None = None
         self.session_name: str = "Mock Set"
+        self.arrangement_clips: list[dict[str, Any]] = []
 
     def connect(self) -> None:
         self._connected = True
@@ -100,10 +101,11 @@ class MockAbletonAdapter(DawAdapter):
                     name=device["name"],
                     class_name=device["class_name"],
                     enabled=device["enabled"],
-                    parameters=[
+                        parameters=[
                         DeviceParameter(**parameter)
                         for parameter in device["parameters"]
                     ],
+                    sample_uri=device.get("sample_uri"),
                 )
                 for dev_index, device in enumerate(raw["devices"])
             ]
@@ -483,6 +485,42 @@ class MockAbletonAdapter(DawAdapter):
             "load_browser_item",
             {"track_index": track_index, "clip_index": clip_index, "item_uri": item_uri},
         )
+
+    def duplicate_clip_to_arrangement(
+        self, track_index: int, clip_index: int, destination_time: float,
+        length: float | None = None,
+    ) -> dict[str, Any]:
+        self._before_write("duplicate_clip_to_arrangement")
+        track = self._track(track_index)
+        source = self._clip(track_index, clip_index)
+        span = float(length if length is not None else source["length"])
+        copies = max(1, int(round(span / 4.0))) if span > 4.0 else 1
+        created: list[dict[str, Any]] = []
+        for offset in range(copies):
+            item = {
+                "id": f"arr_{uuid4().hex[:12]}",
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "start_time": float(destination_time) + offset * 4.0,
+                "length": 4.0 if copies > 1 else span,
+                "name": source["name"],
+            }
+            self.arrangement_clips.append(item)
+            created.append(item)
+        return self._after_write(
+            "duplicate_clip_to_arrangement",
+            {"duplicated": True, "copies": len(created), "arrangement_clip_ids": [item["id"] for item in created]},
+        )
+
+    def get_arrangement_clips(self) -> dict[str, Any]:
+        return {"clips": deepcopy(self.arrangement_clips)}
+
+    def delete_arrangement_clips(self, clip_ids: list[str]) -> dict[str, Any]:
+        self._before_write("delete_arrangement_clips")
+        ids = set(clip_ids)
+        before = len(self.arrangement_clips)
+        self.arrangement_clips = [item for item in self.arrangement_clips if item["id"] not in ids]
+        return self._after_write("delete_arrangement_clips", {"deleted": before - len(self.arrangement_clips), "arrangement_clip_ids": list(ids)})
 
     def _before_write(self, operation: str) -> None:
         if (

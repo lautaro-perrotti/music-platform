@@ -107,6 +107,8 @@ COMMAND_CAPABILITY = {
     "set_clip_warp_mode": "clip.write_notes",
     "create_audio_clip": "clip.create",
     "duplicate_clip_to_arrangement": "clip.create",
+    "get_arrangement_clips": "session.read",
+    "delete_arrangement_clips": "clip.delete",
     "set_clip_warping": "clip.write_notes",
     "set_clip_loop": "clip.write_notes",
     "execute_mutation_batch": "compound.temporary_mutation",

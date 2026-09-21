@@ -44,6 +44,9 @@ TOOL_SPECS: dict[str, tuple[WriteClass, Permission]] = {
     "replace_clip_notes": (WriteClass.IDEMPOTENT_WRITE, Permission.SAFE_WRITE),
     "set_mixer_volume": (WriteClass.IDEMPOTENT_WRITE, Permission.SAFE_WRITE),
     "set_device_parameter": (WriteClass.IDEMPOTENT_WRITE, Permission.SAFE_WRITE),
+    "load_browser_item": (WriteClass.NON_IDEMPOTENT_WRITE, Permission.SAFE_WRITE),
+    "duplicate_clip_to_arrangement": (WriteClass.NON_IDEMPOTENT_WRITE, Permission.SAFE_WRITE),
+    "delete_arrangement_clips": (WriteClass.DESTRUCTIVE, Permission.DESTRUCTIVE),
     "delete_track": (WriteClass.DESTRUCTIVE, Permission.DESTRUCTIVE),
     "delete_clip": (WriteClass.DESTRUCTIVE, Permission.DESTRUCTIVE),
 }

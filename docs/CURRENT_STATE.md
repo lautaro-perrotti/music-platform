@@ -69,6 +69,9 @@ state. DSP measurements enter EvidenceGraph via `DspObservation.to_evidence_item
 relational DSP is `RELATIONSHIP`; non-canonical DSP limitation codes
 propagate. AnalyzeProject stays read-only (`MUSICAL WRITES = 0`).
 `SET_TRACK_VOLUME` remains the only certified musical action.
+`PRODUCER_EXECUTION_V1` is an additive, mock-verified execution boundary for
+the six-action producer minimum; it is LIVE_PENDING until the working-copy
+Ableton certification is completed.
 
 ## Physical DSP (factual, not judgment)
 

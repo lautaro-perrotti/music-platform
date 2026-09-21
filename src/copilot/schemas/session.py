@@ -36,6 +36,8 @@ class ClipState(BaseModel):
     length_beats: float
     is_midi: bool = True
     notes: list[MidiNote] = Field(default_factory=list)
+    sample_uri: str | None = None
+    is_audio: bool = False
 
 
 class DeviceParameter(BaseModel):
@@ -53,6 +55,7 @@ class DeviceState(BaseModel):
     class_name: str = ""
     enabled: bool = True
     parameters: list[DeviceParameter] = Field(default_factory=list)
+    sample_uri: str | None = None
 
 
 class RoutingState(BaseModel):

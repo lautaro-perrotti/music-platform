@@ -10,7 +10,14 @@ from dataclasses import dataclass, field
 
 from copilot.daw.object_ref import require_resolved
 from copilot.daw.identities import fingerprint_track
-from copilot.musicplan import _as_ref, validate_create_track_plan, validate_device_load_plan
+from copilot.musicplan import (
+    _as_ref,
+    validate_duplicate_clip_to_arrangement_plan,
+    validate_create_track_plan,
+    validate_device_load_plan,
+    validate_device_tweak_plan,
+    validate_sample_load_plan,
+)
 from copilot.runtime.safe_write import volume_intent
 from copilot.schemas.musicplan import MusicPlan, ProductionActionKind
 from copilot.schemas.safe_write import (
@@ -44,6 +51,9 @@ class ProductionCompiler:
             ProductionActionKind.CREATE_TRACK,
             ProductionActionKind.LOAD_DEVICE,
             ProductionActionKind.DEVICE_LOAD,
+            ProductionActionKind.SAMPLE_LOAD,
+            ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+            ProductionActionKind.DEVICE_TWEAK,
         })
     )
 
@@ -168,6 +178,81 @@ class ProductionCompiler:
             return ProductionCompileResult(
                 status="COMPILED", intent=intent, certified_action_ids=(action_id,)
             )
+        if action.action_type is ProductionActionKind.SAMPLE_LOAD:
+            validated = validate_sample_load_plan(plan, session=session)
+            if validated.status.value != "READY_FOR_EXECUTION":
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=(validated.rejection_reason or "SAMPLE_LOAD_PLAN_REJECTED",))
+            track = require_resolved(session, _as_ref(action.target.ref))
+            params = action.params
+            action_id = action.action_id
+            audio_track = track.role == "audio"
+            intent = MutationIntent(
+                plan_id=plan.plan_id, kind=KIND_PRODUCER_EXECUTION_V1, user_intent=action.reason,
+                project_identity=session.project_identity or "", expected_revision=session.revision,
+                expected_session_hash=session.state_hash, expected_project_token=session.project_token or "",
+                expected_audible_token=session.audible_token or "", expected_incarnation_id=session.session_incarnation_id or "",
+                targets=[MutationTarget(action_id=action_id, ref=action.target.ref, stable_id=track.stable_id,
+                    name_at_plan=track.name, fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    locator=TargetLocator(track_index=track.index), session_incarnation_id=session.session_incarnation_id or "")],
+                executions=[MutationExecution(action_id=action_id, action_type="LOAD_SAMPLE", operation="load_browser_item",
+                    arguments={"clip_index": params.clip_index, "sample_uri": params.sample_uri},
+                    expected_before=({"clip_index": params.clip_index} if audio_track else {"device_count": len(track.devices)}),
+                    expected_after=({"sample_uri": params.sample_uri} if audio_track else {"device_count": len(track.devices) + 1, "sample_uri": params.sample_uri}),
+                    certified=True, rollback=MutationRollback(inverse_operation="delete_clip",
+                        reversibility=RollbackReversibility.INDEPENDENT, prepared=True))],
+            )
+            if not audio_track:
+                intent.executions[0].rollback.inverse_operation = "delete_device"
+            return ProductionCompileResult(status="COMPILED", intent=intent, certified_action_ids=(action_id,))
+        if action.action_type is ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT:
+            validated = validate_duplicate_clip_to_arrangement_plan(plan, session=session)
+            if validated.status.value != "READY_FOR_EXECUTION":
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=(validated.rejection_reason or "ARRANGEMENT_PLAN_REJECTED",))
+            track = require_resolved(session, _as_ref(action.target.ref))
+            params = action.params
+            action_id = action.action_id
+            intent = MutationIntent(
+                plan_id=plan.plan_id, kind=KIND_PRODUCER_EXECUTION_V1, user_intent=action.reason,
+                project_identity=session.project_identity or "", expected_revision=session.revision,
+                expected_session_hash=session.state_hash, expected_project_token=session.project_token or "",
+                expected_audible_token=session.audible_token or "", expected_incarnation_id=session.session_incarnation_id or "",
+                targets=[MutationTarget(action_id=action_id, ref=action.target.ref, stable_id=track.stable_id,
+                    name_at_plan=track.name, fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    locator=TargetLocator(track_index=track.index, clip_index=params.clip_index), session_incarnation_id=session.session_incarnation_id or "")],
+                executions=[MutationExecution(action_id=action_id, action_type="DUPLICATE_CLIP_TO_ARRANGEMENT",
+                    operation="duplicate_clip_to_arrangement",
+                    arguments={"clip_index": params.clip_index, "destination_time": params.destination_time, "length": params.length},
+                    expected_before={}, expected_after={}, certified=True,
+                    rollback=MutationRollback(inverse_operation="delete_arrangement_clips",
+                        reversibility=RollbackReversibility.INDEPENDENT, prepared=True))],
+            )
+            return ProductionCompileResult(status="COMPILED", intent=intent, certified_action_ids=(action_id,))
+        if action.action_type is ProductionActionKind.DEVICE_TWEAK:
+            validated = validate_device_tweak_plan(plan, session=session)
+            if validated.status.value != "READY_FOR_EXECUTION":
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=(validated.rejection_reason or "SET_DEVICE_PARAMETER_PLAN_REJECTED",))
+            track = require_resolved(session, _as_ref(action.target.ref))
+            params = action.params
+            action_id = action.action_id
+            device = track.devices[int(params.device_index)]
+            parameter = next(item for item in device.parameters if item.name.lower() == params.parameter_name.lower())
+            intent = MutationIntent(
+                plan_id=plan.plan_id, kind=KIND_PRODUCER_EXECUTION_V1, user_intent=action.reason,
+                project_identity=session.project_identity or "", expected_revision=session.revision,
+                expected_session_hash=session.state_hash, expected_project_token=session.project_token or "",
+                expected_audible_token=session.audible_token or "", expected_incarnation_id=session.session_incarnation_id or "",
+                targets=[MutationTarget(action_id=action_id, ref=action.target.ref, stable_id=track.stable_id,
+                    name_at_plan=track.name, fingerprint=TargetFingerprint(**fingerprint_track(track)),
+                    locator=TargetLocator(track_index=track.index, device_index=device.index, parameter_index=parameter.index),
+                    session_incarnation_id=session.session_incarnation_id or "")],
+                executions=[MutationExecution(action_id=action_id, action_type="SET_DEVICE_PARAMETER", operation="set_device_parameter",
+                    arguments={"device_index": device.index, "parameter_index": parameter.index, "value": params.intended_after},
+                    expected_before={"value": params.expected_before}, expected_after={"value": params.intended_after}, certified=True,
+                    rollback=MutationRollback(inverse_operation="set_device_parameter",
+                        inverse_params={"value": params.expected_before}, reversibility=RollbackReversibility.INDEPENDENT,
+                        prepared=True))],
+            )
+            return ProductionCompileResult(status="COMPILED", intent=intent, certified_action_ids=(action_id,))
         track = require_resolved(session, _as_ref(action.target.ref))
         intent = volume_intent(
             session=session,

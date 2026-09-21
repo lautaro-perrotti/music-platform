@@ -1,8 +1,9 @@
 """SAFE_WRITE_FOUNDATION_V2 — generic verified musical mutation architecture.
 
-Wraps TransactionManager, DurableJournal, WriteInDoubt, and SET_TRACK_VOLUME.
-Does not certify EQ/compression/MIDI/arrangement. Does not use capture-host
-MutationBatch. AnalyzeProject stays read-only.
+Wraps TransactionManager, DurableJournal, WriteInDoubt, and the frozen
+SET_TRACK_VOLUME foundation. Producer Execution V1 is an additive intent kind
+that uses this same executor; it does not create a second transaction system.
+AnalyzeProject stays read-only.
 """
 
 from __future__ import annotations
@@ -491,20 +492,10 @@ class SafeWriteExecutor:
             return self._cancel_open(result, cancellation)
 
         guards = {
-            target.name_at_plan: (
-                {"track_ids": [item.stable_id for item in session.tracks]}
-                if any(
-                    step.action_id == target.action_id and step.action_type == "CREATE_TRACK"
-                    for step in intent.executions
-                )
-                else (
-                    {"device_ids": [item.stable_id for item in session.track_by_name(target.name_at_plan).devices]}
-                    if any(
-                        step.action_id == target.action_id and step.action_type == "LOAD_DEVICE"
-                        for step in intent.executions
-                    )
-                    else snapshot_guard_state(session, target.name_at_plan)
-                )
+            target.name_at_plan: self._guard_for_target(
+                session,
+                target.name_at_plan,
+                next(step for step in intent.executions if step.action_id == target.action_id),
             )
             for target in intent.targets
         }
@@ -542,6 +533,14 @@ class SafeWriteExecutor:
                 if step.action_type == "LOAD_DEVICE":
                     step.expected_after["device_stable_id"] = write_result["device_stable_id"]
                     step.rollback.inverse_params["device_stable_id"] = write_result["device_stable_id"]
+                if step.action_type == "LOAD_SAMPLE":
+                    for key in ("clip_stable_id", "device_stable_id"):
+                        if key in write_result:
+                            step.expected_after[key] = write_result[key]
+                            step.rollback.inverse_params[key] = write_result[key]
+                if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                    step.expected_after["arrangement_clip_ids"] = list(write_result["arrangement_clip_ids"])
+                    step.rollback.inverse_params["arrangement_clip_ids"] = list(write_result["arrangement_clip_ids"])
                 if step.action_type == "CREATE_TRACK":
                     created = self._created_track_from_result(write_result)
                     target = next(item for item in intent.targets if item.action_id == step.action_id)
@@ -802,6 +801,35 @@ class SafeWriteExecutor:
             resolved[target.action_id] = track
         return resolved, None
 
+    def _guard_for_target(
+        self, session: SessionState, target_name: str, step: MutationExecution
+    ) -> dict[str, Any]:
+        if step.action_type == "CREATE_TRACK":
+            return {"track_ids": [item.stable_id for item in session.tracks]}
+        track = session.track_by_name(target_name)
+        if track is None:
+            return snapshot_guard_state(session, target_name)
+        guard = snapshot_guard_state(session, target_name)
+        if step.action_type in {"LOAD_DEVICE", "SET_DEVICE_PARAMETER"}:
+            guard["device_ids"] = [item.stable_id for item in track.devices]
+        if step.action_type == "SET_DEVICE_PARAMETER":
+            guard["device_values"] = {
+                f"{device.index}:{parameter.index}": float(parameter.value)
+                for device in track.devices
+                for parameter in device.parameters
+            }
+        if step.action_type == "LOAD_SAMPLE":
+            guard["clip_ids"] = [item.stable_id for item in track.clips]
+            guard["clip_slots"] = [item.slot_index for item in track.clips]
+            guard["clip_samples"] = {
+                str(item.slot_index): item.sample_uri for item in track.clips
+            }
+            guard["device_ids"] = [item.stable_id for item in track.devices]
+        if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+            arrangement = self.tools.daw.get_arrangement_clips()
+            guard["arrangement_ids"] = [str(item.get("id", "")) for item in arrangement.get("clips", [])]
+        return guard
+
     def _validate_preconditions(
         self,
         intent: MutationIntent,
@@ -827,6 +855,47 @@ class SafeWriteExecutor:
                     return (MutationFailure.TARGET_NOT_FOUND, "device target track missing")
                 if len(track.devices) != int(step.expected_before.get("device_count", len(track.devices))):
                     return (MutationFailure.PRECONDITION_FAILED, "device inventory changed before LOAD_DEVICE")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                if track is None:
+                    return (MutationFailure.TARGET_NOT_FOUND, "arrangement target track missing")
+                clip_index = int(step.arguments["clip_index"])
+                if not any(item.slot_index == clip_index for item in track.clips):
+                    return (MutationFailure.PRECONDITION_FAILED, "source clip missing")
+                try:
+                    self.tools.daw.get_arrangement_clips()
+                except Exception as exc:  # noqa: BLE001
+                    return (MutationFailure.PRECONDITION_FAILED, f"arrangement readback unavailable: {exc}")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
+            if step.action_type == "LOAD_SAMPLE":
+                if track is None:
+                    return (MutationFailure.TARGET_NOT_FOUND, "sample target track missing")
+                if not step.arguments.get("sample_uri"):
+                    return (MutationFailure.PRECONDITION_FAILED, "sample URI is required")
+                clip_index = int(step.arguments["clip_index"])
+                if track.role != "audio":
+                    if not step.rollback.prepared:
+                        return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                    continue
+                clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+                if clip is not None:
+                    return (MutationFailure.PRECONDITION_FAILED, f"clip slot occupied: {clip_index}")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
+            if step.action_type == "SET_DEVICE_PARAMETER":
+                if track is None:
+                    return (MutationFailure.TARGET_NOT_FOUND, "parameter target track missing")
+                device_index = int(step.arguments["device_index"])
+                parameter_index = int(step.arguments["parameter_index"])
+                if device_index < 0 or device_index >= len(track.devices) or parameter_index < 0 or parameter_index >= len(track.devices[device_index].parameters):
+                    return (MutationFailure.TARGET_NOT_FOUND, "parameter identity missing")
+                if abs(float(track.devices[device_index].parameters[parameter_index].value) - float(step.expected_before["value"])) > 1e-3:
+                    return (MutationFailure.PRECONDITION_FAILED, "parameter pre-state mismatch")
                 if not step.rollback.prepared:
                     return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
                 continue
@@ -909,6 +978,12 @@ class SafeWriteExecutor:
             return self._execute_create_track(step, session)
         if step.action_type == "LOAD_DEVICE":
             return self._execute_load_device(step, track, session)
+        if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+            return self._execute_duplicate_clip_to_arrangement(step, track, session)
+        if step.action_type == "LOAD_SAMPLE":
+            return self._execute_load_sample(step, track, session)
+        if step.action_type == "SET_DEVICE_PARAMETER":
+            return self._execute_set_device_parameter(step, track, session)
         if step.action_type != CERTIFIED_PRODUCTION_ACTION:
             raise RuntimeError(f"uncertified action reached execute: {step.action_type}")
         volume = validate_mixer_volume(step.arguments["volume"])
@@ -1041,6 +1116,141 @@ class SafeWriteExecutor:
         )
         return {**result, "device_stable_id": device.stable_id, "device_index": device.index}
 
+    def _execute_load_sample(self, step: MutationExecution, track: TrackState | None, session: SessionState) -> dict[str, Any]:
+        if track is None:
+            raise RuntimeError("LOAD_SAMPLE target track is unresolved")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, step.operation)
+        clip_index = int(step.arguments["clip_index"])
+        sample_uri = str(step.arguments["sample_uri"])
+        try:
+            result = self.tools.daw.load_browser_item(track.index, sample_uri, clip_index=clip_index)
+        except WriteInDoubt as exc:
+            live = self.tools.get_session_snapshot()
+            live_track = live.track_by_id(track.stable_id)
+            if track.role == "audio":
+                clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+                if clip is None or clip.sample_uri != sample_uri:
+                    raise WriteInDoubt(step.operation, command_id) from exc
+                return self._record_loaded_clip(step, session, command_id, live_track, clip, reconciled=True)
+            devices = [item for item in live_track.devices if item.sample_uri == sample_uri]
+            if len(devices) != 1:
+                raise WriteInDoubt(step.operation, command_id) from exc
+            return self._record_loaded_device_sample(step, session, command_id, live_track, devices[0], reconciled=True)
+        live = self.tools.get_session_snapshot()
+        live_track = live.track_by_id(track.stable_id)
+        if track.role == "audio":
+            clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+            if clip is None or clip.sample_uri != sample_uri:
+                raise RuntimeError("LOAD_SAMPLE clip missing or sample URI mismatched on readback")
+            return self._record_loaded_clip(step, session, command_id, live_track, clip)
+        device_index = result.get("device_index")
+        device = next((item for item in live_track.devices if item.index == device_index and item.sample_uri == sample_uri), None)
+        if device is None:
+            raise RuntimeError("LOAD_SAMPLE Simpler missing on readback")
+        return self._record_loaded_device_sample(step, session, command_id, live_track, device)
+
+    def _record_loaded_clip(
+        self, step: MutationExecution, session: SessionState, command_id: str,
+        live_track: TrackState, clip, *, reconciled: bool = False,
+    ) -> dict[str, Any]:
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, clip_index=clip.slot_index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)), target_name_at_apply=live_track.name,
+            operation=step.operation, before={"clip_index": clip.slot_index}, after={"clip_stable_id": clip.stable_id},
+            expected_after={"clip_stable_id": clip.stable_id, "sample_uri": step.arguments["sample_uri"]},
+            inverse_operation="delete_clip", inverse_params={}, asset_id=clip.stable_id,
+            command_id=command_id, expected_revision=session.revision,
+        )
+        return {"clip_stable_id": clip.stable_id, "reconciled": reconciled}
+
+    def _record_loaded_device_sample(
+        self, step: MutationExecution, session: SessionState, command_id: str,
+        live_track: TrackState, device, *, reconciled: bool = False,
+    ) -> dict[str, Any]:
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, device_index=device.index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)), target_name_at_apply=live_track.name,
+            operation=step.operation, before={"device_count": len(live_track.devices) - 1},
+            after={"device_stable_id": device.stable_id},
+            expected_after={"device_stable_id": device.stable_id, "sample_uri": step.arguments["sample_uri"]},
+            inverse_operation="delete_device", inverse_params={}, asset_id=device.stable_id,
+            command_id=command_id, expected_revision=session.revision,
+        )
+        return {"device_stable_id": device.stable_id, "device_index": device.index, "reconciled": reconciled}
+
+    def _execute_duplicate_clip_to_arrangement(
+        self, step: MutationExecution, track: TrackState | None, session: SessionState
+    ) -> dict[str, Any]:
+        if track is None:
+            raise RuntimeError("DUPLICATE_CLIP_TO_ARRANGEMENT target is unresolved")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, step.operation)
+        before = self.tools.daw.get_arrangement_clips()
+        before_ids = {str(item.get("id", "")) for item in before.get("clips", [])}
+        try:
+            result = self.tools.daw.duplicate_clip_to_arrangement(
+                track.index,
+                int(step.arguments["clip_index"]),
+                float(step.arguments["destination_time"]),
+                step.arguments.get("length"),
+            )
+        except WriteInDoubt as exc:
+            after = self.tools.daw.get_arrangement_clips()
+            created = [item for item in after.get("clips", []) if str(item.get("id", "")) not in before_ids]
+            if not created:
+                raise WriteInDoubt(step.operation, command_id) from exc
+            result = {"reconciled": True}
+        after = self.tools.daw.get_arrangement_clips()
+        created = [item for item in after.get("clips", []) if str(item.get("id", "")) not in before_ids]
+        ids = [str(item.get("id", "")) for item in created if item.get("id")]
+        if not ids:
+            raise RuntimeError("arrangement readback did not expose the created clip")
+        self.transactions.record(
+            target_stable_id=track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=track.index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+            target_name_at_apply=track.name,
+            operation=step.operation,
+            before={"arrangement_clip_ids": sorted(before_ids)},
+            after={"arrangement_clip_ids": ids},
+            expected_after={"arrangement_clip_ids": ids},
+            inverse_operation="delete_arrangement_clips",
+            inverse_params={"arrangement_clip_ids": ids},
+            asset_id=ids[0],
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        return {**result, "arrangement_clip_ids": ids}
+
+    def _execute_set_device_parameter(self, step: MutationExecution, track: TrackState | None, session: SessionState) -> dict[str, Any]:
+        if track is None:
+            raise RuntimeError("SET_DEVICE_PARAMETER target track is unresolved")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, step.operation)
+        di, pi, value = int(step.arguments["device_index"]), int(step.arguments["parameter_index"]), float(step.arguments["value"])
+        try:
+            result = self.tools.daw.set_device_parameter(track.index, di, pi, value)
+        except WriteInDoubt as exc:
+            live = self.tools.get_session_snapshot()
+            live_track = live.track_by_id(track.stable_id)
+            observed = live_track.devices[di].parameters[pi].value
+            if abs(float(observed) - value) > 1e-3:
+                raise WriteInDoubt(step.operation, command_id) from exc
+            result = {"reconciled": True, "value": observed}
+            value = float(observed)
+        self.transactions.record(
+            target_stable_id=track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=track.index, device_index=di, parameter_index=pi),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(track)), target_name_at_apply=track.name,
+            operation=step.operation, before=step.expected_before, after={"value": value}, expected_after={"value": value},
+            inverse_operation="set_device_parameter", inverse_params={"value": step.expected_before["value"]},
+            command_id=command_id, expected_revision=session.revision,
+        )
+        return {**result, "value": value}
+
     def _track_named_or_index(self, name: str, index: int) -> TrackState:
         session = self.tools.get_session_snapshot()
         track = session.track_by_name(name)
@@ -1093,6 +1303,45 @@ class SafeWriteExecutor:
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "loaded device missing on readback")
                 continue
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                expected_ids = set(str(item) for item in step.expected_after.get("arrangement_clip_ids", []))
+                actual_ids = {
+                    str(item.get("id", ""))
+                    for item in self.tools.daw.get_arrangement_clips().get("clips", [])
+                }
+                matched = bool(expected_ids) and expected_ids.issubset(actual_ids)
+                rows.append(MutationReadback(action_id=step.action_id, parameter="arrangement.clip", expected=sorted(expected_ids), observed=sorted(actual_ids & expected_ids), matched=matched, authoritative=True))
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "arrangement clip missing on readback")
+                continue
+            if step.action_type == "LOAD_SAMPLE":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                track = session.track_by_id(target.stable_id)
+                sample_uri = str(step.arguments["sample_uri"])
+                if track.role == "audio":
+                    clip = next((item for item in track.clips if item.slot_index == int(step.arguments["clip_index"])), None)
+                    observed = None if clip is None else clip.sample_uri
+                    matched = observed == sample_uri
+                    rows.append(MutationReadback(action_id=step.action_id, parameter="clip.sample", expected=sample_uri, observed=observed, matched=matched, authoritative=True))
+                else:
+                    device = next((item for item in track.devices if item.stable_id == str(step.expected_after.get("device_stable_id", ""))), None)
+                    observed = None if device is None else device.sample_uri
+                    matched = observed == sample_uri
+                    rows.append(MutationReadback(action_id=step.action_id, parameter="device.sample", expected=sample_uri, observed=observed, matched=matched, authoritative=True))
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "loaded sample missing or mismatched on readback")
+                continue
+            if step.action_type == "SET_DEVICE_PARAMETER":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                track = session.track_by_id(target.stable_id)
+                param = track.devices[int(step.arguments["device_index"])].parameters[int(step.arguments["parameter_index"])]
+                expected_value = float(step.expected_after["value"])
+                matched = abs(float(param.value) - expected_value) <= 1e-3
+                rows.append(MutationReadback(action_id=step.action_id, parameter="device.parameter", expected=expected_value, observed=param.value, matched=matched, authoritative=True))
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "device parameter mismatch on readback")
+                continue
             track = session.track_by_name(planned.name)
             if track is None:
                 return rows, (
@@ -1140,6 +1389,67 @@ class SafeWriteExecutor:
                 after_ids = {item.stable_id for item in track_after.devices}
                 expected_id = str(step.expected_after.get("device_stable_id", ""))
                 if expected_id not in after_ids or (after_ids - before_ids - {expected_id}):
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_device_state"})
+                continue
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                before_ids = set(guards[target.name_at_plan].get("arrangement_ids", []))
+                expected_ids = set(str(item) for item in step.expected_after.get("arrangement_clip_ids", []))
+                actual_ids = {
+                    str(item.get("id", ""))
+                    for item in self.tools.daw.get_arrangement_clips().get("clips", [])
+                }
+                if not expected_ids or not expected_ids.issubset(actual_ids) or (actual_ids - before_ids - expected_ids):
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_arrangement_state"})
+                continue
+            if step.action_type == "LOAD_SAMPLE":
+                base = diff_guard_state(
+                    guards[target.name_at_plan],
+                    snapshot_guard_state(after, target.name_at_plan),
+                    expected_volume_delta_target="__none__",
+                )
+                unexpected.extend(base["unexpected_mutations"])
+                track_after = after.track_by_id(target.stable_id)
+                if track_after.role == "audio":
+                    before_ids = set(guards[target.name_at_plan].get("clip_ids", []))
+                    after_ids = {item.stable_id for item in track_after.clips}
+                    expected_id = str(step.expected_after.get("clip_stable_id", ""))
+                    clip = next((item for item in track_after.clips if item.stable_id == expected_id), None)
+                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or clip is None or clip.sample_uri != step.arguments["sample_uri"]:
+                        unexpected.append({"action_id": target.action_id, "kind": "unexpected_sample_state"})
+                else:
+                    before_ids = set(guards[target.name_at_plan].get("device_ids", []))
+                    after_ids = {item.stable_id for item in track_after.devices}
+                    expected_id = str(step.expected_after.get("device_stable_id", ""))
+                    device = next((item for item in track_after.devices if item.stable_id == expected_id), None)
+                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or device is None or device.sample_uri != step.arguments["sample_uri"]:
+                        unexpected.append({"action_id": target.action_id, "kind": "unexpected_sample_state"})
+                continue
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                expected_ids = set(str(item) for item in step.expected_after.get("arrangement_clip_ids", []))
+                actual_ids = {
+                    str(item.get("id", ""))
+                    for item in self.tools.daw.get_arrangement_clips().get("clips", [])
+                }
+                present = bool(expected_ids & actual_ids)
+                rows.append(MutationReadback(action_id=step.action_id, parameter="arrangement.clip", expected=False, observed=sorted(expected_ids & actual_ids), matched=not present, authoritative=True, detail="rollback"))
+                if present:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "arrangement clip still present after rollback")
+                continue
+            if step.action_type == "SET_DEVICE_PARAMETER":
+                base = diff_guard_state(
+                    guards[target.name_at_plan],
+                    snapshot_guard_state(after, target.name_at_plan),
+                    expected_volume_delta_target="__none__",
+                )
+                unexpected.extend(base["unexpected_mutations"])
+                track_after = after.track_by_id(target.stable_id)
+                di = int(step.arguments["device_index"])
+                pi = int(step.arguments["parameter_index"])
+                actual = float(track_after.devices[di].parameters[pi].value)
+                if abs(actual - float(step.expected_after["value"])) > 1e-3:
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_parameter_state"})
+                before_devices = set(guards[target.name_at_plan].get("device_ids", []))
+                if {item.stable_id for item in track_after.devices} != before_devices:
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_device_state"})
                 continue
             post = snapshot_guard_state(after, target.name_at_plan)
@@ -1200,6 +1510,28 @@ class SafeWriteExecutor:
                 ))
                 if present:
                     return rows, (MutationFailure.ROLLBACK_FAILED, "loaded device still present after rollback")
+                continue
+            if step.action_type == "LOAD_SAMPLE":
+                target_track = session.track_by_id(target.stable_id)
+                if target_track.role == "audio":
+                    clip = next((item for item in target_track.clips if item.slot_index == int(step.arguments["clip_index"])), None)
+                    present = clip is not None and clip.stable_id == str(step.expected_after.get("clip_stable_id", ""))
+                    parameter = "clip.sample"
+                else:
+                    present = any(item.stable_id == str(step.expected_after.get("device_stable_id", "")) for item in target_track.devices)
+                    parameter = "device.sample"
+                rows.append(MutationReadback(action_id=step.action_id, parameter=parameter, expected=False, observed=present, matched=not present, authoritative=True, detail="rollback"))
+                if present:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "loaded sample still present after rollback")
+                continue
+            if step.action_type == "SET_DEVICE_PARAMETER":
+                target_track = session.track_by_id(target.stable_id)
+                param = target_track.devices[int(step.arguments["device_index"])].parameters[int(step.arguments["parameter_index"])]
+                expected = step.rollback.restore_value if step.rollback.restore_value is not None else step.expected_before["value"]
+                matched = abs(float(param.value) - float(expected)) <= 1e-3
+                rows.append(MutationReadback(action_id=step.action_id, parameter="device.parameter", expected=expected, observed=param.value, matched=matched, authoritative=True, detail="rollback"))
+                if not matched:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "device parameter rollback mismatch")
                 continue
             track = session.track_by_name(target.name_at_plan)
             if track is None:

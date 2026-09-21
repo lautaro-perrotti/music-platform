@@ -106,6 +106,18 @@ class DawAdapter(ABC):
         self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]: ...
 
+    def duplicate_clip_to_arrangement(
+        self, track_index: int, clip_index: int, destination_time: float,
+        length: float | None = None,
+    ) -> dict[str, Any]:
+        raise DawError("Arrangement duplication is not supported by this adapter")
+
+    def get_arrangement_clips(self) -> dict[str, Any]:
+        raise DawError("Arrangement readback is not supported by this adapter")
+
+    def delete_arrangement_clips(self, clip_ids: list[str]) -> dict[str, Any]:
+        raise DawError("Arrangement rollback is not supported by this adapter")
+
     @abstractmethod
     def delete_device(
         self, track_index: int, device_index: int

@@ -406,6 +406,31 @@ class TransactionManager:
             if any(count == before_count + 1 for count in after_counts):
                 return ReconcileResult.AMBIGUOUS
             return ReconcileResult.ABSENT
+        if operation == "load_browser_item":
+            expected_uri = str(expected_after.get("sample_uri", ""))
+            matches = [
+                clip for track in session.tracks for clip in track.clips
+                if clip.sample_uri == expected_uri
+            ] + [
+                device for track in session.tracks for device in track.devices
+                if device.sample_uri == expected_uri
+            ]
+            if len(matches) == 1:
+                return ReconcileResult.SATISFIED
+            if not matches:
+                return ReconcileResult.ABSENT
+            return ReconcileResult.AMBIGUOUS
+        if operation == "duplicate_clip_to_arrangement":
+            expected_ids = set(str(item) for item in expected_after.get("arrangement_clip_ids", []))
+            if not expected_ids:
+                return ReconcileResult.AMBIGUOUS
+            actual = self.daw.get_arrangement_clips().get("clips", [])
+            actual_ids = {str(item.get("id", "")) for item in actual}
+            if expected_ids.issubset(actual_ids):
+                return ReconcileResult.SATISFIED
+            if expected_ids.isdisjoint(actual_ids):
+                return ReconcileResult.ABSENT
+            return ReconcileResult.AMBIGUOUS
         if operation in {"set_mixer_volume", "set_device_parameter", "set_track_name"}:
             return (
                 ReconcileResult.SATISFIED
@@ -514,6 +539,9 @@ class TransactionManager:
             self.daw.load_browser_item(
                 locator.track_index, str(params["item_uri"]), clip_index=locator.clip_index
             )
+            return
+        if op == "delete_arrangement_clips":
+            self.daw.delete_arrangement_clips([str(item) for item in params.get("arrangement_clip_ids", [])])
             return
         raise DawError(f"Unsupported inverse: {op}")
 

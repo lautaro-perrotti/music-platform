@@ -641,7 +641,7 @@ class AbletonMCP(ControlSurface):
                                  "set_track_volume", "set_track_pan",
                                  "delete_track", "duplicate_track", "set_track_color",
                                  "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
-                                 "duplicate_clip", "duplicate_clip_to_arrangement", "set_clip_color", "set_clip_loop",
+                                 "duplicate_clip", "duplicate_clip_to_arrangement", "get_arrangement_clips", "delete_arrangement_clips", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
@@ -932,6 +932,10 @@ class AbletonMCP(ControlSurface):
                             result = self._duplicate_clip_to_arrangement(
                                 track_index, clip_index, destination_time, length
                             )
+                        elif command_type == "get_arrangement_clips":
+                            result = self._get_arrangement_clips()
+                        elif command_type == "delete_arrangement_clips":
+                            result = self._delete_arrangement_clips(params.get("clip_ids", []))
                         elif command_type == "set_clip_color":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -3141,10 +3145,12 @@ class AbletonMCP(ControlSurface):
                 # on Clip.end_time (read-only) / duplicate_loop (MIDI-only).
                 n = int(round(float(length) / bar_beats))
                 names = []
+                ids = []
                 dst = float(destination_time)
                 for i in range(n):
                     arr_clip = track.duplicate_clip_to_arrangement(clip, dst + i * bar_beats)
                     names.append(arr_clip.name)
+                    ids.append(self._arrangement_clip_id(track_index, arr_clip))
                 return {
                     "duplicated": True,
                     "copies": n,
@@ -3152,6 +3158,7 @@ class AbletonMCP(ControlSurface):
                     "length": n * bar_beats,
                     "looping": True,
                     "names": names,
+                    "arrangement_clip_ids": ids,
                 }
             arr_clip = track.duplicate_clip_to_arrangement(clip, float(destination_time))
             return {
@@ -3161,10 +3168,47 @@ class AbletonMCP(ControlSurface):
                 "end_time": arr_clip.end_time,
                 "length": arr_clip.length,
                 "looping": bool(getattr(arr_clip, "looping", False)),
+                "arrangement_clip_ids": [self._arrangement_clip_id(track_index, arr_clip)],
             }
         except Exception as e:
             self.log_message("Error duplicating clip to arrangement: " + str(e))
             raise
+
+    def _arrangement_clip_id(self, track_index, clip):
+        return "arr:{0}:{1:.9f}:{2:.9f}:{3}".format(
+            int(track_index), float(getattr(clip, "start_time", 0.0)),
+            float(getattr(clip, "end_time", 0.0)), str(getattr(clip, "name", "")),
+        )
+
+    def _get_arrangement_clips(self):
+        rows = []
+        for track_index, track in enumerate(self._song.tracks):
+            for clip in list(getattr(track, "arrangement_clips", []) or []):
+                rows.append({
+                    "id": self._arrangement_clip_id(track_index, clip),
+                    "track_index": int(track_index),
+                    "name": str(getattr(clip, "name", "")),
+                    "start_time": float(getattr(clip, "start_time", 0.0)),
+                    "end_time": float(getattr(clip, "end_time", 0.0)),
+                    "length": float(getattr(clip, "length", 0.0)),
+                })
+        return {"clips": rows}
+
+    def _delete_arrangement_clips(self, clip_ids):
+        wanted = set(str(item) for item in (clip_ids or []))
+        deleted = 0
+        for track_index, track in enumerate(self._song.tracks):
+            for clip in list(getattr(track, "arrangement_clips", []) or []):
+                if self._arrangement_clip_id(track_index, clip) not in wanted:
+                    continue
+                if hasattr(track, "delete_clip"):
+                    track.delete_clip(clip)
+                elif hasattr(clip, "delete"):
+                    clip.delete()
+                else:
+                    raise RuntimeError("Ableton does not expose arrangement clip deletion")
+                deleted += 1
+        return {"deleted": deleted, "arrangement_clip_ids": list(wanted)}
 
     def _set_clip_color(self, track_index, clip_index, color):
         """Set the color of a clip"""

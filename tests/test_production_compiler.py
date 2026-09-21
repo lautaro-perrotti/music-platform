@@ -2,6 +2,9 @@ from copilot.daw.mock import MockAbletonAdapter
 from copilot.musicplan import (
     build_create_track_action,
     build_device_load_action,
+    build_device_tweak_action,
+    build_duplicate_clip_to_arrangement_action,
+    build_sample_load_action,
     create_controlled_volume_plan,
 )
 from copilot.runtime.production_compiler import ProductionCompiler
@@ -36,14 +39,109 @@ def test_compiler_emits_core_intent_for_certified_volume():
     assert result.intent.executions[0].action_type == "SET_TRACK_VOLUME"
 
 
-def test_compiler_rejects_lucas_actions_until_certified():
+def test_compiler_rejects_actions_outside_producer_execution_v1():
     _daw, session = _session()
     track = session.tracks[0]
     plan = create_controlled_volume_plan(session=session, track=track, delta=-0.15)
-    plan.actions[0].action_type = ProductionActionKind.SAMPLE_LOAD
+    plan.actions[0].action_type = ProductionActionKind.CREATE_PATTERN
     result = ProductionCompiler().compile(plan, session=session)
     assert result.status == "UNCERTIFIED_ACTION"
     assert result.intent is None
+
+
+def test_sample_load_executes_and_rolls_back_through_safewrite(tmp_path):
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_audio_track("Sample Target")
+    session = daw.snapshot()
+    attach_tokens(session)
+    track = session.tracks[0]
+    action = build_sample_load_action(
+        track=track,
+        project_identity=session.project_identity,
+        clip_index=0,
+        sample_uri="library://kick.wav",
+        reason="load the selected kick",
+        evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "plan_id": "load_sample_test",
+        "target_state_tokens": {track.stable_id: target_token(track)},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
+    assert daw.snapshot().tracks[0].clips[0].sample_uri == "library://kick.wav"
+    assert executor._rollback_applied(result, compiled.intent) == ""
+    assert not daw.snapshot().tracks[0].clips
+
+
+def test_device_tweak_executes_and_rolls_back_through_safewrite(tmp_path):
+    daw, session = _session()
+    attach_tokens(session)
+    track = session.tracks[0]
+    action = build_device_tweak_action(
+        track=track,
+        project_identity=session.project_identity,
+        device_index=0,
+        parameter_name="1 Gain A",
+        expected_before=0.5,
+        intended_after=0.72,
+        reason="set the native EQ target",
+        evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "plan_id": "device_tweak_test",
+        "target_state_tokens": {track.stable_id: target_token(track)},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
+    assert daw.snapshot().tracks[0].devices[0].parameters[0].value == 0.72
+    assert executor._rollback_applied(result, compiled.intent) == ""
+    assert daw.snapshot().tracks[0].devices[0].parameters[0].value == 0.5
+
+
+def test_duplicate_clip_to_arrangement_executes_and_rolls_back_through_safewrite(tmp_path):
+    daw, _ = _session()
+    daw.create_midi_clip(0, 0, 4.0)
+    session = daw.snapshot()
+    attach_tokens(session)
+    track = session.tracks[0]
+    action = build_duplicate_clip_to_arrangement_action(
+        track=track,
+        project_identity=session.project_identity,
+        clip_index=0,
+        destination_time=8.0,
+        length=4.0,
+        reason="place the one-bar groove in the Arrangement",
+        evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "plan_id": "arrangement_duplicate_test",
+        "target_state_tokens": {track.stable_id: target_token(track)},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
+    assert len(daw.get_arrangement_clips()["clips"]) == 1
+    assert executor._rollback_applied(result, compiled.intent) == ""
+    assert daw.get_arrangement_clips()["clips"] == []
 
 
 def _create_plan(session):

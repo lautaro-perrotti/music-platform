@@ -18,7 +18,14 @@ def test_producer_execution_v1_has_exact_minimum_surface():
     }
 
 
-def test_only_volume_is_certified_until_its_full_lifecycle_is_verified():
-    assert CERTIFIED_PRODUCTION_ACTION_KINDS == {ProductionActionKind.SET_TRACK_VOLUME}
-    assert spec_for(ProductionActionKind.CREATE_TRACK).certified is False
+def test_minimum_production_action_set_is_certified_as_one_lifecycle():
+    assert CERTIFIED_PRODUCTION_ACTION_KINDS == {
+        ProductionActionKind.CREATE_TRACK,
+        ProductionActionKind.LOAD_SAMPLE,
+        ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+        ProductionActionKind.LOAD_DEVICE,
+        "SET_DEVICE_PARAMETER",
+        ProductionActionKind.SET_TRACK_VOLUME,
+    }
+    assert spec_for(ProductionActionKind.CREATE_TRACK).certified is True
     assert len(MINIMUM_PRODUCTION_ACTIONS) == 6

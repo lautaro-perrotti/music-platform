@@ -39,6 +39,7 @@ from copilot.schemas.musicplan import (
     PlanStatus,
     RollbackSpec,
     SampleLoadActionParams,
+    ArrangementDuplicateActionParams,
     SetTrackMuteActionParams,
     SampleSwapActionParams,
     SetTrackRoutingActionParams,
@@ -1163,6 +1164,78 @@ def build_sample_load_action(
             ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
         ],
     )
+
+
+def build_duplicate_clip_to_arrangement_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    destination_time: float,
+    length: float | None,
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id) if session_incarnation_id else None
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.DUPLICATE_CLIP_TO_ARRANGEMENT,
+        target=ActionTarget(ref=ref.model_dump(mode="json"), runtime_id=None if runtime is None else runtime.model_dump(mode="json"), track_index_locator=track.index),
+        params=ArrangementDuplicateActionParams(clip_index=clip_index, destination_time=destination_time, length=length),
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=ExpectedEffect(
+            affected_target=f"{track.name}.arrangement",
+            direction="add",
+            description=f"place clip {clip_index} in the Arrangement",
+            measurement_to_compare_after="arrangement clip readback",
+            limitations=["Placement is verified; musical quality is deferred."],
+        ),
+        verification=VerificationSpec(
+            execution=ExecutionVerificationSpec(parameter="arrangement.clip", expected_after=1.0, unit="present"),
+            musical=MusicalVerificationSpec(comparison="recapture_vs_baseline_later", deferred=True),
+        ),
+        rollback=RollbackSpec(parameter="arrangement.clip", unit="clip", restore_value=0.0, prepared=True),
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="SOURCE_CLIP_EXISTS", detail="source clip must exist"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="arrangement delete inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="readback verification required"),
+        ],
+    )
+
+
+def validate_duplicate_clip_to_arrangement_plan(plan: MusicPlan, *, session: SessionState) -> MusicPlan:
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.DUPLICATE_CLIP_TO_ARRANGEMENT)
+    if action is None:
+        return plan
+    params = action.params
+    if not isinstance(params, ArrangementDuplicateActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_arrangement_duplicate_params"
+        return plan
+    if params.clip_index < 0 or not any(clip.slot_index == params.clip_index for clip in track.clips):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "SOURCE_CLIP_NOT_FOUND"
+        return plan
+    if params.destination_time < 0 or (params.length is not None and params.length <= 0):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "ARRANGEMENT_RANGE_INVALID"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
 
 
 def validate_sample_load_plan(
