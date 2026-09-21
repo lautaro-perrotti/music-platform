@@ -3183,7 +3183,17 @@ class AbletonMCP(ControlSurface):
     def _get_arrangement_clips(self):
         rows = []
         for track_index, track in enumerate(self._song.tracks):
-            for clip in list(getattr(track, "arrangement_clips", []) or []):
+            # Live raises RuntimeError when arrangement_clips is queried on
+            # Main, Group, and Return tracks. Those tracks simply cannot own
+            # arrangement clips, so skip that platform-level absence while
+            # preserving unexpected errors for normal audio/MIDI tracks.
+            try:
+                arrangement_clips = getattr(track, "arrangement_clips", []) or []
+            except RuntimeError as exc:
+                if "no arrangement clips" in str(exc).lower():
+                    continue
+                raise
+            for clip in list(arrangement_clips):
                 rows.append({
                     "id": self._arrangement_clip_id(track_index, clip),
                     "track_index": int(track_index),
@@ -3198,7 +3208,16 @@ class AbletonMCP(ControlSurface):
         wanted = set(str(item) for item in (clip_ids or []))
         deleted = 0
         for track_index, track in enumerate(self._song.tracks):
-            for clip in list(getattr(track, "arrangement_clips", []) or []):
+            # Live 12 raises for Main, Group, and Return tracks, which cannot
+            # own Arrangement clips. Treat that platform-level absence like
+            # an empty collection, while preserving unexpected failures.
+            try:
+                arrangement_clips = getattr(track, "arrangement_clips", []) or []
+            except RuntimeError as exc:
+                if "no arrangement clips" in str(exc).lower():
+                    continue
+                raise
+            for clip in list(arrangement_clips):
                 if self._arrangement_clip_id(track_index, clip) not in wanted:
                     continue
                 if hasattr(track, "delete_clip"):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 from uuid import uuid4
 
 from copilot.agent.journal import DurableJournal
@@ -24,6 +25,17 @@ from copilot.schemas.transaction import (
 )
 
 logger = logging.getLogger("copilot.transactions")
+
+
+def _sample_device_matches(device, sample_uri: str) -> bool:
+    observed_uri = str(getattr(device, "sample_uri", None) or "")
+    if observed_uri:
+        return observed_uri == str(sample_uri)
+    value = unquote(str(sample_uri)).replace("\\", "/")
+    value = value.split("#", 1)[-1].rsplit(":", 1)[-1].rsplit("/", 1)[-1]
+    expected = Path(value).stem.casefold()
+    observed = Path(str(getattr(device, "name", ""))).stem.casefold()
+    return bool(expected and observed and expected == observed)
 
 
 class RollbackConflict(DawError):
@@ -408,12 +420,30 @@ class TransactionManager:
             return ReconcileResult.ABSENT
         if operation == "load_browser_item":
             expected_uri = str(expected_after.get("sample_uri", ""))
+            expected_clip_id = str(expected_after.get("clip_stable_id", ""))
+            expected_device_id = str(expected_after.get("device_stable_id", ""))
+            if expected_clip_id:
+                matches = [
+                    clip for track in session.tracks for clip in track.clips
+                    if clip.stable_id == expected_clip_id
+                ]
+                return ReconcileResult.SATISFIED if len(matches) == 1 else (
+                    ReconcileResult.ABSENT if not matches else ReconcileResult.AMBIGUOUS
+                )
+            if expected_device_id:
+                matches = [
+                    device for track in session.tracks for device in track.devices
+                    if device.stable_id == expected_device_id
+                ]
+                return ReconcileResult.SATISFIED if len(matches) == 1 else (
+                    ReconcileResult.ABSENT if not matches else ReconcileResult.AMBIGUOUS
+                )
             matches = [
                 clip for track in session.tracks for clip in track.clips
                 if clip.sample_uri == expected_uri
             ] + [
                 device for track in session.tracks for device in track.devices
-                if device.sample_uri == expected_uri
+                if _sample_device_matches(device, expected_uri)
             ]
             if len(matches) == 1:
                 return ReconcileResult.SATISFIED

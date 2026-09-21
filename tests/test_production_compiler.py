@@ -81,6 +81,48 @@ def test_sample_load_executes_and_rolls_back_through_safewrite(tmp_path):
     assert not daw.snapshot().tracks[0].clips
 
 
+def test_sample_load_accepts_sparse_live_simpler_readback(tmp_path):
+    class SparseLiveMock(MockAbletonAdapter):
+        def load_browser_item(self, track_index, item_uri, clip_index=None):
+            result = super().load_browser_item(track_index, item_uri, clip_index)
+            device = self.tracks[track_index]["devices"][-1]
+            device["name"] = "Abletunes_RAH_Clap_58"
+            device["sample_uri"] = None
+            result.pop("device_index", None)
+            return result
+
+    daw = SparseLiveMock()
+    daw.connect()
+    daw.create_midi_track("Sparse Live Target")
+    session = daw.snapshot()
+    attach_tokens(session)
+    track = session.tracks[0]
+    action = build_sample_load_action(
+        track=track,
+        project_identity=session.project_identity,
+        clip_index=0,
+        sample_uri="query:CurrentProject#Samples:Imported:Abletunes_RAH_Clap_58.wav",
+        reason="load a browser sample with sparse Live readback",
+        evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "plan_id": "sparse_live_sample_test",
+        "target_state_tokens": {track.stable_id: target_token(track)},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    executor = build_safe_write_executor(
+        daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path
+    )
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
+    assert result.readbacks[0].observed == "Abletunes_RAH_Clap_58"
+    assert executor._rollback_applied(result, compiled.intent) == ""
+
+
 def test_device_tweak_executes_and_rolls_back_through_safewrite(tmp_path):
     daw, session = _session()
     attach_tokens(session)

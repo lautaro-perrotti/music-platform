@@ -68,10 +68,17 @@ milestones (plus already-frozen runtime/capture) into one repository
 state. DSP measurements enter EvidenceGraph via `DspObservation.to_evidence_item(s)`;
 relational DSP is `RELATIONSHIP`; non-canonical DSP limitation codes
 propagate. AnalyzeProject stays read-only (`MUSICAL WRITES = 0`).
-`SET_TRACK_VOLUME` remains the only certified musical action.
-`PRODUCER_EXECUTION_V1` is an additive, mock-verified execution boundary for
-the six-action producer minimum; it is LIVE_PENDING until the working-copy
-Ableton certification is completed.
+`SET_TRACK_VOLUME` remains the only certified action in the frozen generic
+foundation. `PRODUCER_EXECUTION_V1` is now LIVE VERIFIED on the controlled
+working copy for the six-action producer minimum: CREATE_TRACK, LOAD_SAMPLE,
+DUPLICATE_CLIP_TO_ARRANGEMENT, LOAD_DEVICE, SET_DEVICE_PARAMETER, and
+SET_TRACK_VOLUME. Each action passed compiler → SafeWrite → authoritative
+readback → rollback, and the final baseline was restored.
+
+`MUSIC_ANALYZER_V1` now has a typed, read-only evidence pack and separate
+`ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. This is the
+analysis/planning boundary; it does not yet run a reference capture or build
+an autonomous Alpha production.
 
 ## Physical DSP (factual, not judgment)
 
@@ -117,7 +124,7 @@ Do not reopen Live capture to manufacture that pack.
 - `DEEP_CAUSAL_DIAGNOSIS_V2`
 - Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
-- References, Music Flamingo, CLAP, sample search, mix, master
+- Reference capture orchestration, Music Flamingo, CLAP, mix, master
 - `RUNTIME_LAUNCH_PATH_OPTIMIZATION` (unconditional launcher sleep / backoff)
 
 ## Agent command count

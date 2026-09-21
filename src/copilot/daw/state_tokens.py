@@ -307,6 +307,14 @@ def project_identity_token(
 def attach_tokens(
     session: SessionState, *, path: str | None = None, name: str | None = None
 ) -> SessionState:
+    # Re-attaching tokens is common during validation and must not erase the
+    # authoritative project identity discovered by the DAW adapter. Callers
+    # may still override either value explicitly, but omission means
+    # "preserve the current session metadata".
+    if path is None:
+        path = session.project_path
+    if name is None:
+        name = session.project_name
     session.project_path = path
     session.project_name = name
     session.project_identity = project_identity_token(session, path=path, name=name)

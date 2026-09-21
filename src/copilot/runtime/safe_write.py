@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 from uuid import uuid4
 
 from copilot.agent.journal import DurableJournal
@@ -64,6 +65,57 @@ assert APPLY_VOCABULARY == (CERTIFIED_PRODUCTION_ACTION,)
 assert set(APPLY_RESULTS) == {item.value for item in ApplyDecision}
 
 VOLUME_READBACK_TOLERANCE = 1e-4
+
+
+def _sample_uri_label(sample_uri: str) -> str:
+    """Return the browser item's filename/stem from a URI-like reference."""
+    value = unquote(str(sample_uri)).replace("\\", "/")
+    value = value.split("#", 1)[-1]
+    value = value.rsplit(":", 1)[-1].rsplit("/", 1)[-1]
+    return Path(value).stem.casefold()
+
+
+def _sample_device_matches(device, sample_uri: str) -> bool:
+    """Match sparse Live readbacks without weakening identity checks.
+
+    Some Live/Remote Script versions omit both ``device_index`` from the
+    write response and ``sample_uri`` from device inventory. In that case
+    the browser-loaded Simpler name is the available identifier. The caller
+    still restricts this match to newly-created device stable IDs and
+    requires uniqueness.
+    """
+    observed_uri = str(getattr(device, "sample_uri", None) or "")
+    if observed_uri:
+        return observed_uri == str(sample_uri)
+    expected = _sample_uri_label(sample_uri)
+    observed = Path(str(getattr(device, "name", ""))).stem.casefold()
+    return bool(expected and observed and expected == observed)
+
+
+def _is_live_sample_routing_normalization(
+    before: dict[str, Any], after: dict[str, Any], target_name: str, row: dict[str, Any]
+) -> bool:
+    """Allow only Live's new-MIDI-track routing normalization for LOAD_SAMPLE."""
+    before_routing = ((before.get("tracks") or {}).get(target_name) or {}).get("routing") or {}
+    after_routing = ((after.get("tracks") or {}).get(target_name) or {}).get("routing") or {}
+    before_target = (before.get("tracks") or {}).get(target_name) or {}
+    after_target = (after.get("tracks") or {}).get(target_name) or {}
+    if (
+        row.get("field") == f"{target_name}.arm"
+        and before_target.get("role") == "midi"
+        and before_target.get("arm") is False
+        and after_target.get("arm") is True
+        and before_routing.get("output_type") == "No Output"
+    ):
+        return True
+    if row.get("field") != f"{target_name}.routing":
+        return False
+    return (
+        before_routing.get("output_type") == "No Output"
+        and after_routing.get("output_type") == "Main"
+        and before_routing.get("input_type") == after_routing.get("input_type")
+        and before_routing.get("monitoring") == after_routing.get("monitoring")
+    )
 
 
 class WriteCancellation:
@@ -1123,6 +1175,7 @@ class SafeWriteExecutor:
         self.transactions.mark_sent(command_id, step.operation)
         clip_index = int(step.arguments["clip_index"])
         sample_uri = str(step.arguments["sample_uri"])
+        before_device_ids = {item.stable_id for item in track.devices}
         try:
             result = self.tools.daw.load_browser_item(track.index, sample_uri, clip_index=clip_index)
         except WriteInDoubt as exc:
@@ -1133,7 +1186,10 @@ class SafeWriteExecutor:
                 if clip is None or clip.sample_uri != sample_uri:
                     raise WriteInDoubt(step.operation, command_id) from exc
                 return self._record_loaded_clip(step, session, command_id, live_track, clip, reconciled=True)
-            devices = [item for item in live_track.devices if item.sample_uri == sample_uri]
+            devices = [
+                item for item in live_track.devices
+                if item.stable_id not in before_device_ids and _sample_device_matches(item, sample_uri)
+            ]
             if len(devices) != 1:
                 raise WriteInDoubt(step.operation, command_id) from exc
             return self._record_loaded_device_sample(step, session, command_id, live_track, devices[0], reconciled=True)
@@ -1144,16 +1200,23 @@ class SafeWriteExecutor:
             if clip is None or clip.sample_uri != sample_uri:
                 raise RuntimeError("LOAD_SAMPLE clip missing or sample URI mismatched on readback")
             return self._record_loaded_clip(step, session, command_id, live_track, clip)
-        device_index = result.get("device_index")
-        device = next((item for item in live_track.devices if item.index == device_index and item.sample_uri == sample_uri), None)
-        if device is None:
+        device_index = result.get("device_index") if isinstance(result, dict) else None
+        candidates = [
+            item for item in live_track.devices
+            if item.stable_id not in before_device_ids and _sample_device_matches(item, sample_uri)
+        ]
+        if device_index is not None:
+            candidates = [item for item in candidates if item.index == int(device_index)]
+        if len(candidates) != 1:
             raise RuntimeError("LOAD_SAMPLE Simpler missing on readback")
+        device = candidates[0]
         return self._record_loaded_device_sample(step, session, command_id, live_track, device)
 
     def _record_loaded_clip(
         self, step: MutationExecution, session: SessionState, command_id: str,
         live_track: TrackState, clip, *, reconciled: bool = False,
     ) -> dict[str, Any]:
+        step.expected_after["clip_stable_id"] = clip.stable_id
         self.transactions.record(
             target_stable_id=live_track.stable_id,
             target_locator_at_apply=TargetLocator(track_index=live_track.index, clip_index=clip.slot_index),
@@ -1169,6 +1232,7 @@ class SafeWriteExecutor:
         self, step: MutationExecution, session: SessionState, command_id: str,
         live_track: TrackState, device, *, reconciled: bool = False,
     ) -> dict[str, Any]:
+        step.expected_after["device_stable_id"] = device.stable_id
         self.transactions.record(
             target_stable_id=live_track.stable_id,
             target_locator_at_apply=TargetLocator(track_index=live_track.index, device_index=device.index),
@@ -1326,8 +1390,8 @@ class SafeWriteExecutor:
                     rows.append(MutationReadback(action_id=step.action_id, parameter="clip.sample", expected=sample_uri, observed=observed, matched=matched, authoritative=True))
                 else:
                     device = next((item for item in track.devices if item.stable_id == str(step.expected_after.get("device_stable_id", ""))), None)
-                    observed = None if device is None else device.sample_uri
-                    matched = observed == sample_uri
+                    observed = None if device is None else (device.sample_uri or device.name)
+                    matched = device is not None and _sample_device_matches(device, sample_uri)
                     rows.append(MutationReadback(action_id=step.action_id, parameter="device.sample", expected=sample_uri, observed=observed, matched=matched, authoritative=True))
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "loaded sample missing or mismatched on readback")
@@ -1407,7 +1471,15 @@ class SafeWriteExecutor:
                     snapshot_guard_state(after, target.name_at_plan),
                     expected_volume_delta_target="__none__",
                 )
-                unexpected.extend(base["unexpected_mutations"])
+                unexpected.extend(
+                    row for row in base["unexpected_mutations"]
+                    if not _is_live_sample_routing_normalization(
+                        guards[target.name_at_plan],
+                        snapshot_guard_state(after, target.name_at_plan),
+                        target.name_at_plan,
+                        row,
+                    )
+                )
                 track_after = after.track_by_id(target.stable_id)
                 if track_after.role == "audio":
                     before_ids = set(guards[target.name_at_plan].get("clip_ids", []))
@@ -1421,7 +1493,7 @@ class SafeWriteExecutor:
                     after_ids = {item.stable_id for item in track_after.devices}
                     expected_id = str(step.expected_after.get("device_stable_id", ""))
                     device = next((item for item in track_after.devices if item.stable_id == expected_id), None)
-                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or device is None or device.sample_uri != step.arguments["sample_uri"]:
+                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or device is None or not _sample_device_matches(device, str(step.arguments["sample_uri"])):
                         unexpected.append({"action_id": target.action_id, "kind": "unexpected_sample_state"})
                 continue
             if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":

@@ -94,7 +94,7 @@ def test_finalization_succeeds_when_shared_readable_even_if_exclusive_held(
     assert out["rows"][0]["exclusive"] is False
 
 
-def test_pool_restores_path_identity_after_isolation_attach(monkeypatch, tmp_path: Path) -> None:
+def test_pool_preserves_path_identity_after_isolation_attach(monkeypatch, tmp_path: Path) -> None:
     path = r"C:\Users\lsper\CopilotProjects\Abletunes - Groove Rider Project\Abletunes - Groove Rider.als"
     session = _session(path=path, name="Abletunes - Groove Rider")
     original = session.project_identity
@@ -102,8 +102,8 @@ def test_pool_restores_path_identity_after_isolation_attach(monkeypatch, tmp_pat
 
     def fake_capture(daw, **kwargs):
         attach_tokens(kwargs["session"])
-        assert kwargs["session"].project_path is None
-        assert kwargs["session"].project_identity != original
+        assert kwargs["session"].project_path == path
+        assert kwargs["session"].project_identity == original
         return {"ok": True, "signal_status": "HAS_SIGNAL"}
 
     monkeypatch.setattr(
