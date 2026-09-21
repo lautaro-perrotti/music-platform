@@ -168,10 +168,12 @@ Do not reopen Live capture to manufacture that pack.
 
 ## Not done
 
-- `DEEP_CAUSAL_V2` is currently `FOUNDATION / NOT VERIFIED`: typed causal
-  evidence, deterministic grading, separate audio/control paths, stale-state
-  rejection and EvidencePack adaptation are implemented read-only. Real
-  replay and regression closure remain.
+- `DEEP_CAUSAL_V2` is `VERIFIED / FROZEN`: factual event extraction,
+  read-only SessionState signal graph, candidate generation, source
+  before/during/after matching, deterministic grading, separate audio/control
+  paths, stale-state rejection and EvidencePack/MusicAnalysisPack adaptation
+  passed controlled-working-copy validation. The real project correctly
+  returned unresolved grades where Main-side matched evidence was unavailable.
 - Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
 - Reference capture orchestration, Music Flamingo, CLAP, mix, master

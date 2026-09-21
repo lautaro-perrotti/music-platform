@@ -38,6 +38,37 @@ class CausalPathKind(StrEnum):
     CONTROL = "CONTROL"
 
 
+class CausalSourceObservation(BaseModel):
+    locator_name: str = ""
+    before_rms: float | None = Field(default=None, ge=0)
+    during_rms: float | None = Field(default=None, ge=0)
+    after_rms: float | None = Field(default=None, ge=0)
+    signal_class: str = "UNKNOWN"
+    arrangement_active: bool | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class CausalEvent(BaseModel):
+    """Observed effect/event extracted from factual analysis output."""
+
+    event_id: str = Field(min_length=1)
+    effect_node_id: str = Field(min_length=1)
+    kind: str = "UNKNOWN"
+    start_s: float = Field(ge=0)
+    end_s: float = Field(gt=0)
+    delta_db: float | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_observations: list[CausalSourceObservation] = Field(default_factory=list)
+    source: str = ""
+    limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_span(self) -> "CausalEvent":
+        if self.end_s <= self.start_s:
+            raise ValueError("causal event end must be after start")
+        return self
+
+
 class CausalNode(BaseModel):
     node_id: str = Field(min_length=1)
     name: str = ""
@@ -81,6 +112,7 @@ class CausalCandidate(BaseModel):
     cause_node_id: str = Field(min_length=1)
     effect_node_id: str = Field(min_length=1)
     path_id: str = Field(min_length=1)
+    event_id: str | None = None
     cause_event_start_s: float | None = Field(default=None, ge=0)
     effect_event_start_s: float | None = Field(default=None, ge=0)
     max_propagation_ms: float = Field(default=250.0, ge=0)
@@ -100,6 +132,7 @@ class CausalContext(BaseModel):
     evidence_generation: int | None = Field(default=None, ge=0)
     nodes: list[CausalNode] = Field(default_factory=list)
     paths: list[CausalPath] = Field(default_factory=list)
+    events: list[CausalEvent] = Field(default_factory=list)
     candidates: list[CausalCandidate] = Field(default_factory=list)
     counterevidence: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
@@ -123,6 +156,7 @@ class CausalEvidence(BaseModel):
     effect_node_id: str
     path_id: str
     grade: CausalGrade
+    event_id: str | None = None
     path_kind: CausalPathKind | None = None
     temporal_precedence: bool | None = None
     propagation_supported: bool | None = None

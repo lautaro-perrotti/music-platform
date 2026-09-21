@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from copilot.audio.deep_causal_v2 import causal_summary, context_from_evidence, evaluate_causal_context
+from copilot.audio.deep_causal_v2 import (
+    build_deep_causal_context,
+    build_signal_graph,
+    causal_summary,
+    context_from_evidence,
+    evaluate_causal_context,
+    extract_observed_effects,
+    generate_causal_candidates,
+)
 from copilot.schemas.deep_causal import (
     CausalCandidate,
     CausalContext,
@@ -12,6 +20,9 @@ from copilot.schemas.deep_causal import (
     WindowMeasurement,
 )
 from copilot.schemas.evidence import EvidenceItem, EvidenceKind, EvidencePack
+from copilot.schemas.music_analysis import MusicAnalysisPack, SectionEvidence, TransitionEvidence
+from copilot.schemas.reference_analysis import ReferenceStateTokens
+from copilot.schemas.session import MixerState, RoutingState, SendState, SessionState, TrackState
 
 
 def _measurement(node: str, phase: str, level: float, ref: str, *, generation: int = 1) -> WindowMeasurement:
@@ -145,6 +156,57 @@ def test_missing_intermediate_propagation_is_weak_support() -> None:
     assert evidence.grade == CausalGrade.WEAK_CAUSAL_SUPPORT
 
 
+def test_negative_direction_is_coincident_not_causal() -> None:
+    context = _context()
+    context.candidates[0].measurements = [
+        item.model_copy(update={"level_db": -18.0})
+        if item.node_id == "main" and item.phase == "during"
+        else item
+        for item in context.candidates[0].measurements
+    ]
+    evidence = evaluate_causal_context(context).results[0]
+    assert evidence.grade == CausalGrade.COINCIDENT
+    assert evidence.direction_compatible is False
+
+
+def test_intentional_source_silence_is_not_reported_as_error() -> None:
+    context = _context()
+    context.candidates[0].measurements = [
+        item.model_copy(update={"active": False})
+        if item.node_id == "source" and item.phase == "during"
+        else item
+        for item in context.candidates[0].measurements
+    ]
+    evidence = evaluate_causal_context(context).results[0]
+    assert evidence.grade == CausalGrade.COMPATIBLE_WITH_CAUSE
+    assert "error" not in " ".join(evidence.reasons).lower()
+
+
+def test_parallel_direct_and_return_paths_are_explicit() -> None:
+    return_track = TrackState(
+        stable_id="return-a",
+        index=1,
+        name="A-Reverb",
+        role="return",
+        mixer=MixerState(),
+        routing=RoutingState(output_type="Main"),
+    )
+    source = TrackState(
+        stable_id="source-a",
+        index=0,
+        name="Source",
+        role="audio",
+        mixer=MixerState(),
+        routing=RoutingState(output_type="Main"),
+        sends=[SendState(index=0, name="A-Reverb", value=0.5)],
+    )
+    nodes, paths = build_signal_graph(SessionState(project_identity="p", tracks=[source, return_track]))
+    direct = next(path for path in paths if path.path_id == "audio:source-a:main")
+    parallel = next(path for path in paths if path.path_id == "audio:source-a:return:return-a")
+    assert parallel.kind == CausalPathKind.AUDIO
+    assert parallel.path_id in direct.parallel_path_ids
+
+
 def test_mixed_identity_is_unresolved() -> None:
     context = _context()
     context.candidates[0].measurements[0] = context.candidates[0].measurements[0].model_copy(
@@ -152,6 +214,65 @@ def test_mixed_identity_is_unresolved() -> None:
     )
     evidence = evaluate_causal_context(context).results[0]
     assert evidence.grade == CausalGrade.CAUSALITY_UNRESOLVED
+
+
+def _pack_with_identity() -> EvidencePack:
+    return EvidencePack(
+        pack_id="real-fact-pack",
+        analysis_version="fixture",
+        prompt_schema_version="fixture",
+        region="r1",
+        project_token="project-token",
+        audible_token="audible-token",
+        items=[
+            EvidenceItem(
+                evidence_id="identity",
+                kind=EvidenceKind.STATE_TOKEN,
+                source_ref="session",
+                region="r1",
+                analysis_version="fixture",
+                name="project_identity",
+                value="fixture-project",
+                project_token="project-token",
+                audible_token="audible-token",
+            )
+        ],
+    )
+
+
+def test_facts_generate_events_and_candidates_without_causal_annotations() -> None:
+    session = SessionState(
+        project_identity="fixture-project",
+        project_token="project-token",
+        audible_token="audible-token",
+        tracks=[
+            TrackState(
+                stable_id="bass-track",
+                index=0,
+                name="Bass",
+                role="midi",
+                mixer=MixerState(),
+                routing=RoutingState(output_type="Main"),
+            )
+        ],
+    )
+    analysis = MusicAnalysisPack(
+        tokens=ReferenceStateTokens(reference_state_token="reference", target_state_token="target"),
+        tempo_bpm=120.0,
+        transitions=[TransitionEvidence(start_beat=8.0, end_beat=10.0, kind="ENERGY_DIP", energy_delta_db=-4.0, event_locations=[9.0])],
+    )
+    pack = _pack_with_identity()
+    events = extract_observed_effects(pack, analysis)
+    nodes, paths = build_signal_graph(session, sidechain_sources={"Bass"})
+    candidates = generate_causal_candidates(events, nodes=nodes, paths=paths)
+    assert events and events[0].effect_node_id == "main"
+    assert candidates and candidates[0].cause_node_id == "bass-track"
+    assert candidates[0].event_id == events[0].event_id
+    context = build_deep_causal_context(pack, analysis_pack=analysis, session=session)
+    result = evaluate_causal_context(context)
+    assert result.results
+    assert result.results[0].grade == CausalGrade.CAUSALITY_UNRESOLVED
+    assert result.musical_writes == 0
 
 
 def test_evidence_pack_and_music_analysis_adapter_is_read_only() -> None:

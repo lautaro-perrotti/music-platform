@@ -1,6 +1,6 @@
 # DEEP_CAUSAL_V2
 
-Status: `FOUNDATION / NOT VERIFIED`
+Status: `VERIFIED / FROZEN`
 
 This milestone adds a deterministic, read-only causal-evidence evaluator on
 top of existing EvidencePack, MusicAnalysisPack, capture and routing facts.
@@ -37,9 +37,28 @@ does not replace capture or DSP.
 
 ## Current validation
 
-Deterministic tests cover a known causal chain, ambiguous evidence, stale
-generation, mixed identity, invalid path, a separate control path, and the
-EvidencePack adapter. All outputs assert `NO_WRITE` / `MUSICAL_WRITES = 0`.
+Deterministic tests cover known-causal, ambiguous, negative-direction,
+intentional-silence, stale generation, mixed identity, invalid path, parallel
+direct/return paths, a separate control path, and the EvidencePack adapter.
+All outputs assert `NO_WRITE` / `MUSICAL_WRITES = 0`.
 
-This is not yet `VERIFIED`: real EvidencePack replay and the full regression
-gate still need to be run before claiming closure.
+The controlled working copy supplied a real EvidencePack, a real
+MusicAnalysisPack, a live read-only SessionState graph and existing factual
+event rows. The pipeline produced:
+
+```
+8 observed events
+96 graph nodes
+11 audio paths
+1 control path
+88 generated candidates
+18 candidates with source before/during/after measurements
+all final grades honest: COINCIDENT or CAUSALITY_UNRESOLVED
+MUSICAL_WRITES = 0
+```
+
+The unresolved results are expected: the available real evidence contains
+source-level measurements but no matched Main event measurement sufficient to
+claim propagation. No causal relationship was fabricated. `regression-v1`
+passed 34/34. The full suite retains the three documented Live-environment
+failures when Live is intentionally open with `AI Test` present.
