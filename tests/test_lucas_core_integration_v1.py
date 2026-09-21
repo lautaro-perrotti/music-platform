@@ -18,6 +18,7 @@ from copilot.integration.lucas_core_v1 import (
     rebind_sample_load_action,
     rebind_sample_load_plan,
     run_lucas_critique,
+    run_lucas_critique_with_provider_failover,
     run_lucas_planner,
 )
 from copilot.musicplan import build_create_track_action, build_pattern_action, build_sample_load_action
@@ -39,6 +40,8 @@ from copilot.schemas.musicplan import (
     ProductionActionKind,
 )
 from copilot.human_eval.store import now_iso
+from copilot.reasoning.errors import ReasoningFailure
+from copilot.reasoning.provider import FailingProvider, ScriptedProvider
 
 
 def _reference(tmp_path: Path):
@@ -181,6 +184,63 @@ def test_lucas_critique_adapter_calls_lucas_surface_without_write(monkeypatch):
     assert observed["plan"] is plan
     assert observed["session"] is session
     assert observed["timeout_s"] == 7.0
+
+
+def test_lucas_critique_provider_failover_preserves_contract_and_evidence():
+    _, session = _session()
+    plan = _plan(session, [])
+    fallback = ScriptedProvider(
+        {"*": '{"verdict":"improve","top_3_issues":[],"reasoning":"grounded fallback"}'},
+        identity="configured-fallback",
+    )
+    primary = FailingProvider(ReasoningFailure.MODEL_TIMEOUT, "primary timeout")
+
+    result = run_lucas_critique_with_provider_failover(
+        plan=plan,
+        session=session,
+        providers=[primary, fallback],
+        evidence_context={"pre_rms": 0.19, "post_rms": 0.17},
+        timeout_s=1.0,
+    )
+
+    assert result["status"] == "CRITIQUE_COMPLETE"
+    assert result["provider"] == "configured-fallback"
+    assert result["result"].verdict == "improve"
+    assert '"pre_rms": 0.19' in fallback.last_prompt
+    assert result["attempts"][0]["status"] == "FAILED"
+    assert result["attempts"][1]["status"] == "SUCCESS"
+
+
+def test_lucas_critique_provider_failover_reports_all_failures_without_verdict():
+    _, session = _session()
+    plan = _plan(session, [])
+
+    result = run_lucas_critique_with_provider_failover(
+        plan=plan,
+        session=session,
+        providers=[FailingProvider(ReasoningFailure.MODEL_TIMEOUT, "timeout")],
+        timeout_s=1.0,
+    )
+
+    assert result["status"] == "CRITIQUE_PROVIDER_UNAVAILABLE"
+    assert result["result"] is None
+    assert result["attempts"][0]["failure"]["type"] == "ProviderError"
+
+
+def test_lucas_critique_invalid_provider_output_is_not_a_verdict():
+    _, session = _session()
+    plan = _plan(session, [])
+
+    result = run_lucas_critique_with_provider_failover(
+        plan=plan,
+        session=session,
+        providers=[ScriptedProvider({"*": "not-json"}, identity="invalid-provider")],
+        timeout_s=1.0,
+    )
+
+    assert result["status"] == "CRITIQUE_PROVIDER_UNAVAILABLE"
+    assert result["result"] is None
+    assert result["attempts"][0]["failure"]["type"] == "INVALID_SCHEMA_OR_CRITIQUE_FAILURE"
 
 
 def test_stale_project_context_fails_closed(tmp_path: Path):

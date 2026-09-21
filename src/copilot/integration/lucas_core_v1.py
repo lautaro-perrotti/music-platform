@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -307,6 +308,93 @@ def run_lucas_critique(
         provider=provider,
         timeout_s=timeout_s,
     )
+
+
+class _GroundedCritiqueProvider:
+    """Provider adapter that adds immutable evidence without becoming a critic."""
+
+    def __init__(self, inner: Any, evidence_context: dict[str, Any] | None) -> None:
+        self.inner = inner
+        self.evidence_context = dict(evidence_context or {})
+        self.failure: dict[str, str] | None = None
+        self.identity = str(getattr(inner, "identity", type(inner).__name__))
+        self.version = str(getattr(inner, "version", "unknown"))
+
+    def reason(self, prompt: str, *, timeout_s: float = 30.0) -> str:
+        grounded = prompt
+        if self.evidence_context:
+            grounded += "\n\n=== IMMUTABLE PRE/POST EVIDENCE ===\n"
+            grounded += json.dumps(self.evidence_context, sort_keys=True, default=str)
+            grounded += "\nUse only this evidence; do not invent measurements."
+        try:
+            return self.inner.reason(grounded, timeout_s=timeout_s)
+        except Exception as exc:  # provider failure is reported, never converted to a verdict
+            self.failure = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            raise
+
+
+def run_lucas_critique_with_provider_failover(
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    providers: Iterable[Any] | None = None,
+    evidence_context: dict[str, Any] | None = None,
+    timeout_s: float = 30.0,
+) -> dict[str, Any]:
+    """Run the unchanged Lucas critique contract over bounded providers.
+
+    This is Core orchestration only. Lucas still owns the prompt, parser, and
+    typed critique result; a provider can only return a valid result or fail.
+    """
+    if providers is None:
+        from copilot.reasoning.provider import configured_http_provider
+
+        configured = configured_http_provider()
+        provider_list = [configured] if configured is not None else []
+    else:
+        provider_list = [provider for provider in providers if provider is not None]
+    attempts: list[dict[str, Any]] = []
+    if not provider_list:
+        return {
+            "status": "CRITIQUE_PROVIDER_UNAVAILABLE",
+            "result": None,
+            "attempts": attempts,
+        }
+    for provider in provider_list:
+        adapter = _GroundedCritiqueProvider(provider, evidence_context)
+        result = run_lucas_critique(
+            plan=plan,
+            session=session,
+            provider=adapter,
+            timeout_s=timeout_s,
+        )
+        if result is not None:
+            return {
+                "status": "CRITIQUE_COMPLETE",
+                "result": result,
+                "provider": adapter.identity,
+                "provider_version": adapter.version,
+                "attempts": [
+                    *attempts,
+                    {"provider": adapter.identity, "status": "SUCCESS"},
+                ],
+            }
+        attempts.append({
+            "provider": adapter.identity,
+            "status": "FAILED",
+            "failure": adapter.failure or {
+                "type": "INVALID_SCHEMA_OR_CRITIQUE_FAILURE",
+                "message": "Lucas critique returned no typed result",
+            },
+        })
+    return {
+        "status": "CRITIQUE_PROVIDER_UNAVAILABLE",
+        "result": None,
+        "attempts": attempts,
+    }
 
 
 def _single_action_plan(action: PlanAction, *, session: SessionState, plan_id: str) -> MusicPlan:

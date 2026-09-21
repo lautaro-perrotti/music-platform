@@ -82,8 +82,12 @@ was available and returned a read-only observation.
 
 The configured Astra critique provider (`gpt-6-astra`) timed out on the real
 critique request. No verdict was invented and both phases were rolled back.
-The remaining closure blocker is this external provider timeout, not audio
-capture or SafeWrite.
+Core now has bounded provider failover around the unchanged Lucas critique
+contract. On this host only one compatible provider was discoverable, so the
+offline MIX and MASTER closure attempts both ended with typed
+`CRITIQUE_PROVIDER_UNAVAILABLE` / `MODEL_TIMEOUT`; no alternate provider was
+available to try. The remaining closure blocker is this external provider
+timeout, not audio capture or SafeWrite.
 
 ## Current status
 
