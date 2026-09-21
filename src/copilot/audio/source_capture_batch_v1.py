@@ -2,7 +2,7 @@
 
 Why this exists
 ---------------
-A traced ``producer-analyze`` on the Groove Rider working copy measured 254.2 s
+A traced ``producer-analyze`` working-copy run measured 254.2 s
 for four sources: 237 Ableton round trips (110.7 s), 91.4 s of real-time
 playback and a 49.6 s Astra call. Each source got its own complete playback
 pass, so the region *and* its 16 qn pre-roll were played once per source.
@@ -16,7 +16,7 @@ Capacity
 --------
 TapProtocol 3 keeps the legacy ceiling: slot 0 Main + slots 1-2 sources.
 TapProtocol 4 discovers up to 8 source slots. Pass width comes from
-``discover_capacity``, not a hardcoded Groove Rider host count.
+``discover_capacity``, not a hardcoded project host count.
 
 Safety contract (unchanged from the single-source path)
 -------------------------------------------------------

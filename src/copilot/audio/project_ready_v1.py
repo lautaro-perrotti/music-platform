@@ -94,8 +94,7 @@ def project_ready(
         return report
 
     bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
-    bootstrap_retry: dict[str, Any] | None = None
-    bootstrap_retry_count = 0
+    bootstrap_convergence_polls = 0
     session = daw.snapshot(include_notes=False)
     retain_tokens(session)
     inventory = inventory_taps(daw)
@@ -111,31 +110,22 @@ def project_ready(
         if track is not None:
             host_infos[name] = daw.get_track_info(track.index)
 
-    # Live can acknowledge the browser load of a Max device before the next
-    # topology read exposes that device.  A clean working copy then produces a
-    # transient TAP_MISSING/PARTIAL result even though the mutation succeeded.
-    # Reconcile only while that transient state remains observable and the
-    # monotonic deadline is alive; never retry policy or safety blocks and never
-    # create an open-ended mutation loop.
+    # Live can acknowledge a browser/device mutation before the next topology
+    # read exposes it.  The bootstrap mutation is issued exactly once; after
+    # that, reconcile only by observing fresh state until a monotonic deadline.
+    # Polling must never call bootstrap_project again.
     convergence_deadline = time.monotonic() + BOOTSTRAP_CONVERGENCE_TIMEOUT_S
-    while True:
-        retry_reason = str(bootstrap.get("reason") or "")
-        retryable = (
-            bootstrap_apply
-            and bootstrap.get("status") in {"BLOCKED", "PARTIAL"}
-            and (
-                retry_reason.startswith("TAP_MISSING:")
-                or bool(bootstrap.get("missing_after"))
-            )
-            and plan_bootstrap(discovery).get("status") == "CHANGES_REQUIRED"
-            and time.monotonic() < convergence_deadline
-        )
-        if not retryable:
+    while (
+        bootstrap_apply
+        and bootstrap.get("status") in {"BOOTSTRAP_APPLIED", "PARTIAL", "BLOCKED"}
+        and plan_bootstrap(discovery).get("status") == "CHANGES_REQUIRED"
+        and time.monotonic() < convergence_deadline
+    ):
+        remaining = convergence_deadline - time.monotonic()
+        if remaining <= 0:
             break
-        if bootstrap_retry is None:
-            bootstrap_retry = bootstrap
-        bootstrap_retry_count += 1
-        bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
+        bootstrap_convergence_polls += 1
+        time.sleep(min(BOOTSTRAP_CONVERGENCE_POLL_S, remaining))
         session = daw.snapshot(include_notes=False)
         retain_tokens(session)
         inventory = inventory_taps(daw)
@@ -150,17 +140,14 @@ def project_ready(
             track = session.track_by_name(name)
             if track is not None:
                 host_infos[name] = daw.get_track_info(track.index)
-        remaining = convergence_deadline - time.monotonic()
-        if remaining > 0:
-            time.sleep(min(BOOTSTRAP_CONVERGENCE_POLL_S, remaining))
     terminal = verify_terminal_state(
         transport_playing=session.transport.playing,
         taps=inventory,
         host_infos=host_infos,
     )
 
-    # ``preflight_session`` is a legacy Groove Rider/lab diagnosis.  It
-    # intentionally requires named Drums/Kick/Bass tracks and must not gate
+    # ``preflight_session`` is a legacy development-lab diagnosis. It
+    # intentionally requires named musical tracks and must not gate
     # generic onboarding of another working copy.  Project readiness only
     # proves identity + observation topology + terminal safety; capture
     # planning discovers the actual project sources afterwards.
@@ -205,18 +192,7 @@ def project_ready(
         "audible_token": session.audible_token,
         "bootstrap_status": bootstrap.get("status"),
         "bootstrap_milestone": bootstrap.get("CROSS_PROJECT_BOOTSTRAP_V1"),
-        "bootstrap_retry": (
-            {
-                "status": bootstrap_retry.get("status"),
-                "reason": bootstrap_retry.get("reason"),
-                "CROSS_PROJECT_BOOTSTRAP_V1": bootstrap_retry.get(
-                    "CROSS_PROJECT_BOOTSTRAP_V1"
-                ),
-            }
-            if bootstrap_retry
-            else None
-        ),
-        "bootstrap_retry_count": bootstrap_retry_count,
+        "bootstrap_convergence_polls": bootstrap_convergence_polls,
         "bootstrap_reused": BOOTSTRAP_MILESTONE,
         "preflight_kind": preflight_kind,
         "preflight_status": preflight.get("status"),

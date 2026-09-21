@@ -112,8 +112,8 @@ host; the non-semantic embedding stub is not counted as semantic perception.
 `PLATFORM_HARDCODE_AUDIT_V1` is CODE VERIFIED, with post-change Live
 revalidation blocked by Ableton crash-recovery/bridge startup (`PORT_CLOSED`).
 Active runtime waits now converge on
-observable Live/browser state with bounded deadlines; project bootstrap retries
-by transient state until deadline; managed host identities and protocol values
+observable Live/browser state with bounded deadlines; project bootstrap issues
+its mutation once and polls transient state until deadline; managed host identities and protocol values
 are classified as internal contracts; and unobserved Main capture capability
 fails closed. See `docs/PLATFORM_HARDCODE_AUDIT_V1.md` for the full inventory,
 the blocker evidence, and the remaining legacy-fixture boundary.

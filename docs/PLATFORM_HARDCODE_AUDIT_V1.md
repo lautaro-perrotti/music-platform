@@ -14,6 +14,61 @@ guards. No user-project name, path, track index, genre, BPM, or fixed section
 shape is used as authoritative runtime identity in the current producer/analyzer
 path.
 
+Scanned scope: 238 production Python files under `src/copilot`, 5 device/build
+assets, 102 Python test files, and 56 documentation/baseline files. Production
+entrypoints traced: `doctor`, `project-ready`, `producer-analyze`,
+`analyze-project`, `regression-v1`, `ProductionCompiler`, `SafeWriteExecutor`,
+`DawAdapter`, M4L provisioning, capture bootstrap, and Analyzer ingestion.
+The audit used static search/AST checks, focused unit tests, metamorphic fixture
+tests, runtime doctor/readiness evidence, and the prior real Live checkpoint.
+
+## Finding inventory
+
+Deduplicated findings, rather than raw literal matches:
+
+| Priority | Found | Fixed | Accepted/documented | Blocked/unresolved |
+|---|---:|---:|---:|---:|
+| P0 | 0 | 0 | 0 | 0 |
+| P1 | 4 | 3 | 0 | 1 |
+| P2 | 12 | 0 | 10 | 2 |
+| P3 | 18 | 0 | 18 | 0 |
+
+The four P1 items are: load/readback fixed sleeps (FIXED), counted bootstrap
+retry (FIXED), false Main-capability fallback (FIXED), and post-change real
+Live revalidation (BLOCKED by Live recovery/bridge startup). No unresolved P0
+or Core P1 code finding remains. The blocked item is an environment gate, not
+silently counted as a pass.
+
+Every finding is assigned one of these dispositions: `FIXED`,
+`ACCEPTED_CONTRACT`, `ACCEPTED_INTERNAL_IDENTITY`, `FIXTURE_ONLY_CONFIRMED`,
+`SAFE_DEFAULT_CONFIRMED`, `HEURISTIC_DOCUMENTED`,
+`LUCAS_OWNED_NOT_MODIFIED`, `THIRD_PARTY_LIMITATION`, or `BLOCKED`.
+
+## Repository-wide class matrix
+
+| Audit class | Result / disposition |
+|---|---|
+| Fixture/project/legacy track names | Legacy probes and baselines only; `FIXTURE_ONLY_CONFIRMED`. Active readiness is generic. |
+| Sample names and filenames | Display/provenance metadata only; `HEURISTIC_DOCUMENTED`. |
+| User display names as authority | State Trust uses persistent refs/tokens; duplicate names fail closed; `FIXED`. |
+| Track/device/clip/scene indices | Locators only; stable refs and readback are authoritative; `ACCEPTED_CONTRACT`. |
+| Fixed counts and budgets | Explicit bounded resource/safety limits; `SAFE_DEFAULT_CONFIRMED`. |
+| Absolute paths/usernames/OS code | Host discovery and platform adapters; static guard passes; `FIXED`. |
+| Ableton/Remote Script versions and object types | Handshake/capability and vendor boundary; `THIRD_PARTY_LIMITATION` where unportable. |
+| Routing/device/parameter names and URIs | LOM/device contracts with readback; managed tap identity is internal; `ACCEPTED_CONTRACT`. |
+| Roles, genre, BPM, 4/4, bar length | No genre truth; BPM/signature defaults are explicit fallback values, never measurement authority; 32 bars are measurement only; `HEURISTIC_DOCUMENTED`. |
+| Sample rate/channel/duration/alignment | Audio metadata and bounded tolerances are observed/documented; `ACCEPTED_CONTRACT`. |
+| Capture hosts, slots, TapProtocol | Copilot-owned namespace and protocol; collision detection/lifecycle/readback present; `ACCEPTED_INTERNAL_IDENTITY`. |
+| Providers/models/GPU/hardware/credentials | Provider availability and secrets are explicit; no GPU requirement; `THIRD_PARTY_LIMITATION` / `SAFE_DEFAULT_CONFIRMED`. |
+| Local host/port 127.0.0.1:9877 | Local-only contractual default; handshake remains authoritative and open port is insufficient; `ACCEPTED_CONTRACT`. |
+| Timeouts/sleeps/retries/fallbacks | Load/browser waits use observable state + monotonic deadline; capture timing remains bounded transport/file settling; `FIXED`/`ACCEPTED_CONTRACT`. |
+| UI/dialog/locale behavior | Known recovery/modal allowlist; unknown modal fails closed; `ACCEPTED_CONTRACT`. |
+| Fixtures, mocks, labs, caches, logs | Static guards and entrypoint tracing keep them off the active generic path; `FIXTURE_ONLY_CONFIRMED`. |
+| Schema defaults/numeric fallbacks/UNKNOWN | Defaults are labeled fallback and unknown is not coerced to false; `SAFE_DEFAULT_CONFIRMED`. |
+| Reference/event/provider/cache identities | Tokens, hashes, evidence IDs and provider versions are used; filenames/events are not identity; `ACCEPTED_CONTRACT`. |
+| Write and rollback targets | Compiler → MutationIntent → SafeWriteExecutor → DawAdapter; persistent refs/readback, not names/indexes; `ACCEPTED_CONTRACT`. |
+| Lucas-owned integration surface | Read-only audit only; no Lucas files modified; `LUCAS_OWNED_NOT_MODIFIED`. |
+
 ## Corrections made
 
 - M4L device load/readback no longer relies on fixed `sleep(1.0)`, `sleep(0.8)`
@@ -21,11 +76,34 @@ path.
   monotonic deadline and returns `TAP_READBACK_TIMEOUT` when convergence fails.
 - Browser resolution now uses a bounded observable-condition poll instead of
   the fixed `1/2/4/8` second backoff sequence.
-- `project-ready` now converges on the observed bootstrap state until a bounded
-  deadline. It does not retry an arbitrary fixed number of times and never
-  retries policy, identity, transport, or collision failures.
+- `project-ready` now converges by polling the observed bootstrap state until a
+  bounded deadline. The bootstrap mutation is issued once; polling never calls
+  `bootstrap_project` again and never retries policy, identity, transport, or
+  collision failures.
 - Capture capacity no longer claims `main_sidecar_supported=True` without an
   observed Main tap. Missing capability fails closed.
+
+## Known incidents and causality
+
+- `Kick 808 Deep`, `Sub Bass`, and similar names were found only in historical
+  evaluation/fixture material; they are not generic readiness requirements.
+- `D:/MusicCopilot` is confined to the tap migration normalizer and guards;
+  current provisioning uses the host-discovered capture directory token.
+- The original fixed sleeps and counted retry were real active-runtime findings
+  and are fixed in this checkpoint.
+- The two post-change smoke attempts used a fresh manifest-backed copy created
+  from the protected source. Before project bootstrap could run, Ableton showed
+  the known `RECOVER_WORK` dialog, the autonomy handler selected `No` for that
+  controlled copy, and the process never exposed TCP `127.0.0.1:9877`.
+- Process inventory showed one Ableton process, no listening port, no zombie
+  port, and no duplicate launcher instance. The failure happened before
+  `SESSION_READY`, before M4L tap loading, and before `project_ready`; therefore
+  the new tap polling and bootstrap observation loop were not on the failing
+  execution path. This rules out those changes as the direct cause, while the
+  underlying Ableton recovery/startup cause remains unresolved.
+- The controlled process was stopped after the bounded deadline. The protected
+  source remained untouched. Status stays `LIVE_REVALIDATION_BLOCKED` rather
+  than being promoted by inference.
 
 ## Accepted constants
 
@@ -63,8 +141,25 @@ music:
 - `tests/test_portability_cli_v1.py`: PASS
 - `tests/test_environment_autonomy_v1.py`: PASS
 - capture/bootstrap/project-ready/M4L/analyzer focused suites: PASS
+- `tests/test_platform_hardcode_audit_v1.py`: PASS, including rename, reorder,
+  extra-track, no-role/no-kick/no-bass, ambiguity, duplicate-name, device-order,
+  readback-timeout, browser-timeout, single-bootstrap-issue, and static-guard
+  checks.
 - `REGRESSION_V1`: `34 PASS / 0 FAIL / 0 BLOCKED`
 - `git diff --check`: PASS
+
+## Metamorphic results
+
+- Rename user tracks: PASS; readiness unchanged.
+- Reorder tracks: PASS; readiness unchanged and indices remain locators.
+- Insert unrelated track: PASS.
+- No kick / no bass: PASS; readiness remains valid and source-specific evidence
+  is limited rather than invented.
+- No recognizable musical roles: PASS; mixture-level readiness remains valid.
+- Multiple identical candidates: PASS; `TARGET_AMBIGUOUS`, never first-match.
+- Duplicate display names: PASS; display name alone does not become identity.
+- Reorder host devices: PASS; tap is found by observed device identity/readback.
+- Random project name: PASS; no project-name branch.
 
 ## Live revalidation blocker
 
