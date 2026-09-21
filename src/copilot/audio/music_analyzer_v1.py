@@ -34,6 +34,9 @@ def build_music_analysis_pack(
     source_activity: Sequence[Mapping[str, Any] | SourceActivityEvidence] = (),
     transitions: Sequence[Mapping[str, Any] | TransitionEvidence] = (),
     analyzer_ids: Mapping[str, str] | None = None,
+    evidence_refs: Sequence[str] = (),
+    provenance: Mapping[str, Any] | None = None,
+    contradictions: Sequence[Mapping[str, Any]] = (),
     limitations: Sequence[str] = (),
 ) -> MusicAnalysisPack:
     """Compose existing factual analyzer outputs without measuring or writing.
@@ -78,6 +81,8 @@ def build_music_analysis_pack(
             timbre=TimbreEvidence(**timbre),
             texture=TextureEvidence(**texture),
             prominence=ProminenceEvidence(**prominence),
+            evidence_refs=list(evidence_refs),
+            provenance=dict(provenance or {}),
             limitations=list(ref_window.model_dump().get("limitations", []) or []),
         ))
 
@@ -93,6 +98,9 @@ def build_music_analysis_pack(
         source_activity=parsed_activity,
         transitions=parsed_transitions,
         analyzer_ids=dict(analyzer_ids or {}),
+        evidence_refs=list(evidence_refs),
+        provenance=dict(provenance or {}),
+        contradictions=[dict(item) for item in contradictions],
         limitations=list(limitations),
         no_write=True,
         raw_audio_included=False,

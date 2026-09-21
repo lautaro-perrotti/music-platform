@@ -8,7 +8,9 @@ boundaries come from an independent novelty/change-point pass.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import hashlib
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import soundfile as sf
@@ -61,13 +63,16 @@ def analyze_reference_music(
     if tempo_bpm <= 0:
         raise ValueError("tempo_bpm must be positive")
     audio_path = Path(path)
+    started = perf_counter()
     samples, sample_rate = _load_mono(audio_path)
+    decoded_at = perf_counter()
     observation = compute_fullmix_observation(
         audio_path,
         region_id="REFERENCE_FULL_TRACK",
         region_label="reference",
         use_cache=use_cache,
     )
+    physical_at = perf_counter()
     reference = pack_from_fullmix_observation(
         observation,
         reference_state_token=reference_state_token,
@@ -80,6 +85,7 @@ def analyze_reference_music(
         tempo_bpm=tempo_bpm,
         duration_s=len(samples) / float(sample_rate),
     )
+    structure_at = perf_counter()
     kick_rows, bass_rows, lowend_limitations = _optional_lowend_stems(
         kick_path, bass_path, sample_rate=sample_rate, tempo_bpm=tempo_bpm,
         duration_s=len(samples) / float(sample_rate),
@@ -96,7 +102,11 @@ def analyze_reference_music(
         end_beat = min(float(start_beat + window_beats), total_beats)
         start_s, end_s = start_beat * 60.0 / tempo_bpm, end_beat * 60.0 / tempo_bpm
         rows = [row for row in frame_rows if start_s <= row["t_s"] < end_s]
-        section = _section_at((start_beat + end_beat) / 2.0, sections)
+        section_label = _measurement_window_section_label(
+            start_beat,
+            end_beat,
+            sections,
+        )
         low_values = [row["low_band_energy"] for row in rows]
         onset_times = [row["t_s"] for row in rows if row["onset"]]
         chroma = _mean_chroma(rows)
@@ -110,7 +120,7 @@ def analyze_reference_music(
             "event_locations": [t * tempo_bpm / 60.0 for t in onset_times],
         }
         low_row = {
-            "section_label": section.name if section else "UNKNOWN",
+            "section_label": section_label,
             "low_band_energy": _mean(low_values),
             "decay_trajectory": _decay_trajectory(samples, sample_rate, onset_times),
             "lowend_measurement_status": "MASTER_ONLY",
@@ -151,6 +161,25 @@ def analyze_reference_music(
             "harmony": "music-analyzer-v1.chroma-1",
             "timbre": "music-analyzer-v1.spectral-1",
         },
+        evidence_refs=[
+            "fullmix.energy_frames",
+            "fullmix.spectral_trajectory",
+            "music_analyzer.change_points",
+            "music_analyzer.onsets",
+            "music_analyzer.chroma",
+        ],
+        provenance={
+            "audio_sha256": _file_sha256(audio_path),
+            "audio_path": str(audio_path.resolve()),
+            "sample_rate": sample_rate,
+            "duration_s": len(samples) / float(sample_rate),
+            "source_views": {
+                "main": str(audio_path.resolve()),
+                "kick": str(Path(kick_path).resolve()) if kick_path else None,
+                "bass": str(Path(bass_path).resolve()) if bass_path else None,
+            },
+        },
+        contradictions=[],
         limitations=[
             "32-bar windows aggregate evidence and are not section boundaries.",
             "LUFS is unavailable in frozen FullMix V1; energy and crest are reported instead.",
@@ -158,7 +187,22 @@ def analyze_reference_music(
             *lowend_limitations,
         ],
     )
+    pack.metadata["timings_s"] = {
+        "audio_decode_s": decoded_at - started,
+        "physical_dsp_fullmix_s": physical_at - decoded_at,
+        "section_and_feature_extraction_s": structure_at - physical_at,
+        "pack_assembly_s": perf_counter() - structure_at,
+        "total_s": perf_counter() - started,
+    }
     return pack
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def infer_reference_sections(
@@ -190,8 +234,12 @@ def infer_reference_sections(
         after = [row["energy_db"] for row in frame_rows if end_s <= row["t_s"] < min(duration_s, end_s + 1.0)]
         slope = ((_mean(after) or energy or global_energy) - (_mean(before) or energy or global_energy)) / max(end_s - start_s, 1e-9)
         contrast = (energy or global_energy) - global_energy
-        function = _section_function(index, len(boundaries_s) - 1, energy or global_energy, slope, global_energy)
-        confidence = min(1.0, max(0.0, 0.45 + abs(contrast) / 24.0 + (0.15 if index in {0, len(boundaries_s) - 2} else 0.0)))
+        onset_density = sum(1 for row in rows if row["onset"]) / max(end_s - start_s, 1e-9)
+        function = _section_function(index, len(boundaries_s) - 1, energy or global_energy, slope, global_energy, onset_density)
+        confidence = min(0.9, max(0.0, 0.45 + abs(contrast) / 40.0 + (0.1 if index in {0, len(boundaries_s) - 2} else 0.0)))
+        evidence = ["energy_change_point", "spectral_flux_change_point"]
+        if onset_density > 0.25:
+            evidence.append("onset_density")
         sections.append(SectionEvidence(
             name=function,
             start_beat=start_s * tempo_bpm / 60.0,
@@ -201,7 +249,7 @@ def infer_reference_sections(
             energy_slope_db_per_s=slope,
             contrast_db=contrast,
             confidence=confidence,
-            evidence=["energy_change_point", "spectral_flux_change_point"],
+            evidence=evidence,
         ))
     return sections
 
@@ -284,7 +332,7 @@ def _key_candidate(chroma: list[float]) -> tuple[str | None, float | None]:
     return label, confidence
 
 
-def _section_function(index: int, count: int, energy: float, slope: float, baseline: float) -> str:
+def _section_function(index: int, count: int, energy: float, slope: float, baseline: float, onset_density: float) -> str:
     if count > 1 and index == 0:
         return "INTRO"
     if count > 1 and index == count - 1:
@@ -293,13 +341,32 @@ def _section_function(index: int, count: int, energy: float, slope: float, basel
         return "BREAK"
     if slope > 0.8:
         return "BUILD"
-    if energy > baseline + 3.0:
+    if energy > baseline + 3.0 and onset_density >= 0.25:
         return "DROP"
     return "GROOVE"
 
 
-def _section_at(beat: float, sections: Iterable[SectionEvidence]) -> SectionEvidence | None:
-    return next((section for section in sections if section.start_beat <= beat < section.end_beat), None)
+def _measurement_window_section_label(
+    start_beat: float,
+    end_beat: float,
+    sections: Iterable[SectionEvidence],
+) -> str:
+    """Label an aggregation window without pretending it is a section.
+
+    A 32-bar measurement window may contain several independently inferred
+    sections.  In that case its label is intentionally ``MIXED``; the
+    authoritative section boundaries remain in ``pack.sections``.
+    """
+    overlapping = [
+        section
+        for section in sections
+        if section.end_beat > start_beat and section.start_beat < end_beat
+    ]
+    if not overlapping:
+        return "UNKNOWN"
+    if len(overlapping) > 1:
+        return "MIXED"
+    return overlapping[0].name
 
 
 def _median_ioi(times: list[float]) -> float | None:
@@ -382,21 +449,22 @@ def _optional_lowend_stems(kick_path, bass_path, *, sample_rate: int, tempo_bpm:
 
     def rows(signal, *, with_overlap=False):
         out = []
+        window_s = 128.0 * 60.0 / tempo_bpm
         for index in range(count):
-            start = int(index * 128.0 / tempo_bpm * sample_rate / 60.0)
-            end = int(min(len(signal), (index + 1) * 128.0 / tempo_bpm * sample_rate / 60.0))
+            start = int(index * window_s * sample_rate)
+            end = int(min(len(signal), (index + 1) * window_s * sample_rate))
             segment = signal[start:end]
             row = {"rms": float(np.sqrt(np.mean(segment ** 2))) if len(segment) else 0.0}
             if with_overlap:
                 local_attacks = [attack for attack in attacks if start <= attack < end]
-                overlap_samples = 0
+                overlap_mask = np.zeros(max(end - start, 1), dtype=bool)
                 for attack in local_attacks:
-                    left = max(start, attack - int(0.12 * sample_rate))
-                    right = min(len(bass_envelope), attack + int(0.25 * sample_rate))
-                    overlap_samples += int(np.sum(bass_envelope[left:right] >= bass_threshold))
-                row["overlap_ratio"] = min(1.0, float(
-                    overlap_samples / max(len(local_attacks) * int(0.37 * sample_rate), 1)
-                )) if local_attacks else None
+                    left = max(start, attack - int(0.12 * sample_rate)) - start
+                    right = min(end, attack + int(0.25 * sample_rate)) - start
+                    if right > left:
+                        overlap_mask[left:right] |= bass_envelope[start + left:start + right] >= bass_threshold
+                overlap_samples = int(np.sum(overlap_mask))
+                row["overlap_ratio"] = float(overlap_samples / max(end - start, 1)) if local_attacks else None
                 row["overlap_duration_s"] = float(overlap_samples / sample_rate) if local_attacks else None
             out.append(row)
         return out
@@ -410,7 +478,7 @@ def _lowend_relationship(kick: dict, bass: dict) -> dict:
         "bass_energy": bass_energy,
         "kick_bass_overlap_ratio": kick.get("overlap_ratio"),
         "kick_bass_overlap_duration_s": kick.get("overlap_duration_s"),
-        "lowend_measurement_status": "STEMS_ENERGY_ONLY",
+        "lowend_measurement_status": "STEMS_ENERGY_TIMING",
     }
 
 

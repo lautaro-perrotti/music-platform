@@ -126,6 +126,8 @@ class MusicAnalysisWindow(BaseModel):
     timbre: TimbreEvidence = Field(default_factory=TimbreEvidence)
     texture: TextureEvidence = Field(default_factory=TextureEvidence)
     prominence: ProminenceEvidence = Field(default_factory=ProminenceEvidence)
+    evidence_refs: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -149,6 +151,9 @@ class MusicAnalysisPack(BaseModel):
     source_activity: list[SourceActivityEvidence] = Field(default_factory=list)
     transitions: list[TransitionEvidence] = Field(default_factory=list)
     analyzer_ids: dict[str, str] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    contradictions: list[dict[str, Any]] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     no_write: bool = True
     raw_audio_included: bool = False

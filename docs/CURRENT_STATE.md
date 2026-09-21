@@ -82,6 +82,15 @@ timbre features, optional kick+bass relationship measurements, and separate
 FOUNDATION / NOT VERIFIED for real Ableton reference capture: no real user
 reference has yet been run through the full Live capture → analyzer path.
 
+Latest checkpoint (2026-09-21): the analyzer was run against the persisted
+15.238 s Main/Kick/Bass capture from the controlled Groove Rider working copy.
+It produced INTRO/GROOVE/OUTRO change-point sections, a MIXED 32-bar
+measurement window, bounded kick/bass overlap timing, low-confidence harmony,
+evidence references, SHA-256 provenance, and no-write output. Ableton itself
+is SESSION_READY / PROJECT_READY after capture-host normalization, but the
+current set is `TARGET_SOURCE_UNSUPPORTED` for a fresh reference capture, so
+this is real-capture validation evidence—not a full MUSIC_ANALYZER_V1 freeze.
+
 ## Physical DSP (factual, not judgment)
 
 `PHYSICAL_DSP_V2` measures. It does not say muddy / professional / needs

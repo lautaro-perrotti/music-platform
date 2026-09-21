@@ -21,6 +21,9 @@ def test_analyze_reference_file_is_windowed_and_no_write(tmp_path: Path):
     assert pack.raw_audio_included is False
     assert pack.tokens.reference_state_token != pack.tokens.target_state_token
     assert len(pack.windows) == 1
+    assert pack.evidence_refs
+    assert pack.provenance["audio_sha256"]
+    assert any("isolated stems" in item for item in pack.limitations)
 
 
 def test_real_music_analyzer_infers_sections_outside_measurement_windows(tmp_path: Path):
@@ -52,6 +55,9 @@ def test_real_music_analyzer_infers_sections_outside_measurement_windows(tmp_pat
     assert len(pack.sections) >= 2  # independently inferred boundaries
     assert any(section.function in {"INTRO", "BREAK", "DROP", "BUILD"} for section in pack.sections)
     assert any(section.end_beat != 128.0 for section in pack.sections)
+    assert pack.windows[0].section_label == "MIXED"
+    assert pack.windows[0].evidence_refs == pack.evidence_refs
+    assert pack.windows[0].provenance["audio_sha256"] == pack.provenance["audio_sha256"]
     assert pack.windows[0].timbre.spectral_centroid_hz is not None
     assert pack.windows[0].harmony.key_candidate is not None
     assert any(item.startswith("32-bar windows aggregate evidence") for item in pack.limitations)
@@ -84,7 +90,7 @@ def test_real_music_analyzer_reports_lowend_relationship_when_stems_exist(tmp_pa
     )
 
     window = pack.windows[0]
-    assert window.lowend_measurement_status == "STEMS_ENERGY_ONLY"
+    assert window.lowend_measurement_status == "STEMS_ENERGY_TIMING"
     assert window.kick_energy is not None
     assert window.bass_energy is not None
     assert window.kick_bass_overlap_duration_s is not None
