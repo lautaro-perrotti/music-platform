@@ -58,6 +58,15 @@ ROWS: tuple[dict[str, Any], ...] = (
         "note": "FROZEN. Wraps canonical producer-analyze. Capture batching frozen at max_batch_sources=2.",
     },
     {
+        "id": "LUCAS_CORE_INTEGRATION_V1",
+        "command": None,
+        "claim": "Typed Lucas producer handoff through ProductionCompiler and SafeWrite with real Live readback and rollback.",
+        "status": "VERIFIED",
+        "frozen": True,
+        "writes": "development_working_copy_only",
+        "note": "Real controlled-working-copy validation. Lucas owns intent; Core owns identity, writes, readback, rollback, and abstention.",
+    },
+    {
         "id": "RPC_OPTIMIZATION_V2",
         "command": "analyze-project",
         "claim": "Domain-scoped ProjectReadView + bulk host-state reads. Zero precision loss.",

@@ -116,6 +116,17 @@ real audio-to-audio and audio-to-text comparison, caching, and
 reported as a limitation; the non-semantic embedding stub is never counted
 as semantic perception.
 
+`LUCAS_CORE_INTEGRATION_V1` is now `VERIFIED / FROZEN`. The existing Lucas
+planner, sample library, and critique surface connect through typed Core
+contexts, explicit action bounding, `ProductionCompiler`, and the canonical
+`SafeWriteExecutor`. A real controlled-working-copy run executed a bounded
+`CREATE_TRACK` + `SAMPLE_LOAD` pair with authoritative readback, ran the
+read-only Producer analysis (`MUSICAL WRITES = 0`), obtained advisory critique,
+and rolled both writes back to the original 34-track state. Lucas-owned files
+were not modified. The real bridge's sample-load capability is represented as
+MIDI/Simpler execution when the selected library action is an audio-track
+intent; this is a Core execution mapping, not a change to Lucas musical logic.
+
 `PLATFORM_HARDCODE_AUDIT_V1` is now VERIFIED / FROZEN on the controlled
 working copy. The Trial modal was acknowledged, the manifest-backed project
 reached `PROJECT_READY`, real capture and EvidencePack generation passed, and
