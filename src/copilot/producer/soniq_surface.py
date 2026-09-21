@@ -555,3 +555,134 @@ def restore_param_snapshot(
         },
     }
     return apply_patch_contract(daw, session=session, contract=contract, throttle_ms=throttle_ms)
+
+
+_EXPECTED_PARAM_COUNTS = {
+    # Soniq reference for Serum 2 full surface
+    "serum 2": 2623,
+    "serum2": 2623,
+    # Serum 1 count can vary by version/build; keep a conservative floor.
+    "serum": 1000,
+}
+
+
+def _expected_count_for_device(device_name: str) -> int | None:
+    n = _normalize_name(device_name)
+    for key, val in _EXPECTED_PARAM_COUNTS.items():
+        if key in n:
+            return int(val)
+    return None
+
+
+def detect_surface_completeness(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    filter_midi_passthrough: bool = False,
+) -> dict[str, Any]:
+    """Detect whether the visible parameter surface is close to a full plugin surface.
+
+    For Serum2, Soniq reports ~2623 reachable params; we use that as the target.
+    """
+    schema = read_vst_schema(
+        daw,
+        session=session,
+        track_name=track_name,
+        device_name=device_name,
+        filter_midi_passthrough=filter_midi_passthrough,
+    )
+    visible = int(schema.get("parameter_count", 0))
+    expected = _expected_count_for_device(str(schema.get("plugin") or device_name))
+
+    if expected is None:
+        return {
+            "ok": True,
+            "mode": "unknown_plugin",
+            "plugin": schema.get("plugin") or device_name,
+            "visible": visible,
+            "expected": None,
+            "ratio": None,
+            "is_full_surface": False,
+            "reason": "no expected reference for this plugin",
+            "schema": schema,
+        }
+
+    ratio = (visible / expected) if expected > 0 else 0.0
+    # High bar for "full surface": at least 85% of reference count.
+    is_full = ratio >= 0.85
+    return {
+        "ok": True,
+        "mode": "full_surface" if is_full else "limited_surface",
+        "plugin": schema.get("plugin") or device_name,
+        "visible": visible,
+        "expected": expected,
+        "ratio": ratio,
+        "is_full_surface": is_full,
+        "reason": "serum-like full surface detected" if is_full else "surface below full threshold",
+        "schema": schema,
+    }
+
+
+def apply_patch_contract_auto_mode(
+    daw,
+    *,
+    session: SessionState,
+    contract: dict[str, Any],
+    throttle_ms: int = 40,
+) -> dict[str, Any]:
+    """Auto-route patch contracts by detected device surface completeness.
+
+    - Serum2 + full surface -> full_surface mode (larger write budget, no MIDI filter).
+    - Otherwise -> constrained fallback to current generic contract flow.
+    """
+    track = str(contract.get("track") or "")
+    device = str(contract.get("device") or "")
+    det = detect_surface_completeness(
+        daw,
+        session=session,
+        track_name=track,
+        device_name=device,
+        filter_midi_passthrough=False,
+    )
+
+    c = dict(contract)
+    c_constraints = dict(c.get("constraints") or {})
+
+    if det.get("is_full_surface"):
+        # In full surface mode we allow slightly wider batches while still safe.
+        c_constraints.setdefault("max_writes", 24)
+        c_constraints.setdefault("max_delta_norm", 0.5)
+        c_constraints.setdefault("forbid_device_on_toggle", True)
+        c["constraints"] = c_constraints
+        patch = apply_patch_contract(
+            daw,
+            session=session,
+            contract=c,
+            throttle_ms=throttle_ms,
+        )
+        return {
+            "ok": bool(patch.get("ok", False)),
+            "routing_mode": "full_surface",
+            "detector": det,
+            "patch": patch,
+        }
+
+    # Explicit fallback path (requested by user): same wrapper, conservative limits.
+    c_constraints.setdefault("max_writes", 8)
+    c_constraints.setdefault("max_delta_norm", 0.35)
+    c_constraints.setdefault("forbid_device_on_toggle", True)
+    c["constraints"] = c_constraints
+    patch = apply_patch_contract(
+        daw,
+        session=session,
+        contract=c,
+        throttle_ms=throttle_ms,
+    )
+    return {
+        "ok": bool(patch.get("ok", False)),
+        "routing_mode": "fallback_surface",
+        "detector": det,
+        "patch": patch,
+    }

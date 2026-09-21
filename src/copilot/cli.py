@@ -2922,7 +2922,7 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     if ok and leave:
         from copilot.musicplan.arrangement_builder import build_arrangement
         from copilot.musicplan.mix_tweaks import apply_mix
-        from copilot.producer.soniq_surface import apply_patch_contract
+        from copilot.producer.soniq_surface import apply_patch_contract_auto_mode
 
         final_session = daw.snapshot()
 
@@ -2934,12 +2934,18 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
             print(f"\nASTRAL PATCH CONTRACTS: {len(patch_contracts)}")
             for c in patch_contracts:
                 try:
-                    rep = apply_patch_contract(daw, session=daw.snapshot(), contract=c, throttle_ms=40)
+                    rep = apply_patch_contract_auto_mode(daw, session=daw.snapshot(), contract=c, throttle_ms=40)
+                    patch = rep.get("patch", {})
                     if rep.get("ok"):
                         applied += 1
                     else:
                         failed += 1
-                    print(f"  - {c.get('track')} / {c.get('device')} -> ok={rep.get('ok')} applied={rep.get('applied')} viol={len(rep.get('violations', []))}")
+                    print(
+                        f"  - {c.get('track')} / {c.get('device')} -> ok={rep.get('ok')}"
+                        f" mode={rep.get('routing_mode')}"
+                        f" applied={patch.get('applied')}"
+                        f" viol={len(patch.get('violations', []))}"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     failed += 1
                     print(f"  - {c.get('track')} / {c.get('device')} -> error ({exc})")
