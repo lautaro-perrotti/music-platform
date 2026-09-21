@@ -497,7 +497,14 @@ class SafeWriteExecutor:
                     step.action_id == target.action_id and step.action_type == "CREATE_TRACK"
                     for step in intent.executions
                 )
-                else snapshot_guard_state(session, target.name_at_plan)
+                else (
+                    {"device_ids": [item.stable_id for item in session.track_by_name(target.name_at_plan).devices]}
+                    if any(
+                        step.action_id == target.action_id and step.action_type == "LOAD_DEVICE"
+                        for step in intent.executions
+                    )
+                    else snapshot_guard_state(session, target.name_at_plan)
+                )
             )
             for target in intent.targets
         }
@@ -532,6 +539,9 @@ class SafeWriteExecutor:
             not_attempted.remove(step.action_id)
             try:
                 write_result = self._execute_certified_step(step, resolved[step.action_id], session)
+                if step.action_type == "LOAD_DEVICE":
+                    step.expected_after["device_stable_id"] = write_result["device_stable_id"]
+                    step.rollback.inverse_params["device_stable_id"] = write_result["device_stable_id"]
                 if step.action_type == "CREATE_TRACK":
                     created = self._created_track_from_result(write_result)
                     target = next(item for item in intent.targets if item.action_id == step.action_id)
@@ -812,6 +822,14 @@ class SafeWriteExecutor:
                 if not step.rollback.prepared:
                     return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
                 continue
+            if step.action_type == "LOAD_DEVICE":
+                if track is None:
+                    return (MutationFailure.TARGET_NOT_FOUND, "device target track missing")
+                if len(track.devices) != int(step.expected_before.get("device_count", len(track.devices))):
+                    return (MutationFailure.PRECONDITION_FAILED, "device inventory changed before LOAD_DEVICE")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
             if step.action_type != CERTIFIED_PRODUCTION_ACTION:
                 continue
             expected = float(step.expected_before.get("volume", track.mixer.volume))
@@ -889,6 +907,8 @@ class SafeWriteExecutor:
     ) -> dict[str, Any]:
         if step.action_type == "CREATE_TRACK":
             return self._execute_create_track(step, session)
+        if step.action_type == "LOAD_DEVICE":
+            return self._execute_load_device(step, track, session)
         if step.action_type != CERTIFIED_PRODUCTION_ACTION:
             raise RuntimeError(f"uncertified action reached execute: {step.action_type}")
         volume = validate_mixer_volume(step.arguments["volume"])
@@ -979,6 +999,48 @@ class SafeWriteExecutor:
             raise RuntimeError("created track stable identity could not be resolved")
         return matches[0]
 
+    def _execute_load_device(
+        self, step: MutationExecution, track: TrackState | None, session: SessionState
+    ) -> dict[str, Any]:
+        if track is None:
+            raise RuntimeError("LOAD_DEVICE target track is unresolved")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, step.operation)
+        before_ids = {device.stable_id for device in track.devices}
+        try:
+            result = self.tools.daw.load_instrument_or_effect(
+                track.index, str(step.arguments["uri"])
+            )
+        except WriteInDoubt as exc:
+            live = self.tools.get_session_snapshot()
+            live_track = live.track_by_id(track.stable_id)
+            created = [device for device in live_track.devices if device.stable_id not in before_ids]
+            if len(created) != 1:
+                raise WriteInDoubt(step.operation, command_id) from exc
+            result = {"reconciled": True, "device_index": created[0].index}
+        live = self.tools.get_session_snapshot()
+        live_track = live.track_by_id(track.stable_id)
+        created = [device for device in live_track.devices if device.stable_id not in before_ids]
+        if len(created) != 1:
+            raise RuntimeError("LOAD_DEVICE readback was ambiguous")
+        device = created[0]
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, device_index=device.index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)),
+            target_name_at_apply=live_track.name,
+            operation=step.operation,
+            before={"device_count": len(track.devices), "device_ids": sorted(before_ids)},
+            after={"device_count": len(live_track.devices), "device_stable_id": device.stable_id},
+            expected_after={"device_count": len(track.devices) + 1, "device_stable_id": device.stable_id},
+            inverse_operation="delete_device",
+            inverse_params={},
+            asset_id=device.stable_id,
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        return {**result, "device_stable_id": device.stable_id, "device_index": device.index}
+
     def _track_named_or_index(self, name: str, index: int) -> TrackState:
         session = self.tools.get_session_snapshot()
         track = session.track_by_name(name)
@@ -1013,6 +1075,23 @@ class SafeWriteExecutor:
                 )
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "created track missing on readback")
+                continue
+            if step.action_type == "LOAD_DEVICE":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                track = session.track_by_id(target.stable_id)
+                expected_id = str(step.expected_after.get("device_stable_id", ""))
+                device = next((item for item in track.devices if item.stable_id == expected_id), None)
+                matched = device is not None
+                rows.append(MutationReadback(
+                    action_id=step.action_id,
+                    parameter="track.device",
+                    expected=expected_id,
+                    observed=None if device is None else device.stable_id,
+                    matched=matched,
+                    authoritative=True,
+                ))
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "loaded device missing on readback")
                 continue
             track = session.track_by_name(planned.name)
             if track is None:
@@ -1054,6 +1133,14 @@ class SafeWriteExecutor:
                 after_ids = {item.stable_id for item in after.tracks}
                 if target.stable_id not in after_ids or (after_ids - before_ids - {target.stable_id}):
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
+                continue
+            if step.action_type == "LOAD_DEVICE":
+                before_ids = set(guards[target.name_at_plan].get("device_ids", []))
+                track_after = after.track_by_id(target.stable_id)
+                after_ids = {item.stable_id for item in track_after.devices}
+                expected_id = str(step.expected_after.get("device_stable_id", ""))
+                if expected_id not in after_ids or (after_ids - before_ids - {expected_id}):
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_device_state"})
                 continue
             post = snapshot_guard_state(after, target.name_at_plan)
             diff = diff_guard_state(
@@ -1097,6 +1184,22 @@ class SafeWriteExecutor:
                 )
                 if present:
                     return rows, (MutationFailure.ROLLBACK_FAILED, "created track still present after rollback")
+                continue
+            if step.action_type == "LOAD_DEVICE":
+                target_track = session.track_by_id(target.stable_id)
+                device_id = str(step.expected_after.get("device_stable_id", ""))
+                present = any(item.stable_id == device_id for item in target_track.devices)
+                rows.append(MutationReadback(
+                    action_id=step.action_id,
+                    parameter="track.device",
+                    expected=False,
+                    observed=present,
+                    matched=not present,
+                    authoritative=True,
+                    detail="rollback",
+                ))
+                if present:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "loaded device still present after rollback")
                 continue
             track = session.track_by_name(target.name_at_plan)
             if track is None:

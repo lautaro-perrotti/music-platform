@@ -386,13 +386,26 @@ class TransactionManager:
         expected_after: dict[str, Any],
         session: SessionState,
     ) -> ReconcileResult:
-        if operation == "create_midi_track":
+        if operation in {"create_midi_track", "create_audio_track"}:
             before_count = int(before.get("track_count", 0))
             if len(session.tracks) == before_count + 1:
                 return ReconcileResult.SATISFIED
             if len(session.tracks) == before_count:
                 return ReconcileResult.ABSENT
             return ReconcileResult.AMBIGUOUS
+        if operation == "load_instrument_or_effect":
+            expected_id = str(expected_after.get("device_stable_id", ""))
+            if expected_id and any(
+                device.stable_id == expected_id
+                for track in session.tracks
+                for device in track.devices
+            ):
+                return ReconcileResult.SATISFIED
+            before_count = int(before.get("device_count", 0))
+            after_counts = [len(track.devices) for track in session.tracks]
+            if any(count == before_count + 1 for count in after_counts):
+                return ReconcileResult.AMBIGUOUS
+            return ReconcileResult.ABSENT
         if operation in {"set_mixer_volume", "set_device_parameter", "set_track_name"}:
             return (
                 ReconcileResult.SATISFIED

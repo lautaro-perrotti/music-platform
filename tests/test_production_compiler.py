@@ -1,5 +1,9 @@
 from copilot.daw.mock import MockAbletonAdapter
-from copilot.musicplan import build_create_track_action, create_controlled_volume_plan
+from copilot.musicplan import (
+    build_create_track_action,
+    build_device_load_action,
+    create_controlled_volume_plan,
+)
 from copilot.runtime.production_compiler import ProductionCompiler
 from copilot.runtime.safe_write import build_safe_write_executor
 from copilot.schemas.musicplan import (
@@ -9,7 +13,7 @@ from copilot.schemas.musicplan import (
     PlanStatus,
     ProductionActionKind,
 )
-from copilot.daw.state_tokens import attach_tokens
+from copilot.daw.state_tokens import attach_tokens, target_token
 from copilot.human_eval.store import now_iso
 
 
@@ -71,7 +75,7 @@ def test_create_track_executes_and_rolls_back_through_safewrite(tmp_path):
     daw, session = _session()
     plan = _create_plan(session)
     compiled = ProductionCompiler().compile(plan, session=session)
-    assert compiled.status == "COMPILED"
+    assert compiled.status == "COMPILED", compiled.reasons
     assert compiled.intent is not None
     executor = build_safe_write_executor(
         daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path
@@ -86,3 +90,30 @@ def test_create_track_executes_and_rolls_back_through_safewrite(tmp_path):
     rollback_error = executor._rollback_applied(result, compiled.intent)
     assert rollback_error == ""
     assert not any(track.stable_id == created_id for track in daw.snapshot().tracks)
+
+
+def test_load_device_executes_and_rolls_back_through_safewrite(tmp_path):
+    daw, session = _session()
+    attach_tokens(session)
+    track = session.tracks[0]
+    action = build_device_load_action(
+        track=track,
+        project_identity=session.project_identity,
+        device_name="Glue Compressor",
+        device_uri="native://Glue Compressor",
+        reason="add native glue",
+        evidence_refs=[],
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "plan_id": "load_device_test",
+        "target_state_tokens": {track.stable_id: target_token(track)},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    executor = build_safe_write_executor(
+        daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path
+    )
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
