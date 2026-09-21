@@ -6,7 +6,7 @@ from pathlib import Path
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.schemas.session import MidiNote
 from copilot.producer.chain_ops import ensure_chain, ensure_order
-from copilot.producer.soniq_surface import apply_patch_contract
+from copilot.producer.soniq_surface import apply_patch_contract_auto_mode
 
 
 def first_relative_sample() -> str | None:
@@ -58,7 +58,7 @@ def run() -> dict:
                 MidiNote(pitch=36, start_time=3.0, duration=0.5, velocity=100),
             ],
         )
-        p1 = apply_patch_contract(
+        p1 = apply_patch_contract_auto_mode(
             daw,
             session=daw.snapshot(),
             contract={
@@ -84,7 +84,7 @@ def run() -> dict:
         ensure_order(daw, session=daw.snapshot(), track_name=audio_name, desired_order=["Compressor", "EQ Eight"])
         if sample:
             daw.load_browser_item(int(at.index), sample, clip_index=0)
-        p2 = apply_patch_contract(
+        p2 = apply_patch_contract_auto_mode(
             daw,
             session=daw.snapshot(),
             contract={
@@ -102,7 +102,7 @@ def run() -> dict:
         add("audio_fx_batch", ok=bool(p2.get("ok")), sample_loaded=bool(sample), contract=p2)
 
         # Scenario 3: Cross-track autonomous pass
-        p3a = apply_patch_contract(
+        p3a = apply_patch_contract_auto_mode(
             daw,
             session=daw.snapshot(),
             contract={
@@ -116,7 +116,7 @@ def run() -> dict:
             },
             throttle_ms=40,
         )
-        p3b = apply_patch_contract(
+        p3b = apply_patch_contract_auto_mode(
             daw,
             session=daw.snapshot(),
             contract={

@@ -12,6 +12,8 @@ from copilot.producer.soniq_surface import (
     capture_param_snapshot,
     restore_param_snapshot,
     load_preset,
+    detect_surface_completeness,
+    apply_patch_contract_auto_mode,
 )
 
 
@@ -207,3 +209,58 @@ def test_load_preset_on_mock() -> None:
         preset_uri="query:UserPresets#Serum2#WarmPad01",
     )
     assert rep["ok"] is True
+
+
+
+def test_detect_surface_completeness_fallback_for_small_serum_surface() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    det = detect_surface_completeness(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        filter_midi_passthrough=False,
+    )
+    assert det["mode"] == "limited_surface"
+    assert det["is_full_surface"] is False
+
+
+def test_apply_patch_contract_auto_mode_routes_fallback() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    rep = apply_patch_contract_auto_mode(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [{"index": 1, "value": 0.6}],
+            "constraints": {},
+        },
+        throttle_ms=0,
+    )
+    assert rep["ok"] is True
+    assert rep["routing_mode"] == "fallback_surface"
+
+
+def test_apply_patch_contract_auto_mode_routes_full_for_large_surface() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    # Inflate params to mimic a full Serum2 surface like Soniq (~2623)
+    dev = daw.tracks[0]["devices"][-1]
+    dev["parameters"] = [
+        {"index": i, "name": f"P{i}", "value": 0.0, "min": 0.0, "max": 1.0}
+        for i in range(2400)
+    ]
+    session = daw.snapshot()
+    rep = apply_patch_contract_auto_mode(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [{"index": 5, "value": 0.6}],
+            "constraints": {},
+        },
+        throttle_ms=0,
+    )
+    assert rep["ok"] is True
+    assert rep["routing_mode"] == "full_surface"
