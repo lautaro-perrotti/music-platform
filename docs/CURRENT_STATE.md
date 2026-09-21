@@ -109,8 +109,11 @@ form a `ReferenceIntentBundle` without merging facts. The current real run is
 `PROVIDER_LIMITED`: CLAP and semantic-ear providers are unavailable on this
 host; the non-semantic embedding stub is not counted as semantic perception.
 
-`PLATFORM_HARDCODE_AUDIT_V1` is CODE VERIFIED, with post-change Live
-revalidation blocked by Ableton crash-recovery/bridge startup (`PORT_CLOSED`).
+`PLATFORM_HARDCODE_AUDIT_V1` is CODE VERIFIED, with Live revalidation still
+blocked after `SESSION_READY` by a later `ZOMBIE_PORT` handshake timeout.
+The lifecycle defect that created repeated `RECOVER_WORK` states is fixed:
+the launcher now owns the launched PID, requests normal shutdown, and never
+kills an unknown Live session by process name.
 Active runtime waits now converge on
 observable Live/browser state with bounded deadlines; project bootstrap issues
 its mutation once and polls transient state until deadline; managed host identities and protocol values

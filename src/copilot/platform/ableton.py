@@ -87,6 +87,32 @@ class PlatformAbletonDriver:
         if command:
             subprocess.run(command, capture_output=True, text=True, check=False)
 
+    def request_shutdown(self, process: subprocess.Popen[bytes]) -> None:
+        """Request shutdown for the exact process owned by this launcher."""
+        if process.poll() is not None:
+            return
+        command = self.request_shutdown_command(process.pid)
+        if command:
+            subprocess.run(command, capture_output=True, text=True, check=False)
+        else:
+            process.terminate()
+
+    def request_shutdown_command(self, pid: int) -> list[str]:
+        return []
+
+    def force_shutdown(self, process: subprocess.Popen[bytes]) -> None:
+        """Last-resort shutdown for a process started by this launcher only."""
+        if process.poll() is not None:
+            return
+        command = self.force_shutdown_command(process.pid)
+        if command:
+            subprocess.run(command, capture_output=True, text=True, check=False)
+        else:
+            process.kill()
+
+    def force_shutdown_command(self, pid: int) -> list[str]:
+        return []
+
     def terminate_command(self, executable: str) -> list[str]:
         return []
 
@@ -100,6 +126,12 @@ class WindowsAbletonDriver(PlatformAbletonDriver):
 
     def terminate_command(self, executable: str) -> list[str]:
         return ["taskkill", "/IM", Path(executable).name, "/F"]
+
+    def request_shutdown_command(self, pid: int) -> list[str]:
+        return ["taskkill", "/PID", str(pid), "/T"]
+
+    def force_shutdown_command(self, pid: int) -> list[str]:
+        return ["taskkill", "/PID", str(pid), "/T", "/F"]
 
 
 class MacOSAbletonDriver(PlatformAbletonDriver):
@@ -117,6 +149,12 @@ class MacOSAbletonDriver(PlatformAbletonDriver):
     def terminate_command(self, executable: str) -> list[str]:
         return ["pkill", "-f", executable]
 
+    def request_shutdown_command(self, pid: int) -> list[str]:
+        return ["kill", "-TERM", str(pid)]
+
+    def force_shutdown_command(self, pid: int) -> list[str]:
+        return ["kill", "-KILL", str(pid)]
+
 
 class LinuxAbletonDriver(PlatformAbletonDriver):
     system = "Linux"
@@ -127,6 +165,12 @@ class LinuxAbletonDriver(PlatformAbletonDriver):
 
     def terminate_command(self, executable: str) -> list[str]:
         return ["pkill", "-f", executable]
+
+    def request_shutdown_command(self, pid: int) -> list[str]:
+        return ["kill", "-TERM", str(pid)]
+
+    def force_shutdown_command(self, pid: int) -> list[str]:
+        return ["kill", "-KILL", str(pid)]
 
 
 def driver_for_system(system: str | None = None) -> PlatformAbletonDriver:

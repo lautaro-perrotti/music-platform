@@ -13,12 +13,19 @@ from copilot.daw.detect import detect_ableton
 from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready, wait_for_session
 from copilot.importing.crash_recovery_v1 import (
     dismiss_live_blocking_dialogs,
+    inspect_recovery_metadata,
     preserve_crash_recovery,
+    quarantine_controlled_recovery_metadata,
 )
 from copilot.platform.ableton import driver_for_system
 
 MILESTONE = "ABLETON_LAUNCHER_V1"
 CRASH_CFG_REL = Path("Preferences") / "CrashDetection.cfg"
+PROCESS_POLL_S = 0.25
+DIALOG_POLL_S = 0.25
+SHUTDOWN_TIMEOUT_S = 30.0
+
+
 def launch_working_copy(
     working_als: str | Path,
     *,
@@ -61,14 +68,42 @@ def launch_working_copy(
                 "launch": "already_open",
             }
 
+    if detection.process_running:
+        return {
+            "milestone": MILESTONE,
+            "status": "LIVE_SESSION_CONFLICT",
+            "working_als": str(als),
+            "reason": "A Live process is already running and is not proven to be Copilot-owned.",
+            "force_requested": force,
+            "detection": detection.to_dict(),
+        }
+
+    recovery_before = inspect_recovery_metadata(detection.prefs_root, als)
+    if recovery_before.get("classification") == "RECOVERY_OF_ORIGINAL_PROJECT":
+        return {
+            "milestone": MILESTONE,
+            "status": "RECOVERY_OF_ORIGINAL_PROJECT",
+            "working_als": str(als),
+            "recovery_metadata": recovery_before,
+            "ORIGINAL_SET_ON_DISK_UNTOUCHED": True,
+        }
+    if recovery_before.get("classification") == "UNKNOWN_RECOVERY_STATE":
+        return {
+            "milestone": MILESTONE,
+            "status": "UNKNOWN_RECOVERY_STATE",
+            "working_als": str(als),
+            "recovery_metadata": recovery_before,
+            "ORIGINAL_SET_ON_DISK_UNTOUCHED": True,
+        }
+
     crash = preserve_crash_recovery(detection.prefs_root, quarantine=False)
-    _stop_live(exe)
     crash_after = preserve_crash_recovery(detection.prefs_root, quarantine=True)
-    _clear_crash_flag(detection.prefs_root)
-    time.sleep(1.5)
+    recovery_metadata = quarantine_controlled_recovery_metadata(
+        detection.prefs_root, als
+    )
     _clear_crash_flag(detection.prefs_root)
     try:
-        _start_live(exe, als)
+        process = _start_live(exe, als)
     except OSError as exc:
         return {
             "milestone": MILESTONE,
@@ -76,6 +111,7 @@ def launch_working_copy(
             "working_als": str(als),
             "reason": str(exc),
             "crash_recovery": crash_after or crash,
+            "recovery_metadata": recovery_metadata,
         }
 
     dialog_events: list[dict[str, Any]] = []
@@ -86,7 +122,7 @@ def launch_working_copy(
             result = dismiss_live_blocking_dialogs(als, recover_policy="open_command_line")
             if result.get("status") != "NO_DIALOG":
                 dialog_events.append(result)
-            if stop.wait(0.7):
+            if stop.wait(DIALOG_POLL_S):
                 break
 
     poller = threading.Thread(target=_poll_crash_dialog, daemon=True)
@@ -100,6 +136,7 @@ def launch_working_copy(
             port,
             deadline_s=deadline_s,
             dialog_events=dialog_events,
+            process=process,
         )
     finally:
         stop.set()
@@ -110,6 +147,7 @@ def launch_working_copy(
         "controlled_relaunches": relaunches,
     }
     if ready is None or ready.status != SESSION_READY:
+        shutdown = _shutdown_owned_process(process)
         return {
             "milestone": MILESTONE,
             "status": (ready.status if ready is not None else "LIVE_UNAVAILABLE"),
@@ -117,6 +155,8 @@ def launch_working_copy(
             "session": ready.to_dict() if ready is not None else {},
             "launch": "started",
             **extra,
+            "recovery_metadata": recovery_metadata,
+            "process_lifecycle": shutdown,
         }
     if not paths_match(ready.project_path, als) and not names_match(ready.project_name, als):
         return {
@@ -127,6 +167,7 @@ def launch_working_copy(
             "opened_name": ready.project_name,
             "session": ready.to_dict(),
             **extra,
+            "recovery_metadata": recovery_metadata,
         }
     return {
         "milestone": MILESTONE,
@@ -138,6 +179,12 @@ def launch_working_copy(
         "session": ready.to_dict(),
         "launch": "started",
         **extra,
+        "recovery_metadata": recovery_metadata,
+        "process_lifecycle": {
+            "pid": process.pid,
+            "owned": True,
+            "left_running": True,
+        },
     }
 
 
@@ -185,12 +232,12 @@ def _wait_ready_allowing_one_relaunch(
     *,
     deadline_s: float,
     dialog_events: list[dict[str, Any]],
+    process: subprocess.Popen[bytes],
 ) -> tuple[Any, int]:
-    deadline = time.time() + deadline_s
-    relaunches = 0
+    deadline = time.monotonic() + deadline_s
     last = None
-    while time.time() < deadline:
-        chunk = min(20.0, deadline - time.time())
+    while time.monotonic() < deadline:
+        chunk = min(20.0, deadline - time.monotonic())
         if chunk <= 0:
             break
         last = wait_for_session(
@@ -198,41 +245,50 @@ def _wait_ready_allowing_one_relaunch(
             probe=lambda: probe_session_ready(host, port),
         )
         if last.status == SESSION_READY:
-            return last, relaunches
-        if detect_ableton(port).process_running:
-            continue
-        if relaunches >= 1:
+            return last, 0
+        if process.poll() is not None:
+            dialog_events.append(
+                {
+                    "status": "PROCESS_EXITED_BEFORE_SESSION_READY",
+                    "pid": process.pid,
+                    "returncode": process.returncode,
+                }
+            )
             break
-        _stop_live(exe)
-        preserve_crash_recovery(prefs_root, quarantine=True)
-        _clear_crash_flag(prefs_root)
-        time.sleep(2.0)
-        _clear_crash_flag(prefs_root)
-        try:
-            _start_live(exe, als)
-        except OSError:
-            break
-        relaunches += 1
-        dialog_events.append(
-            {
-                "status": "CONTROLLED_RELAUNCH",
-                "reason": "LIVE_EXITED_BEFORE_SESSION_READY",
-            }
-        )
-    return last, relaunches
+    return last, 0
 
 
-def _stop_live(exe: str | None = None) -> None:
-    """Stop only the discovered Live executable through the host driver."""
-    if not exe:
-        return
-    driver_for_system().terminate(exe)
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        if not detect_ableton().process_running:
-            time.sleep(3.0)
-            return
-        time.sleep(0.4)
+def _shutdown_owned_process(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout_s: float = SHUTDOWN_TIMEOUT_S,
+) -> dict[str, Any]:
+    """Close only the process launched in this invocation; force is last resort."""
+    driver = driver_for_system()
+    result: dict[str, Any] = {
+        "pid": process.pid,
+        "owned": True,
+        "request_sent": False,
+        "force_sent": False,
+        "exited": process.poll() is not None,
+    }
+    if result["exited"]:
+        result["returncode"] = process.returncode
+        return result
+    driver.request_shutdown(process)
+    result["request_sent"] = True
+    deadline = time.monotonic() + timeout_s
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(min(PROCESS_POLL_S, max(0.0, deadline - time.monotonic())))
+    if process.poll() is None:
+        driver.force_shutdown(process)
+        result["force_sent"] = True
+        force_deadline = time.monotonic() + timeout_s
+        while process.poll() is None and time.monotonic() < force_deadline:
+            time.sleep(min(PROCESS_POLL_S, max(0.0, force_deadline - time.monotonic())))
+    result["exited"] = process.poll() is not None
+    result["returncode"] = process.returncode
+    return result
 
 
 def _clear_crash_flag(prefs_root: str | None) -> None:

@@ -113,6 +113,79 @@ def preserve_crash_recovery(
     }
 
 
+def inspect_recovery_metadata(
+    prefs_root: str | Path | None,
+    expected_als: str | Path | None = None,
+) -> dict[str, Any]:
+    """Classify Live's global recovery pointer without changing it."""
+    if not prefs_root:
+        return {"status": "NO_PREFS", "classification": "UNKNOWN_RECOVERY_STATE"}
+    path = Path(prefs_root) / "Preferences" / "CrashRecoveryInfo.cfg"
+    if not path.is_file():
+        return {
+            "status": "NO_METADATA",
+            "classification": "STALE_RECOVERY_METADATA",
+            "path": str(path),
+        }
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return {
+            "status": "READ_FAILED",
+            "classification": "UNKNOWN_RECOVERY_STATE",
+            "path": str(path),
+            "error": str(exc),
+        }
+    decoded = raw.decode("utf-16le", errors="ignore") + raw.decode(
+        "utf-8", errors="ignore"
+    )
+    normalized = decoded.replace("\x00", "").replace("\\", "/").casefold()
+    expected = str(expected_als or "").replace("\\", "/").casefold()
+    if expected and expected in normalized:
+        classification = "RECOVERY_OF_CONTROLLED_WORKING_COPY"
+    elif "copilotprojects/" in normalized and ".als" in normalized:
+        classification = "RECOVERY_OF_CONTROLLED_WORKING_COPY"
+    elif ".als" in normalized:
+        classification = "RECOVERY_OF_ORIGINAL_PROJECT"
+    else:
+        classification = "UNKNOWN_RECOVERY_STATE"
+    return {
+        "status": "PRESENT",
+        "classification": classification,
+        "path": str(path),
+        "expected_match": bool(expected and expected in normalized),
+    }
+
+
+def quarantine_controlled_recovery_metadata(
+    prefs_root: str | Path | None,
+    expected_als: str | Path | None = None,
+) -> dict[str, Any]:
+    """Move only identified Copilot recovery metadata to recoverable storage."""
+    observed = inspect_recovery_metadata(prefs_root, expected_als)
+    if observed.get("classification") != "RECOVERY_OF_CONTROLLED_WORKING_COPY":
+        return {**observed, "quarantined": False}
+    source = Path(str(observed["path"]))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    destination = KEEP_ROOT / stamp / source.name
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+    except OSError as exc:
+        return {
+            **observed,
+            "quarantined": False,
+            "status": "QUARANTINE_FAILED",
+            "error": str(exc),
+        }
+    return {
+        **observed,
+        "quarantined": True,
+        "backup": str(destination),
+        "ORIGINAL_SET_ON_DISK_UNTOUCHED": True,
+    }
+
+
 def dismiss_unrelated_crash_dialog(expected_als: str | Path) -> dict[str, Any]:
     return dismiss_live_blocking_dialogs(expected_als, recover_policy="match_expected")
 

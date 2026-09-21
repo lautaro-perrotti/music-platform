@@ -15,12 +15,18 @@ shape is used as authoritative runtime identity in the current producer/analyzer
 path.
 
 Scanned scope: 238 production Python files under `src/copilot`, 5 device/build
-assets, 102 Python test files, and 56 documentation/baseline files. Production
+assets, 103 Python test files, and 56 documentation/baseline files. Production
 entrypoints traced: `doctor`, `project-ready`, `producer-analyze`,
 `analyze-project`, `regression-v1`, `ProductionCompiler`, `SafeWriteExecutor`,
 `DawAdapter`, M4L provisioning, capture bootstrap, and Analyzer ingestion.
 The audit used static search/AST checks, focused unit tests, metamorphic fixture
 tests, runtime doctor/readiness evidence, and the prior real Live checkpoint.
+
+The lifecycle follow-up identified and fixed a concrete defect: the launcher
+could terminate Ableton by process name with `taskkill /F`, creating the crash
+recovery state it then encountered on the next launch. The corrected path owns
+the launched PID, requests normal shutdown, observes process exit, and keeps
+force termination as a last resort for that PID only.
 
 ## Finding inventory
 
@@ -29,15 +35,15 @@ Deduplicated findings, rather than raw literal matches:
 | Priority | Found | Fixed | Accepted/documented | Blocked/unresolved |
 |---|---:|---:|---:|---:|
 | P0 | 0 | 0 | 0 | 0 |
-| P1 | 4 | 3 | 0 | 1 |
+| P1 | 5 | 4 | 0 | 1 |
 | P2 | 12 | 0 | 10 | 2 |
 | P3 | 18 | 0 | 18 | 0 |
 
-The four P1 items are: load/readback fixed sleeps (FIXED), counted bootstrap
-retry (FIXED), false Main-capability fallback (FIXED), and post-change real
-Live revalidation (BLOCKED by Live recovery/bridge startup). No unresolved P0
-or Core P1 code finding remains. The blocked item is an environment gate, not
-silently counted as a pass.
+The five P1 items are: load/readback fixed sleeps (FIXED), counted bootstrap
+retry (FIXED), false Main-capability fallback (FIXED), forced process-name
+termination (FIXED), and post-change real Live revalidation (BLOCKED by the
+later handshake timeout). No unresolved P0 or Core P1 code finding remains.
+The blocked item is an environment gate, not silently counted as a pass.
 
 Every finding is assigned one of these dispositions: `FIXED`,
 `ACCEPTED_CONTRACT`, `ACCEPTED_INTERNAL_IDENTITY`, `FIXTURE_ONLY_CONFIRMED`,
@@ -145,6 +151,8 @@ music:
   extra-track, no-role/no-kick/no-bass, ambiguity, duplicate-name, device-order,
   readback-timeout, browser-timeout, single-bootstrap-issue, and static-guard
   checks.
+- `tests/test_ableton_lifecycle_v1.py`: PASS; exact-PID shutdown, controlled
+  recovery metadata quarantine, and original-project preservation.
 - `REGRESSION_V1`: `34 PASS / 0 FAIL / 0 BLOCKED`
 - `git diff --check`: PASS
 
@@ -163,14 +171,25 @@ music:
 
 ## Live revalidation blocker
 
-The post-change clean-working-copy Live smoke was attempted twice. The
-launcher discovered Ableton, preserved crash recovery, dismissed the recovery
-modal, and kept the original source untouched, but Live never exposed TCP
-`127.0.0.1:9877` before the bounded deadline (`PORT_CLOSED`). The controlled
-Ableton process was then stopped. This is an environment/lifecycle blocker,
-not a successful runtime validation, so the audit must not be promoted to
-fully `VERIFIED` until a fresh Live session reaches `SESSION_READY` and
-`PROJECT_READY` with the new readback waits.
+The lifecycle fix was validated once on a new manifest-backed working copy.
+Ableton reached `SESSION_READY`: one controlled process, port open, handshake,
+request-id behavior, snapshot, and project identity all passed; there was no
+relaunch and no recovery modal. The evidence classified the prior state as
+`RECOVERY_OF_CONTROLLED_WORKING_COPY`: `CrashRecoveryInfo.cfg` pointed into
+`CopilotProjects`, and the earlier launcher had used forced process-name
+termination. That metadata and the Crash folder were preserved in recoverable
+Copilot-owned quarantine storage; the protected source was untouched.
+
+The subsequent `project-ready` gate did not pass. It observed a listening port
+but timed out during the next handshake and correctly returned
+`ZOMBIE_PORT`/`NO WRITE`. Ableton's log shows the Remote Script initialized on
+9877 and accepted the launcher handshake commands during startup, but the
+later readiness probe did not obtain a complete response. The controlled PID
+was then closed with `CloseMainWindow`; no force-kill was used in this run.
+
+Because `PROJECT_READY` and the read-only smoke did not complete, the audit
+must remain `CODE_VERIFIED / LIVE_REVALIDATION_BLOCKED`. No additional launch
+or exploratory retry is authorized in this checkpoint.
 
 `ADVANCED_PERCEPTION_V1` remains `PROVIDER_LIMITED`; this audit does not add
 CLAP, MIR, or semantic providers and does not reopen the frozen Analyzer.
