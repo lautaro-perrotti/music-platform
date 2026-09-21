@@ -646,7 +646,7 @@ class AbletonMCP(ControlSurface):
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
                                  "load_instrument_or_effect",
-                                 "set_device_parameter", "toggle_device", "delete_device",
+                                 "set_device_parameter", "set_device_parameters", "toggle_device", "delete_device",
                                  "create_scene", "delete_scene", "fire_scene", "stop_scene",
                                  "set_scene_name", "set_scene_color", "duplicate_scene",
                                  "undo", "redo",

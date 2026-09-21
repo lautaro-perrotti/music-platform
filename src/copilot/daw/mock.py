@@ -405,6 +405,38 @@ class MockAbletonAdapter(DawAdapter):
             {"device_index": device_index, "device_name": name},
         )
 
+    def get_device_by_name(self, track_index: int, device_name: str) -> dict[str, Any]:
+        track = self._track(track_index)
+        wanted = " ".join((device_name or "").strip().lower().split())
+        for i, d in enumerate(track.get("devices", [])):
+            name = " ".join((d.get("name") or "").strip().lower().split())
+            if name == wanted or wanted in name:
+                return {
+                    "found": True,
+                    "track_index": track_index,
+                    "device_index": i,
+                    "device_name": d.get("name", ""),
+                    "class_name": d.get("class_name", ""),
+                }
+        return {"found": False, "track_index": track_index, "device_name": device_name}
+
+    def load_device_preset(self, track_index: int, device_index: int, preset_uri: str) -> dict[str, Any]:
+        self._before_write("load_device_preset")
+        track = self._track(track_index)
+        if device_index < 0 or device_index >= len(track["devices"]):
+            raise DawError("Device index out of range")
+        dev = track["devices"][device_index]
+        dev["preset_uri"] = preset_uri
+        return self._after_write(
+            "load_device_preset",
+            {
+                "loaded": True,
+                "track_index": track_index,
+                "device_index": device_index,
+                "preset_uri": preset_uri,
+            },
+        )
+
     def delete_device(self, track_index: int, device_index: int) -> dict[str, Any]:
         self._before_write("delete_device")
         track = self._track(track_index)

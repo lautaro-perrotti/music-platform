@@ -154,12 +154,14 @@ def set_vst_params_batch(
                 "value": float(value_native),
             }
         )
+    write_mode = "batch_native"
     try:
         daw.set_device_parameters(items)
     except Exception as exc:  # noqa: BLE001
         msg = str(exc).lower()
         if "unknown command" not in msg and "unsupported" not in msg:
             raise
+        write_mode = "sequential_fallback"
         # Bridge fallback: sequential writes when batch endpoint is unavailable.
         for it in items:
             daw.set_device_parameter(
@@ -207,20 +209,25 @@ def set_vst_params_batch(
         "track_index": ti,
         "device_index": di,
         "writes": len(writes),
+        "write_mode": write_mode,
         "readback": readback,
     }
 
 
-def coalesce_writes(writes: list[dict[str, float]]) -> list[dict[str, float]]:
+def coalesce_writes(writes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Soniq-style write coalescing: last value wins per parameter index."""
-    by_idx: dict[int, float] = {}
+    by_idx: dict[int, dict[str, Any]] = {}
     order: list[int] = []
     for w in writes or []:
         idx = int(w["index"])
         if idx not in by_idx:
             order.append(idx)
-        by_idx[idx] = float(w["value"])
-    return [{"index": i, "value": by_idx[i]} for i in order]
+        by_idx[idx] = {
+            "index": idx,
+            "value": float(w["value"]),
+            "normalized": bool(w.get("normalized", True)),
+        }
+    return [by_idx[i] for i in order]
 
 
 @dataclass
@@ -280,12 +287,12 @@ _LAST_PATCH_TS: dict[tuple[int, int], float] = {}
 def _resolve_patch_indices(
     schema_params: list[dict[str, Any]],
     writes: list[dict[str, Any]],
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     by_name = { _normalize_name(str(p.get("name") or "")): int(p.get("index", -1)) for p in schema_params }
     resolved: list[dict[str, float]] = []
     for w in writes or []:
         if "index" in w:
-            resolved.append({"index": int(w["index"]), "value": float(w["value"])})
+            resolved.append({"index": int(w["index"]), "value": float(w["value"]), "normalized": bool(w.get("normalized", True))})
             continue
         needle = _normalize_name(str(w.get("name") or ""))
         if not needle:
@@ -297,7 +304,7 @@ def _resolve_patch_indices(
                 break
         if idx is None:
             continue
-        resolved.append({"index": int(idx), "value": float(w["value"])})
+        resolved.append({"index": int(idx), "value": float(w["value"]), "normalized": bool(w.get("normalized", True))})
     return resolved
 
 
@@ -430,7 +437,10 @@ def apply_patch_contract(
 
     for w in resolved:
         idx = int(w["index"])
-        target = max(0.0, min(1.0, float(w["value"])))
+        normalized = bool(w.get("normalized", True))
+        target = float(w["value"])
+        if normalized:
+            target = max(0.0, min(1.0, target))
         p = by_idx.get(idx)
         if p is None:
             violations.append(f"unknown_param_index:{idx}")
@@ -441,13 +451,14 @@ def apply_patch_contract(
             violations.append(f"blocked_device_on_toggle:{idx}")
             continue
 
-        current_norm = _normalized_from_param(float(p.get("value", 0.0)), p)
-        if abs(target - current_norm) > max_delta:
-            step = max_delta if target > current_norm else -max_delta
-            target = current_norm + step
-            violations.append(f"delta_clamped:{idx}")
+        if normalized:
+            current_norm = _normalized_from_param(float(p.get("value", 0.0)), p)
+            if abs(target - current_norm) > max_delta:
+                step = max_delta if target > current_norm else -max_delta
+                target = current_norm + step
+                violations.append(f"delta_clamped:{idx}")
 
-        adjusted.append({"index": idx, "value": target})
+        adjusted.append({"index": idx, "value": target, "normalized": normalized})
 
     patch = apply_patch(
         daw,
@@ -468,3 +479,79 @@ def apply_patch_contract(
         "violations": violations,
         "patch": patch,
     }
+
+
+
+def resolve_device(session: SessionState, *, track_name: str, device_name: str) -> dict[str, Any]:
+    """Resolve track/device indices for an existing device."""
+    ti = _resolve_track_index(session, track_name)
+    di = _resolve_device_index(session, ti, device_name)
+    return {"track_index": ti, "device_index": di}
+
+
+def load_preset(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    preset_uri: str,
+) -> dict[str, Any]:
+    """Load plugin preset using bridge hot-swap when available."""
+    ref = resolve_device(session, track_name=track_name, device_name=device_name)
+    result = daw.load_device_preset(int(ref["track_index"]), int(ref["device_index"]), preset_uri)
+    ok = bool(result.get("loaded", False)) and not result.get("error")
+    return {
+        "ok": ok,
+        "track": track_name,
+        "device": device_name,
+        "preset_uri": preset_uri,
+        "result": result,
+    }
+
+
+def capture_param_snapshot(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    filter_midi_passthrough: bool = True,
+) -> dict[str, Any]:
+    """Capture full parameter snapshot for A/B rollback style preset workflow."""
+    schema = read_vst_schema(
+        daw,
+        session=session,
+        track_name=track_name,
+        device_name=device_name,
+        filter_midi_passthrough=filter_midi_passthrough,
+    )
+    writes = [{"index": int(p["index"]), "value": float(p["value"]), "normalized": False} for p in schema.get("parameters", [])]
+    return {
+        "ok": True,
+        "track": track_name,
+        "device": device_name,
+        "schema_param_count": int(schema.get("parameter_count", 0)),
+        "writes": writes,
+    }
+
+
+def restore_param_snapshot(
+    daw,
+    *,
+    session: SessionState,
+    snapshot: dict[str, Any],
+    throttle_ms: int = 40,
+) -> dict[str, Any]:
+    """Restore captured param snapshot through apply_patch (native values, no normalization)."""
+    contract = {
+        "track": snapshot.get("track"),
+        "device": snapshot.get("device"),
+        "writes": snapshot.get("writes") or [],
+        "constraints": {
+            "max_delta_norm": 1.0,
+            "max_writes": 4096,
+            "forbid_device_on_toggle": False,
+        },
+    }
+    return apply_patch_contract(daw, session=session, contract=contract, throttle_ms=throttle_ms)
