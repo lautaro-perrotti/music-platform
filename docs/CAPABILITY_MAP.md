@@ -15,7 +15,7 @@ reproducible bug.
 | Working copy policy | VERIFIED | Require a manifest-backed working copy; refuse unprotected originals. Fixture ≠ musical holdout. |
 | `CROSS_PROJECT_BOOTSTRAP_V1` | VERIFIED | Infra only. Second run `NO_CHANGES_REQUIRED`. |
 | `PROJECT_READY_V1` | VERIFIED | Identity → bootstrap → preflight. |
-| `PLATFORM_HARDCODE_AUDIT_V1` | CODE VERIFIED / LIVE BLOCKED | Active runtime audited for paths, names, timing, capabilities, retries, and fixture leakage; observable-condition waits and fail-closed capacity fixes applied. Forced process-name termination is fixed; post-change Live reaches `SESSION_READY` but `PROJECT_READY` remains blocked by a later `ZOMBIE_PORT` handshake timeout. |
+| `PLATFORM_HARDCODE_AUDIT_V1` | VERIFIED / FROZEN | Platform audit closed on the controlled working copy. Trial-modal acknowledgement, manifest-backed project discovery, `PROJECT_READY`, real capture, deterministic Astra-timeout `ABSTAIN`, terminal restoration, and zero musical writes all passed. |
 
 ## Observation
 

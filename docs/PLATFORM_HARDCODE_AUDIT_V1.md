@@ -6,7 +6,28 @@ Baseline: `205fd1c` (`MUSIC_ANALYZER_V1 = VERIFIED / FROZEN`)
 
 ## Result
 
-`PLATFORM_HARDCODE_AUDIT_V1 = CODE_VERIFIED / LIVE_REVALIDATION_BLOCKED`
+`PLATFORM_HARDCODE_AUDIT_V1 = VERIFIED / FROZEN`
+
+## Follow-up closure (2026-09-21)
+
+The later controlled-working-copy validation closed the previous Live gate.
+After the user dismissed the known Ableton Trial status modal, the correct
+manifest-backed Groove Rider copy reached `SESSION_READY` and `PROJECT_READY`.
+Real capture, EvidencePack generation, FullMix, and LowEnd completed. The
+remaining `PROJECT_MISMATCH` was traced to capture-pool expansion: the run
+provisioned `Copilot Capture 3` and `Copilot Capture 4`, changing the project
+and audible tokens while preserving the same project identity. Runtime state
+bookkeeping was updated only after validating that the topology delta was
+exclusively those Copilot-owned hosts; arbitrary mismatches still fail closed.
+
+The deterministic provider-failure regression then exercised timeout, rate-limit,
+and parse-failure outcomes. A real Live run with an injected provider timeout
+returned `DIAGNOSIS_UNSTABLE` / `ABSTAIN`, `PROJECT_MISMATCH` was absent,
+terminal restoration was verified, journals and transactions were empty, and
+`MUSICAL WRITES = 0`. Commit: `b27815a`.
+
+The historical blocked attempt below remains as audit evidence; it is no longer
+the current milestone status.
 
 The audit covered active runtime code, the Ableton/M4L integration boundary,
 capture topology, project onboarding, platform adapters, and static portability
