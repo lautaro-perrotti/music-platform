@@ -33,6 +33,10 @@ class ProductionActionKind(StrEnum):
     """Producer intent vocabulary; certification is owned by the runtime."""
 
     SET_TRACK_VOLUME = "SET_TRACK_VOLUME"
+    LOAD_SAMPLE = "LOAD_SAMPLE"
+    DUPLICATE_CLIP_TO_ARRANGEMENT = "DUPLICATE_CLIP_TO_ARRANGEMENT"
+    LOAD_DEVICE = "LOAD_DEVICE"
+    SET_DEVICE_PARAMETER = "SET_DEVICE_PARAMETER"
     DEVICE_TWEAK = "DEVICE_TWEAK"
     DEVICE_LOAD = "DEVICE_LOAD"
     SAMPLE_SWAP = "SAMPLE_SWAP"
