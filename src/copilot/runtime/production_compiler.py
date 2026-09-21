@@ -9,10 +9,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from copilot.daw.object_ref import require_resolved
-from copilot.musicplan import _as_ref
+from copilot.musicplan import _as_ref, validate_create_track_plan
 from copilot.runtime.safe_write import volume_intent
 from copilot.schemas.musicplan import MusicPlan, ProductionActionKind
-from copilot.schemas.safe_write import MutationIntent
+from copilot.schemas.safe_write import (
+    KIND_PRODUCER_EXECUTION_V1,
+    MutationExecution,
+    MutationIntent,
+    MutationRollback,
+    MutationTarget,
+    RollbackReversibility,
+)
+from copilot.schemas.transaction import TargetFingerprint, TargetLocator
 from copilot.schemas.session import SessionState
 
 
@@ -30,7 +38,10 @@ class ProductionCompiler:
     """MusicPlan -> SafeWrite intent compiler; never a writer."""
 
     certified_kinds: frozenset[ProductionActionKind] = field(
-        default_factory=lambda: frozenset({ProductionActionKind.SET_TRACK_VOLUME})
+        default_factory=lambda: frozenset({
+            ProductionActionKind.SET_TRACK_VOLUME,
+            ProductionActionKind.CREATE_TRACK,
+        })
     )
 
     def compile(self, plan: MusicPlan, *, session: SessionState) -> ProductionCompileResult:
@@ -54,6 +65,58 @@ class ProductionCompiler:
             )
 
         action = plan.actions[0]
+        if action.action_type is ProductionActionKind.CREATE_TRACK:
+            validated = validate_create_track_plan(plan, session=session)
+            if validated.status.value != "READY_FOR_EXECUTION":
+                return ProductionCompileResult(
+                    status="PLAN_REJECTED",
+                    reasons=(validated.rejection_reason or "CREATE_TRACK_PLAN_REJECTED",),
+                )
+            params = action.params
+            operation = "create_audio_track" if params.track_kind == "audio" else "create_midi_track"
+            target_id = action.action_id
+            intent = MutationIntent(
+                plan_id=plan.plan_id,
+                kind=KIND_PRODUCER_EXECUTION_V1,
+                user_intent=action.reason,
+                project_identity=session.project_identity or "",
+                expected_revision=session.revision,
+                expected_session_hash=session.state_hash,
+                expected_project_token=session.project_token or "",
+                expected_audible_token=session.audible_token or "",
+                expected_incarnation_id=session.session_incarnation_id or "",
+                targets=[
+                    MutationTarget(
+                        action_id=target_id,
+                        ref=action.target.ref,
+                        name_at_plan=params.track_name,
+                        fingerprint=TargetFingerprint(),
+                        locator=None,
+                        session_incarnation_id=session.session_incarnation_id or "",
+                    )
+                ],
+                executions=[
+                    MutationExecution(
+                        action_id=target_id,
+                        action_type="CREATE_TRACK",
+                        operation=operation,
+                        arguments={"name": params.track_name, "index": params.index_hint},
+                        expected_before={"track_count": len(session.tracks)},
+                        expected_after={"track_count": len(session.tracks) + 1},
+                        certified=True,
+                        rollback=MutationRollback(
+                            inverse_operation="delete_track",
+                            reversibility=RollbackReversibility.INDEPENDENT,
+                            prepared=True,
+                        ),
+                    )
+                ],
+            )
+            return ProductionCompileResult(
+                status="COMPILED",
+                intent=intent,
+                certified_action_ids=(target_id,),
+            )
         track = require_resolved(session, _as_ref(action.target.ref))
         intent = volume_intent(
             session=session,

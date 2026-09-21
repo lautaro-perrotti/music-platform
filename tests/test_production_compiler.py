@@ -1,7 +1,16 @@
 from copilot.daw.mock import MockAbletonAdapter
-from copilot.musicplan import create_controlled_volume_plan
+from copilot.musicplan import build_create_track_action, create_controlled_volume_plan
 from copilot.runtime.production_compiler import ProductionCompiler
-from copilot.schemas.musicplan import ProductionActionKind
+from copilot.runtime.safe_write import build_safe_write_executor
+from copilot.schemas.musicplan import (
+    DiagnosisBinding,
+    MusicPlan,
+    PlanIntentClass,
+    PlanStatus,
+    ProductionActionKind,
+)
+from copilot.daw.state_tokens import attach_tokens
+from copilot.human_eval.store import now_iso
 
 
 def _session():
@@ -31,3 +40,49 @@ def test_compiler_rejects_lucas_actions_until_certified():
     result = ProductionCompiler().compile(plan, session=session)
     assert result.status == "UNCERTIFIED_ACTION"
     assert result.intent is None
+
+
+def _create_plan(session):
+    attach_tokens(session)
+    action = build_create_track_action(
+        project_identity=session.project_identity,
+        track_name="Created By SafeWrite",
+        track_kind="midi",
+        reason="create the first producer track",
+        evidence_refs=[],
+    )
+    return MusicPlan(
+        plan_id="create_track_test",
+        status=PlanStatus.READY_FOR_EXECUTION,
+        intent_class=PlanIntentClass.AUTONOMOUS_MUSICAL_IMPROVEMENT,
+        diagnosis=DiagnosisBinding(
+            diagnosis_id="test",
+            diagnosis_status="SUPPORTED",
+            diagnosis_accepted=True,
+        ),
+        project_state_token=session.project_token,
+        audible_state_token=session.audible_token,
+        created_at=now_iso(),
+        actions=[action],
+    )
+
+
+def test_create_track_executes_and_rolls_back_through_safewrite(tmp_path):
+    daw, session = _session()
+    plan = _create_plan(session)
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED"
+    assert compiled.intent is not None
+    executor = build_safe_write_executor(
+        daw, journal_path=tmp_path / "journal.jsonl", persist_dir=tmp_path
+    )
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.readbacks[0].matched is True
+    created_id = compiled.intent.targets[0].stable_id
+    assert created_id
+    assert any(track.stable_id == created_id for track in daw.snapshot().tracks)
+
+    rollback_error = executor._rollback_applied(result, compiled.intent)
+    assert rollback_error == ""
+    assert not any(track.stable_id == created_id for track in daw.snapshot().tracks)

@@ -32,6 +32,8 @@ from copilot.musicplan.execute import diff_guard_state, snapshot_guard_state
 from copilot.schemas.safe_write import (
     CERTIFIED_PRODUCTION_ACTION,
     CERTIFIED_PRODUCTION_ACTIONS,
+    KIND_PRODUCER_EXECUTION_V1,
+    PRODUCER_CERTIFIED_ACTIONS,
     KIND_PRODUCTION_MUSICAL,
     MILESTONE,
     SCHEMA_VERSION,
@@ -117,6 +119,12 @@ def certified_production_actions() -> frozenset[str]:
 
 def action_is_certified(action_type: str) -> bool:
     return action_type == CERTIFIED_PRODUCTION_ACTION
+
+
+def action_is_certified_for_intent(intent: MutationIntent, action_type: str) -> bool:
+    if intent.kind == KIND_PRODUCER_EXECUTION_V1:
+        return action_type in PRODUCER_CERTIFIED_ACTIONS
+    return action_is_certified(action_type)
 
 
 def plan_compound_rollback(executions: list[MutationExecution]) -> dict[str, Any]:
@@ -415,7 +423,7 @@ class SafeWriteExecutor:
         uncertified = [
             step.action_type
             for step in intent.executions
-            if not action_is_certified(step.action_type)
+            if not action_is_certified_for_intent(intent, step.action_type)
         ]
         if uncertified:
             result.phase = MutationPhase.PERSIST_ROLLBACK
@@ -483,7 +491,14 @@ class SafeWriteExecutor:
             return self._cancel_open(result, cancellation)
 
         guards = {
-            target.name_at_plan: snapshot_guard_state(session, target.name_at_plan)
+            target.name_at_plan: (
+                {"track_ids": [item.stable_id for item in session.tracks]}
+                if any(
+                    step.action_id == target.action_id and step.action_type == "CREATE_TRACK"
+                    for step in intent.executions
+                )
+                else snapshot_guard_state(session, target.name_at_plan)
+            )
             for target in intent.targets
         }
 
@@ -516,7 +531,18 @@ class SafeWriteExecutor:
                 return self._cancel_open(result, cancellation)
             not_attempted.remove(step.action_id)
             try:
-                self._execute_certified_step(step, resolved[step.action_id], session)
+                write_result = self._execute_certified_step(step, resolved[step.action_id], session)
+                if step.action_type == "CREATE_TRACK":
+                    created = self._created_track_from_result(write_result)
+                    target = next(item for item in intent.targets if item.action_id == step.action_id)
+                    target.stable_id = created.stable_id
+                    target.name_at_plan = created.name
+                    target.locator = TargetLocator(track_index=created.index)
+                    target.fingerprint = TargetFingerprint(**fingerprint_track(created))
+                    target.ref = ref_from_track(
+                        created, project_identity=session.project_identity or ""
+                    ).model_dump(mode="json")
+                    resolved[step.action_id] = created
             except WriteInDoubt as exc:
                 unknown.append(step.action_id)
                 unknown.extend(not_attempted)
@@ -742,6 +768,13 @@ class SafeWriteExecutor:
     ) -> tuple[dict[str, TrackState], tuple[MutationFailure, str] | None]:
         resolved: dict[str, TrackState] = {}
         for target in intent.targets:
+            step = next((item for item in intent.executions if item.action_id == target.action_id), None)
+            if step is not None and step.action_type == "CREATE_TRACK":
+                # CREATE_TRACK has no pre-existing track target. The project
+                # identity and session tokens are the preconditions; the
+                # created track receives its PersistentObjectRef after write.
+                resolved[target.action_id] = None  # type: ignore[assignment]
+                continue
             ref = PersistentObjectRef.model_validate(target.ref)
             outcome = resolve_track(session, ref)
             if outcome.status is ResolveStatus.PROJECT_MISMATCH:
@@ -768,9 +801,17 @@ class SafeWriteExecutor:
         if not intent.executions:
             return (MutationFailure.PRECONDITION_FAILED, "empty mutation plan")
         for step in intent.executions:
-            if not action_is_certified(step.action_type):
+            if not action_is_certified_for_intent(intent, step.action_type):
                 continue
             track = resolved[step.action_id]
+            if step.action_type == "CREATE_TRACK":
+                if len(_session.tracks) != int(step.expected_before.get("track_count", len(_session.tracks))):
+                    return (MutationFailure.PRECONDITION_FAILED, "track count changed before CREATE_TRACK")
+                if any(item.name == str(step.arguments.get("name", "")) for item in _session.tracks):
+                    return (MutationFailure.PRECONDITION_FAILED, "track name already exists")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
             if step.action_type != CERTIFIED_PRODUCTION_ACTION:
                 continue
             expected = float(step.expected_before.get("volume", track.mixer.volume))
@@ -819,12 +860,19 @@ class SafeWriteExecutor:
             "audible_token": session.audible_token,
             "targets": [target.model_dump(mode="json") for target in intent.targets],
             "before": {
-                action_id: {
-                    "name": track.name,
-                    "index": track.index,
-                    "stable_id": track.stable_id,
-                    "volume": float(track.mixer.volume),
-                }
+                action_id: (
+                    {
+                        "track_count": len(session.tracks),
+                        "track_ids": [item.stable_id for item in session.tracks],
+                    }
+                    if track is None
+                    else {
+                        "name": track.name,
+                        "index": track.index,
+                        "stable_id": track.stable_id,
+                        "volume": float(track.mixer.volume),
+                    }
+                )
                 for action_id, track in resolved.items()
             },
             "rollback_plan": rollback_plan,
@@ -839,6 +887,8 @@ class SafeWriteExecutor:
         track: TrackState,
         session: SessionState,
     ) -> dict[str, Any]:
+        if step.action_type == "CREATE_TRACK":
+            return self._execute_create_track(step, session)
         if step.action_type != CERTIFIED_PRODUCTION_ACTION:
             raise RuntimeError(f"uncertified action reached execute: {step.action_type}")
         volume = validate_mixer_volume(step.arguments["volume"])
@@ -876,6 +926,59 @@ class SafeWriteExecutor:
         )
         return result
 
+    def _execute_create_track(
+        self, step: MutationExecution, session: SessionState
+    ) -> dict[str, Any]:
+        """Create, identify and journal exactly one new track."""
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        operation = step.operation
+        self.transactions.mark_sent(command_id, operation)
+        before_ids = {track.stable_id for track in session.tracks}
+        try:
+            if operation == "create_audio_track":
+                result = self.tools.daw.create_audio_track(
+                    str(step.arguments["name"]), int(step.arguments.get("index", -1))
+                )
+            else:
+                result = self.tools.daw.create_midi_track(
+                    str(step.arguments["name"]), int(step.arguments.get("index", -1))
+                )
+        except WriteInDoubt as exc:
+            live = self.tools.get_session_snapshot()
+            created = [track for track in live.tracks if track.stable_id not in before_ids]
+            if len(created) != 1:
+                raise WriteInDoubt(operation, command_id) from exc
+            result = {"reconciled": True, "index": created[0].index}
+        live = self.tools.get_session_snapshot()
+        created = [track for track in live.tracks if track.stable_id not in before_ids]
+        if len(created) != 1:
+            raise RuntimeError("CREATE_TRACK readback was ambiguous")
+        track = created[0]
+        self.transactions.record(
+            target_stable_id=track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=track.index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+            target_name_at_apply=track.name,
+            operation=operation,
+            before={"track_count": len(session.tracks), "track_ids": sorted(before_ids)},
+            after={"track_count": len(live.tracks), "stable_id": track.stable_id},
+            expected_after={"track_count": len(session.tracks) + 1, "stable_id": track.stable_id},
+            inverse_operation="delete_track",
+            inverse_params={},
+            asset_id=track.stable_id,
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        return {**result, "track_stable_id": track.stable_id, "track_index": track.index}
+
+    def _created_track_from_result(self, result: dict[str, Any]) -> TrackState:
+        stable_id = str(result.get("track_stable_id") or "")
+        live = self.tools.get_session_snapshot()
+        matches = [track for track in live.tracks if track.stable_id == stable_id]
+        if len(matches) != 1:
+            raise RuntimeError("created track stable identity could not be resolved")
+        return matches[0]
+
     def _track_named_or_index(self, name: str, index: int) -> TrackState:
         session = self.tools.get_session_snapshot()
         track = session.track_by_name(name)
@@ -894,6 +997,23 @@ class SafeWriteExecutor:
         rows: list[MutationReadback] = []
         for step in intent.executions:
             planned = resolved[step.action_id]
+            if step.action_type == "CREATE_TRACK":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                created = next((item for item in session.tracks if item.stable_id == target.stable_id), None)
+                matched = created is not None
+                rows.append(
+                    MutationReadback(
+                        action_id=step.action_id,
+                        parameter="session.track",
+                        expected=target.stable_id,
+                        observed=None if created is None else created.stable_id,
+                        matched=matched,
+                        authoritative=True,
+                    )
+                )
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "created track missing on readback")
+                continue
             track = session.track_by_name(planned.name)
             if track is None:
                 return rows, (
@@ -929,6 +1049,12 @@ class SafeWriteExecutor:
         unexpected: list[dict[str, Any]] = []
         for target in intent.targets:
             step = next(item for item in intent.executions if item.action_id == target.action_id)
+            if step.action_type == "CREATE_TRACK":
+                before_ids = set(guards[target.name_at_plan].get("track_ids", []))
+                after_ids = {item.stable_id for item in after.tracks}
+                if target.stable_id not in after_ids or (after_ids - before_ids - {target.stable_id}):
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
+                continue
             post = snapshot_guard_state(after, target.name_at_plan)
             diff = diff_guard_state(
                 guards[target.name_at_plan],
@@ -956,6 +1082,22 @@ class SafeWriteExecutor:
         rows: list[MutationReadback] = []
         for step in intent.executions:
             target = next(item for item in intent.targets if item.action_id == step.action_id)
+            if step.action_type == "CREATE_TRACK":
+                present = any(item.stable_id == target.stable_id for item in session.tracks)
+                rows.append(
+                    MutationReadback(
+                        action_id=step.action_id,
+                        parameter="session.track",
+                        expected=False,
+                        observed=present,
+                        matched=not present,
+                        authoritative=True,
+                        detail="rollback",
+                    )
+                )
+                if present:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "created track still present after rollback")
+                continue
             track = session.track_by_name(target.name_at_plan)
             if track is None:
                 return rows, (
@@ -991,6 +1133,13 @@ class SafeWriteExecutor:
     ) -> tuple[MutationVerification, tuple[MutationFailure, str] | None]:
         unexpected: list[dict[str, Any]] = []
         for target in intent.targets:
+            step = next(item for item in intent.executions if item.action_id == target.action_id)
+            if step.action_type == "CREATE_TRACK":
+                before_ids = set(guards[target.name_at_plan].get("track_ids", []))
+                after_ids = {item.stable_id for item in restored.tracks}
+                if after_ids != before_ids:
+                    unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
+                continue
             post = snapshot_guard_state(restored, target.name_at_plan)
             diff = diff_guard_state(
                 guards[target.name_at_plan],
