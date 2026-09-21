@@ -6,6 +6,7 @@ import os
 import re
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -599,21 +600,158 @@ def _soniq_ws_url() -> str | None:
     return url or None
 
 
-def _rpc_try_methods(ws, methods: list[str], params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+def _stable_plugin_name(schema: dict[str, Any], requested_device: str) -> str:
+    raw = str(schema.get("pluginName") or schema.get("plugin") or "").strip()
+    if raw and _normalize_name(raw) not in {"none", "null"}:
+        return raw
+    if int(schema.get("paramCount") or schema.get("parameter_count") or 0) >= 2000 and "serum" in _normalize_name(requested_device):
+        return "Serum 2"
+    return requested_device
+
+
+def _ws_collect_push_notifications(ws, *, timeout_s: float = 0.2, max_messages: int = 24) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    try:
+        ws.settimeout(timeout_s)
+    except Exception:
+        return events
+    for _ in range(max_messages):
+        try:
+            raw = ws.recv()
+        except Exception:
+            break
+        try:
+            msg = json.loads(raw)
+        except Exception:
+            continue
+        if msg.get("id") is not None:
+            # ignore stray responses from other in-flight calls
+            continue
+        method = str(msg.get("method") or "")
+        if not method:
+            continue
+        params = msg.get("params")
+        events.append({"method": method, "params": params})
+    return events
+
+_SONIQ_PRESET_SNAPSHOT_DIR = Path("logs/soniq_presets")
+
+
+def _snapshot_key(device_name: str, preset_uri: str) -> str:
+    base = f"{_normalize_name(device_name)}::{preset_uri}"
+    safe = re.sub(r"[^a-z0-9._-]+", "_", base.lower())
+    return safe[:180]
+
+
+def _snapshot_path(device_name: str, preset_uri: str) -> Path:
+    _SONIQ_PRESET_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    return _SONIQ_PRESET_SNAPSHOT_DIR / f"{_snapshot_key(device_name, preset_uri)}.json"
+
+
+def _ws_read_all_params(ws, track_name: str, device_name: str) -> tuple[str, str, list[dict[str, Any]]]:
+    common = {"track": track_name, "device": device_name, "track_name": track_name, "device_name": device_name}
+    schema_method, schema = _rpc_try_methods(ws, ["read_vst_schema", "vst.schema", "soniq.vst.schema"], common)
+    schema = schema if isinstance(schema, dict) else {}
+    params = list(schema.get("params") or schema.get("parameters") or [])
+    indices = [int(p.get("index", -1)) for p in params if int(p.get("index", -1)) >= 0]
+    read_method, readback = _rpc_try_methods(
+        ws,
+        ["read_vst_params", "vst.read", "soniq.vst.read"],
+        {**common, "indices": indices, "params": indices},
+    )
+    rows = list(readback or []) if isinstance(readback, list) else list((readback or {}).get("params") or [])
+    plugin_name = _stable_plugin_name(schema, device_name)
+    return schema_method, read_method, [{"index": int(r.get("index", -1)), "value": float(r.get("value", 0.0))} for r in rows if int(r.get("index", -1)) >= 0]
+
+
+def _save_preset_snapshot_via_soniq_ws(*, track_name: str, device_name: str, preset_uri: str, timeout_s: float = 6.0) -> dict[str, Any]:
+    ws_url = _soniq_ws_url()
+    if not ws_url:
+        return {"ok": False, "error": "soniq_ws_url_not_configured"}
+    try:
+        import websocket  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "error": f"websocket_client_missing:{exc}"}
+
+    ws = websocket.create_connection(ws_url, timeout=timeout_s)
+    try:
+        schema_method, read_method, rows = _ws_read_all_params(ws, track_name, device_name)
+        snap = {
+            "track": track_name,
+            "device": device_name,
+            "preset_uri": preset_uri,
+            "saved_at": time.time(),
+            "schema_method": schema_method,
+            "read_method": read_method,
+            "writes": [{"index": int(r["index"]), "value": float(r["value"]), "normalized": False} for r in rows],
+        }
+        path = _snapshot_path(device_name, preset_uri)
+        path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "mode": "soniq_ws_snapshot", "snapshot_path": str(path), "write_count": len(rows)}
+    except Exception as exc:
+        return {"ok": False, "error": f"soniq_snapshot_save_error:{exc}"}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+
+def _load_preset_snapshot_via_soniq_ws(*, track_name: str, device_name: str, preset_uri: str, timeout_s: float = 8.0) -> dict[str, Any]:
+    ws_url = _soniq_ws_url()
+    if not ws_url:
+        return {"ok": False, "error": "soniq_ws_url_not_configured"}
+    path = _snapshot_path(device_name, preset_uri)
+    if not path.is_file():
+        return {"ok": False, "error": f"snapshot_not_found:{path}"}
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"ok": False, "error": f"snapshot_read_error:{exc}"}
+
+    writes = coalesce_writes(list(payload.get("writes") or []))
+    if not writes:
+        return {"ok": False, "error": "snapshot_has_no_writes"}
+
+    try:
+        import websocket  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "error": f"websocket_client_missing:{exc}"}
+
+    ws = websocket.create_connection(ws_url, timeout=timeout_s)
+    try:
+        common = {"track": track_name, "device": device_name, "track_name": track_name, "device_name": device_name}
+        method, wr = _rpc_try_methods(ws, ["set_vst_params_batch", "vst.write", "soniq.vst.write"], {**common, "writes": writes, "items": writes, "parameters": writes})
+        _, rb = _rpc_try_methods(ws, ["read_vst_params", "vst.read", "soniq.vst.read"], {**common, "indices": [int(w["index"]) for w in writes]})
+        return {"ok": True, "mode": "soniq_ws_snapshot", "method": method, "write": wr, "readback": rb, "snapshot_path": str(path)}
+    except Exception as exc:
+        return {"ok": False, "error": f"soniq_snapshot_load_error:{exc}"}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+
+
+def _rpc_try_methods(ws, methods: list[str], params: dict[str, Any]) -> tuple[str, Any]:
     last_err: str | None = None
     for method in methods:
         rid = str(uuid.uuid4())
         ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
-        raw = ws.recv()
-        data = json.loads(raw)
-        if data.get("id") != rid:
-            # tolerate out-of-order: keep trying this response if it is success-shaped
-            if "result" in data and not data.get("error"):
-                return method, data["result"]
-        if data.get("error"):
-            last_err = str(data.get("error"))
-            continue
-        return method, data.get("result") or {}
+        while True:
+            raw = ws.recv()
+            data = json.loads(raw)
+            # Ignore push notifications and unrelated ids while waiting our response.
+            if data.get("id") is None:
+                continue
+            if data.get("id") != rid:
+                continue
+            if data.get("error"):
+                last_err = str(data.get("error"))
+                break
+            return method, data.get("result")
     raise DawError(f"Soniq RPC failed for methods={methods}: {last_err or 'no compatible method'}")
 
 
@@ -646,7 +784,10 @@ def _apply_patch_via_soniq_ws(contract: dict[str, Any], *, timeout_s: float = 4.
             ["read_vst_schema", "vst.schema", "soniq.vst.schema"],
             common,
         )
-        params = list(schema.get("parameters") or [])
+        if not isinstance(schema, dict):
+            schema = {}
+        plugin_name = _stable_plugin_name(schema, device)
+        params = list(schema.get("parameters") or schema.get("params") or [])
         by_name = {_normalize_name(str(p.get("name") or "")): int(p.get("index", -1)) for p in params}
 
         resolved: list[dict[str, Any]] = []
@@ -688,16 +829,26 @@ def _apply_patch_via_soniq_ws(contract: dict[str, Any], *, timeout_s: float = 4.
             ["read_vst_params", "vst.read", "soniq.vst.read"],
             read_params,
         )
+        push_events = _ws_collect_push_notifications(ws, timeout_s=0.15, max_messages=24)
+        rb_rows = list(readback or []) if isinstance(readback, list) else list((readback or {}).get("params") or [])
+        synthesized_events = [{"event": "param_changed", "index": int(r.get("index", -1)), "value": float(r.get("value", 0.0))} for r in rb_rows if int(r.get("index", -1)) >= 0]
+        events = push_events if push_events else synthesized_events
 
         return {
             "ok": True,
             "schema_method": schema_method,
             "write_method": write_method,
             "readback_method": readback_method,
+            "plugin_name": plugin_name,
             "requested": len(writes),
             "applied": len(resolved),
             "write": write_result,
             "readback": readback,
+            "events": events,
+            "event_transport": "push_ws" if push_events else "pull_readback",
+            "event_count": len(events),
+            "push_events": push_events,
+            "push_event_count": len(push_events),
         }
     except Exception as exc:
         return {"ok": False, "error": f"soniq_rpc_error:{exc}"}
@@ -706,6 +857,130 @@ def _apply_patch_via_soniq_ws(contract: dict[str, Any], *, timeout_s: float = 4.
             ws.close()
         except Exception:
             pass
+
+
+def _load_preset_via_soniq_ws(
+    *,
+    track_name: str,
+    device_name: str,
+    preset_uri: str,
+    timeout_s: float = 4.0,
+) -> dict[str, Any]:
+    ws_url = _soniq_ws_url()
+    if not ws_url:
+        return {"ok": False, "error": "soniq_ws_url_not_configured"}
+    try:
+        import websocket  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "error": f"websocket_client_missing:{exc}"}
+
+    ws = websocket.create_connection(ws_url, timeout=timeout_s)
+    try:
+        common = {
+            "track": track_name,
+            "device": device_name,
+            "track_name": track_name,
+            "device_name": device_name,
+            "preset_uri": preset_uri,
+            "preset": preset_uri,
+            "path": preset_uri,
+        }
+        method, result = _rpc_try_methods(
+            ws,
+            ["load_vst_preset", "vst.loadPreset", "soniq.vst.loadPreset", "vst.load_preset"],
+            common,
+        )
+        sch_method, sch = _rpc_try_methods(
+            ws,
+            ["read_vst_schema", "vst.schema", "soniq.vst.schema"],
+            {"track": track_name, "device": device_name, "track_name": track_name, "device_name": device_name},
+        )
+        sch = sch if isinstance(sch, dict) else {}
+        return {
+            "ok": True,
+            "method": method,
+            "schema_method": sch_method,
+            "plugin_name": _stable_plugin_name(sch, device_name),
+            "schema_param_count": int(sch.get("paramCount") or sch.get("parameter_count") or 0),
+            "result": result,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"soniq_preset_rpc_error:{exc}"}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+
+def save_preset_hybrid(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    preset_uri: str,
+) -> dict[str, Any]:
+    """Save preset workflow. On WS path, persist a full parameter snapshot for deterministic A/B recall."""
+    _ = daw, session  # reserved for future live-mcp native save support
+    if _plugin_is_complex(device_name) and _soniq_ws_url():
+        return _save_preset_snapshot_via_soniq_ws(track_name=track_name, device_name=device_name, preset_uri=preset_uri)
+    return {"ok": False, "mode": "live_mcp", "error": "save_preset_not_supported_without_soniq_ws"}
+
+
+def load_preset_hybrid(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    preset_uri: str,
+) -> dict[str, Any]:
+    """Preset workflow: try Soniq WS native load; fallback to WS snapshot; then Live MCP loader."""
+    plugin_complex = _plugin_is_complex(device_name)
+    if plugin_complex and _soniq_ws_url():
+        ws_rep = _load_preset_via_soniq_ws(track_name=track_name, device_name=device_name, preset_uri=preset_uri)
+        if ws_rep.get("ok"):
+            return {"ok": True, "mode": "soniq_ws", "preset_uri": preset_uri, "report": ws_rep}
+        ws_snap = _load_preset_snapshot_via_soniq_ws(track_name=track_name, device_name=device_name, preset_uri=preset_uri)
+        if ws_snap.get("ok"):
+            return {"ok": True, "mode": "soniq_ws_snapshot", "preset_uri": preset_uri, "report": ws_snap}
+    try:
+        live_rep = load_preset(
+            daw,
+            session=session,
+            track_name=track_name,
+            device_name=device_name,
+            preset_uri=preset_uri,
+        )
+        return {"ok": bool(live_rep.get("ok", False)), "mode": "live_mcp", "preset_uri": preset_uri, "report": live_rep}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "mode": "live_mcp",
+            "preset_uri": preset_uri,
+            "report": {"ok": False, "error": f"live_preset_error:{exc}"},
+        }
+
+
+def load_wavetable_hybrid(
+    daw,
+    *,
+    session: SessionState,
+    track_name: str,
+    device_name: str,
+    wavetable_preset_uri: str,
+) -> dict[str, Any]:
+    """Wavetable workflow via preset swap (Soniq-style): load a preset carrying target wavetable."""
+    rep = load_preset_hybrid(
+        daw,
+        session=session,
+        track_name=track_name,
+        device_name=device_name,
+        preset_uri=wavetable_preset_uri,
+    )
+    rep["workflow"] = "wavetable_via_preset"
+    return rep
 
 
 def detect_surface_completeness(
