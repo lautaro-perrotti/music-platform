@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -561,9 +564,21 @@ _EXPECTED_PARAM_COUNTS = {
     # Soniq reference for Serum 2 full surface
     "serum 2": 2623,
     "serum2": 2623,
+    # Indicative references for other deep synths (kept conservative).
+    "pigments": 1200,
+    "vital": 500,
+    "massive": 400,
     # Serum 1 count can vary by version/build; keep a conservative floor.
     "serum": 1000,
 }
+
+_COMPLEX_PLUGIN_HINTS = (
+    "serum",
+    "pigments",
+    "vital",
+    "massive",
+    "phase plant",
+)
 
 
 def _expected_count_for_device(device_name: str) -> int | None:
@@ -572,6 +587,125 @@ def _expected_count_for_device(device_name: str) -> int | None:
         if key in n:
             return int(val)
     return None
+
+
+def _plugin_is_complex(device_name: str) -> bool:
+    n = _normalize_name(device_name)
+    return any(k in n for k in _COMPLEX_PLUGIN_HINTS)
+
+
+def _soniq_ws_url() -> str | None:
+    url = os.getenv("SONIQ_WS_URL", "").strip()
+    return url or None
+
+
+def _rpc_try_methods(ws, methods: list[str], params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    last_err: str | None = None
+    for method in methods:
+        rid = str(uuid.uuid4())
+        ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
+        raw = ws.recv()
+        data = json.loads(raw)
+        if data.get("id") != rid:
+            # tolerate out-of-order: keep trying this response if it is success-shaped
+            if "result" in data and not data.get("error"):
+                return method, data["result"]
+        if data.get("error"):
+            last_err = str(data.get("error"))
+            continue
+        return method, data.get("result") or {}
+    raise DawError(f"Soniq RPC failed for methods={methods}: {last_err or 'no compatible method'}")
+
+
+def _apply_patch_via_soniq_ws(contract: dict[str, Any], *, timeout_s: float = 4.0) -> dict[str, Any]:
+    """Optional Soniq-style path over WS JSON-RPC (when SONIQ_WS_URL is configured)."""
+    ws_url = _soniq_ws_url()
+    if not ws_url:
+        return {"ok": False, "error": "soniq_ws_url_not_configured"}
+    try:
+        import websocket  # type: ignore
+    except Exception as exc:  # pragma: no cover - environment dependent
+        return {"ok": False, "error": f"websocket_client_missing:{exc}"}
+
+    track = str(contract.get("track") or "")
+    device = str(contract.get("device") or "")
+    writes = list(contract.get("writes") or [])
+    if not track or not device or not writes:
+        return {"ok": False, "error": "invalid_contract"}
+
+    ws = websocket.create_connection(ws_url, timeout=timeout_s)
+    try:
+        common = {
+            "track": track,
+            "device": device,
+            "track_name": track,
+            "device_name": device,
+        }
+        schema_method, schema = _rpc_try_methods(
+            ws,
+            ["read_vst_schema", "vst.schema", "soniq.vst.schema"],
+            common,
+        )
+        params = list(schema.get("parameters") or [])
+        by_name = {_normalize_name(str(p.get("name") or "")): int(p.get("index", -1)) for p in params}
+
+        resolved: list[dict[str, Any]] = []
+        for w in writes:
+            idx = w.get("index")
+            if idx is None and w.get("name"):
+                idx = by_name.get(_normalize_name(str(w.get("name") or "")))
+            if idx is None or int(idx) < 0:
+                continue
+            resolved.append({
+                "index": int(idx),
+                "value": float(w.get("value", 0.0)),
+                "normalized": bool(w.get("normalized", True)),
+            })
+
+        resolved = coalesce_writes(resolved)
+        if not resolved:
+            return {"ok": False, "error": "no_resolved_writes", "schema_method": schema_method}
+
+        write_params = {
+            **common,
+            "writes": resolved,
+            "items": resolved,
+            "parameters": resolved,
+        }
+        write_method, write_result = _rpc_try_methods(
+            ws,
+            ["set_vst_params_batch", "vst.write", "soniq.vst.write"],
+            write_params,
+        )
+
+        read_params = {
+            **common,
+            "indices": [int(w["index"]) for w in resolved],
+            "params": [int(w["index"]) for w in resolved],
+        }
+        readback_method, readback = _rpc_try_methods(
+            ws,
+            ["read_vst_params", "vst.read", "soniq.vst.read"],
+            read_params,
+        )
+
+        return {
+            "ok": True,
+            "schema_method": schema_method,
+            "write_method": write_method,
+            "readback_method": readback_method,
+            "requested": len(writes),
+            "applied": len(resolved),
+            "write": write_result,
+            "readback": readback,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"soniq_rpc_error:{exc}"}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
 
 
 def detect_surface_completeness(
@@ -634,8 +768,11 @@ def apply_patch_contract_auto_mode(
 ) -> dict[str, Any]:
     """Auto-route patch contracts by detected device surface completeness.
 
-    - Serum2 + full surface -> full_surface mode (larger write budget, no MIDI filter).
-    - Otherwise -> constrained fallback to current generic contract flow.
+    Routing priority:
+    1) full_surface via Live MCP when completeness is high.
+    2) soniq_full_surface via optional WS bridge for complex plugins (Serum/Pigments/...)
+       when Live MCP surface is limited.
+    3) fallback_surface via conservative live wrapper.
     """
     track = str(contract.get("track") or "")
     device = str(contract.get("device") or "")
@@ -651,17 +788,11 @@ def apply_patch_contract_auto_mode(
     c_constraints = dict(c.get("constraints") or {})
 
     if det.get("is_full_surface"):
-        # In full surface mode we allow slightly wider batches while still safe.
         c_constraints.setdefault("max_writes", 24)
         c_constraints.setdefault("max_delta_norm", 0.5)
         c_constraints.setdefault("forbid_device_on_toggle", True)
         c["constraints"] = c_constraints
-        patch = apply_patch_contract(
-            daw,
-            session=session,
-            contract=c,
-            throttle_ms=throttle_ms,
-        )
+        patch = apply_patch_contract(daw, session=session, contract=c, throttle_ms=throttle_ms)
         return {
             "ok": bool(patch.get("ok", False)),
             "routing_mode": "full_surface",
@@ -669,20 +800,30 @@ def apply_patch_contract_auto_mode(
             "patch": patch,
         }
 
-    # Explicit fallback path (requested by user): same wrapper, conservative limits.
+    plugin_name = str(det.get("plugin") or device)
+    soniq_attempted = False
+    soniq_report: dict[str, Any] | None = None
+    if _plugin_is_complex(plugin_name) and _soniq_ws_url():
+        soniq_attempted = True
+        soniq_report = _apply_patch_via_soniq_ws(c)
+        if soniq_report.get("ok"):
+            return {
+                "ok": True,
+                "routing_mode": "soniq_full_surface",
+                "detector": det,
+                "soniq": soniq_report,
+            }
+
     c_constraints.setdefault("max_writes", 8)
     c_constraints.setdefault("max_delta_norm", 0.35)
     c_constraints.setdefault("forbid_device_on_toggle", True)
     c["constraints"] = c_constraints
-    patch = apply_patch_contract(
-        daw,
-        session=session,
-        contract=c,
-        throttle_ms=throttle_ms,
-    )
+    patch = apply_patch_contract(daw, session=session, contract=c, throttle_ms=throttle_ms)
     return {
         "ok": bool(patch.get("ok", False)),
         "routing_mode": "fallback_surface",
         "detector": det,
+        "soniq_attempted": soniq_attempted,
+        "soniq": soniq_report,
         "patch": patch,
     }
