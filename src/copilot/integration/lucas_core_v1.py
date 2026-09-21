@@ -333,6 +333,66 @@ def _single_action_plan(action: PlanAction, *, session: SessionState, plan_id: s
     )
 
 
+def execute_core_action_through_safe_write(
+    *,
+    action: PlanAction,
+    session: SessionState,
+    daw,
+    persist_dir: Path,
+    rollback_after: bool = False,
+) -> dict[str, Any]:
+    """Compile and execute one already-grounded Lucas action through Core.
+
+    The caller is responsible for resolving the action target against the
+    authoritative session. This helper is deliberately single-action so every
+    mix/master write has its own durable pre-state, readback, and rollback.
+    """
+    from copilot.runtime.production_compiler import ProductionCompiler
+    from copilot.runtime.safe_write import build_safe_write_executor
+
+    attach_tokens(session)
+    single = _single_action_plan(
+        action,
+        session=session,
+        plan_id=re.sub(r"[^A-Za-z0-9_.-]+", "_", f"core_{action.action_id}"),
+    )
+    compiled = ProductionCompiler().compile(single, session=session)
+    if compiled.status != "COMPILED" or compiled.intent is None:
+        return {
+            "status": "EXECUTION_DEFERRED",
+            "reason": "; ".join(compiled.reasons) or compiled.status,
+            "action_type": action.action_type.value,
+            "direct_lucas_writes": 0,
+            "write_authority": "SafeWriteExecutor",
+        }
+    executor = build_safe_write_executor(
+        daw,
+        journal_path=persist_dir / f"{action.action_id}_safe_write.jsonl",
+        persist_dir=persist_dir,
+    )
+    result = executor.run(compiled.intent)
+    if not result.ok:
+        return {
+            "status": "SAFE_WRITE_FAILED",
+            "reason": result.error or "SAFE_WRITE_FAILED",
+            "action_type": action.action_type.value,
+            "direct_lucas_writes": 0,
+            "write_authority": "SafeWriteExecutor",
+        }
+    rollback_error = ""
+    if rollback_after:
+        rollback_error = executor._rollback_applied(result, compiled.intent)
+    return {
+        "status": "SAFE_WRITE_COMPLETE" if not rollback_error else "SAFE_WRITE_ROLLBACK_FAILED",
+        "action_type": action.action_type.value,
+        "readbacks": [row.model_dump(mode="json") for row in result.readbacks],
+        "rollback_verified": rollback_after and not rollback_error,
+        "rollback_error": rollback_error,
+        "direct_lucas_writes": 0,
+        "write_authority": "SafeWriteExecutor",
+    }
+
+
 def execute_lucas_plan_through_core(
     *,
     plan: MusicPlan,
