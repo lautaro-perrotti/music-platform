@@ -1,7 +1,7 @@
 # LUCAS_BRANCH_INTEGRATION_AUDIT_V1
 
 Date: 2026-09-17
-Repository: `C:\Users\lsper\music-platform`
+Repository: `<repo-root>`
 
 ## Verdict
 
@@ -35,7 +35,7 @@ $ git log --all --format='%an <%ae>' | sort | uniq -c
 
 $ git fsck --lost-found            # no dangling commits
 $ git worktree list
-C:/Users/lsper/music-platform 3caa792 [main]
+<repo-root> 3caa792 [main]
 ```
 
 Findings:

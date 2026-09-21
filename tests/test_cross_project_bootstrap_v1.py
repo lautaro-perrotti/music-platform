@@ -13,6 +13,7 @@ from copilot.audio.cross_project_bootstrap_v1 import (
     plan_bootstrap,
 )
 from copilot.audio.terminal_state_v1 import unresolved_bootstrap_journals
+from copilot.importing.working_copy_manager_v1 import create_working_copy
 from copilot.schemas.session import (
     DeviceState,
     MixerState,
@@ -76,9 +77,25 @@ def _master(last: bool = True) -> dict:
     }
 
 
-def test_classify_project_kinds() -> None:
-    assert classify_project(r"C:\x\pista_copilot_eval.als")["kind"] == "development_working_copy"
-    assert classify_project(r"C:\x\pista.als")["refuse_original"] is True
+def _working_pair(tmp_path: Path) -> tuple[Path, Path]:
+    source_root = tmp_path / "Source Project"
+    source_root.mkdir()
+    source = source_root / "Source.als"
+    source.write_bytes(b"set")
+    copy = create_working_copy(
+        source_als=source,
+        project_root=source_root,
+        copy_scope="project_directory",
+        workspace=tmp_path / "CopilotProjects",
+    )
+    return source, Path(str(copy["working_als"]))
+
+
+def test_classify_project_kinds(tmp_path: Path, monkeypatch) -> None:
+    source, working = _working_pair(tmp_path)
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
+    assert classify_project(str(working))["kind"] == "development_working_copy"
+    assert classify_project(str(source))["refuse_original"] is True
     assert classify_project(r"C:\x\copilot_bootstrap_fixture.als")["kind"] == "bootstrap_fixture"
     assert classify_project(r"C:\other\song.als")["kind"] == "external"
     assert classify_project(r"C:\x\Sin título.als")["kind"] == "untitled_scratch"
@@ -222,8 +239,10 @@ def test_exact_infra_name_with_user_devices_is_collision() -> None:
     assert plan["reason"] == "USER_TRACK_NAME_COLLISION"
 
 
-def test_original_set_refused() -> None:
-    session = _session([], path=r"C:\Users\lsper\Desktop\pista Project\pista.als")
+def test_original_set_refused(tmp_path: Path, monkeypatch) -> None:
+    source, _working = _working_pair(tmp_path)
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
+    session = _session([], path=str(source))
     discovery = discover_topology(session=session, inventory=[], master_pos=_master(True))
     assert plan_bootstrap(discovery)["status"] == "BLOCKED"
 
@@ -293,10 +312,12 @@ def test_canonical_parked_hosts_are_no_changes() -> None:
     assert plan_bootstrap(discovery)["status"] == "NO_CHANGES_REQUIRED"
 
 
-def test_development_working_copy_does_not_reroute() -> None:
+def test_development_working_copy_does_not_reroute(tmp_path: Path, monkeypatch) -> None:
+    _source, working = _working_pair(tmp_path)
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
     session = _session(
         [_track(0, "Lead")],
-        path=r"C:\Users\lsper\Desktop\pista Project\pista_copilot_eval.als",
+        path=str(working),
     )
     discovery = discover_topology(session=session, inventory=[], master_pos=_master(True))
     plan = plan_bootstrap(discovery)

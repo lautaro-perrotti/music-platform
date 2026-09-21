@@ -190,7 +190,7 @@ def run_live2(daw: AbletonTcpAdapter, evidence: Path) -> dict[str, Any]:
     report["limitations"] = [
         "MASTER only",
         "one Max Audio Effect: Copilot Audio Tap",
-        "staging file D:/MusicCopilot/captures/_next.wav renamed after stop",
+        "staging WAV renamed after stop",
         "UDP 19877 used as Rec fallback if Live parameter set fails",
         "no multi-track, stems, bounce, or permanent stream",
     ]

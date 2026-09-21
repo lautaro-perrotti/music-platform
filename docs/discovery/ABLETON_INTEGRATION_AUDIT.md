@@ -4,7 +4,7 @@
 **Environment:** Windows 10, Python 3.12.10, uv 0.12.7, no Ableton Live executable found  
 **Ableton Live verification status:** `BLOCKED_BY_ENVIRONMENT`
 
-Clones inspected at `D:\music-platform-audit\`.
+Clones inspected at `<audit-root>`.
 
 ---
 
@@ -25,7 +25,7 @@ Do not expose raw LOM, `eval`, or arbitrary Python to the agent.
 ## 1. jpoindexter/ableton-mcp
 
 **Repository:** https://github.com/jpoindexter/ableton-mcp  
-**Cloned:** `D:\music-platform-audit\ableton-mcp` (shallow, 2026-09-13)  
+**Cloned:** `<audit-root>/ableton-mcp` (shallow, 2026-09-13)
 **License:** MIT (`LICENSE` present)  
 **Created:** 2026-01-27  
 **Claimed:** "200+ tools"  
@@ -62,7 +62,7 @@ Remote Script binds `HOST` default `localhost`, port `9877`. No `eval` / `exec` 
 
 ### Real tool counts (executed, not README)
 
-Counted from source with `D:\music-platform-audit\count_tools.py`:
+Counted from source with `<audit-root>/count_tools.py`:
 
 - **MCP tools (`@mcp.tool` in `MCP_Server/server.py`): 128**
 - **Remote Script command types: 257**
@@ -144,7 +144,7 @@ get_rack_chains, select_rack_chain, get_groove_pool, apply_groove, commit_groove
 ## 2. ideoforms/AbletonOSC
 
 **Repository:** https://github.com/ideoforms/AbletonOSC  
-**Cloned:** `D:\music-platform-audit\AbletonOSC`  
+**Cloned:** `<audit-root>/AbletonOSC`
 **License:** MIT  
 **Last upstream push listed:** 2025-11-19  
 **Status:** `PARTIALLY_VERIFIED` (code + in-repo Live tests; Live execution blocked)

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
-import subprocess
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from copilot.platform.modals import modal_driver_for_system
 
 MILESTONE = "CRASH_RECOVERY_V1"
 KEEP_ROOT = Path.home() / "CopilotProjects" / "_crash_recovery_keep"
@@ -23,7 +24,6 @@ FATAL_MARKERS = (
     "report a crash",
     "error grave",
     "se cerrara despues",
-    "se cerrará después",
 )
 RECOVER_MARKERS = (
     "cerrado inesperadamente",
@@ -33,7 +33,7 @@ RECOVER_MARKERS = (
 )
 ACCEPT_BUTTONS = frozenset({"Aceptar", "OK", "Ok"})
 DISCARD_BUTTONS = frozenset({"No"})
-RECOVER_BUTTONS = frozenset({"Sí", "Si", "Yes"})
+RECOVER_BUTTONS = frozenset({"S\u00ed", "Si", "Yes"})
 
 
 def recovered_set_name(dialog_text: str) -> str:
@@ -44,13 +44,13 @@ def recovered_set_name(dialog_text: str) -> str:
 
 
 def recovery_action(dialog_text: str, expected_als: str | Path) -> str:
-    """recover = same set we launched. discard = different set. unknown = no name."""
+    """Recover only the set we launched; discard a different or unnamed set."""
     name = recovered_set_name(dialog_text)
     if not name:
         return "unknown"
     expected = Path(expected_als)
-    stem = Path(name).stem.lower()
-    if stem == expected.stem.lower() or name.lower() == expected.name.lower():
+    stem = Path(name).stem.casefold()
+    if stem == expected.stem.casefold() or name.casefold() == expected.name.casefold():
         return "recover"
     return "discard"
 
@@ -70,7 +70,7 @@ def recover_click_target(
     *,
     recover_policy: str = "match_expected",
 ) -> str:
-    """accept | discard | recover | ''."""
+    """Return only a registered action: accept, discard, recover, or empty."""
     kind = classify_live_dialog(dialog_text)
     if kind == "FATAL_ERROR":
         return "accept"
@@ -122,16 +122,7 @@ def dismiss_live_blocking_dialogs(
     *,
     recover_policy: str = "open_command_line",
 ) -> dict[str, Any]:
-    """Dismiss Live startup dialogs without walking the main Live UI tree.
-
-    Ableton draws these as custom Panes (Ableton Live Window Class), not
-    native #32770 message boxes. Query by HWND + FindFirst(Name, Button).
-
-    recover_policy:
-      open_command_line — always No on recover-work (launcher opened a specific .als
-        after quarantining Crash/). Clicking Sí after a force-kill can AV Live.
-      match_expected — recover only when the dialog names the same set.
-    """
+    """Handle only known Live startup dialogs through the platform driver."""
     hwnds = _ableton_live_hwnds()
     if not hwnds:
         return {"status": "NO_DIALOG", "milestone": MILESTONE, "kind": "NONE"}
@@ -165,16 +156,8 @@ def dismiss_live_blocking_dialogs(
 
 
 def _fold(value: str) -> str:
-    return (
-        (value or "")
-        .casefold()
-        .replace("á", "a")
-        .replace("é", "e")
-        .replace("í", "i")
-        .replace("ó", "o")
-        .replace("ú", "u")
-        .replace("ü", "u")
-    )
+    normalized = unicodedata.normalize("NFKD", value or "").casefold()
+    return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
 def _buttons_for_target(target: str) -> set[str]:
@@ -188,56 +171,11 @@ def _buttons_for_target(target: str) -> set[str]:
 
 
 def _ableton_live_hwnds() -> list[int]:
-    import ctypes
-    from ctypes import POINTER, WINFUNCTYPE, byref, wintypes
-
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    WNDENUMPROC = WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    GetWindowThreadProcessId = user32.GetWindowThreadProcessId
-    GetWindowThreadProcessId.argtypes = [wintypes.HWND, POINTER(wintypes.DWORD)]
-    IsWindowVisible = user32.IsWindowVisible
-    QueryFullProcessImageNameW = kernel32.QueryFullProcessImageNameW
-    QueryFullProcessImageNameW.argtypes = [
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.LPWSTR,
-        POINTER(wintypes.DWORD),
-    ]
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    hwnds: list[int] = []
-
-    def _path(pid: int) -> str:
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return ""
-        try:
-            buf = ctypes.create_unicode_buffer(32768)
-            size = wintypes.DWORD(32768)
-            if QueryFullProcessImageNameW(handle, 0, buf, byref(size)):
-                return buf.value
-            return ""
-        finally:
-            kernel32.CloseHandle(handle)
-
-    def _enum(hwnd: int, _lparam: int) -> bool:
-        if not IsWindowVisible(hwnd):
-            return True
-        pid = wintypes.DWORD()
-        GetWindowThreadProcessId(hwnd, byref(pid))
-        path = _path(int(pid.value))
-        if "Ableton Live" in path:
-            hwnds.append(int(hwnd))
-        return True
-
-    callback = WNDENUMPROC(_enum)
-    user32.EnumWindows(callback, 0)
-    return hwnds
+    return modal_driver_for_system().window_handles()
 
 
 def _find_dialog_buttons(hwnds: list[int]) -> dict[str, Any]:
-    script = _uia_fromhandle_script(hwnds, click=())
-    payload = _run_uia_script(script)
+    payload = modal_driver_for_system().find_buttons(hwnds)
     buttons = [str(item) for item in (payload.get("buttons") or [])]
     names = {_fold(item) for item in buttons}
     kind = "NONE"
@@ -249,69 +187,4 @@ def _find_dialog_buttons(hwnds: list[int]) -> dict[str, Any]:
 
 
 def _invoke_named_button_on_hwnds(hwnds: list[int], expected: set[str]) -> str | None:
-    if not hwnds or not expected:
-        return None
-    payload = _run_uia_script(_uia_fromhandle_script(hwnds, click=tuple(sorted(expected))))
-    clicked = payload.get("clicked")
-    return str(clicked) if clicked else None
-
-
-def _uia_fromhandle_script(hwnds: list[int], *, click: tuple[str, ...]) -> str:
-    hwnd_list = ",".join(str(int(item)) for item in hwnds)
-    want = ", ".join("'" + item.replace("'", "''") + "'" for item in click)
-    click_block = ""
-    if click:
-        click_block = (
-            f"$want = @({want})\n"
-            "        if ($btn -and ($want -contains $btn.Current.Name)) {\n"
-            "          $inv = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)\n"
-            "          $inv.Invoke()\n"
-            "          $clicked = $btn.Current.Name\n"
-            "        }\n"
-        )
-    script = f"""
-Add-Type -AssemblyName UIAutomationClient
-$hwnds = @({hwnd_list})
-$btnCond = New-Object System.Windows.Automation.PropertyCondition(
-  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-  [System.Windows.Automation.ControlType]::Button)
-$names = @('No','Sí','Si','Yes','Aceptar','OK','Ok')
-$found = @()
-$clicked = ''
-foreach ($h in $hwnds) {{
-  try {{
-    $el = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h)
-  }} catch {{ continue }}
-  if (-not $el) {{ continue }}
-  foreach ($n in $names) {{
-    $nameCond = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::NameProperty, $n)
-    $and = New-Object System.Windows.Automation.AndCondition($nameCond, $btnCond)
-    $btn = $el.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $and)
-    if (-not $btn) {{ continue }}
-    $found += [string]$btn.Current.Name
-CLICK_PLACEHOLDER
-  }}
-}}
-$uniq = @($found | Select-Object -Unique)
-$result = @{{ buttons = $uniq; clicked = $clicked; text = ($uniq -join ' ') }}
-$result | ConvertTo-Json -Compress
-"""
-    return script.replace("CLICK_PLACEHOLDER", click_block)
-
-
-def _run_uia_script(script: str) -> dict[str, Any]:
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    raw = (proc.stdout or "").strip()
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"parse_error": raw[:400]}
-    return parsed if isinstance(parsed, dict) else {}
+    return modal_driver_for_system().invoke_button(hwnds, expected)

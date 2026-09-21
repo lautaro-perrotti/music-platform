@@ -116,7 +116,7 @@ def refuse_known_lab(identity: dict[str, Any], policy: dict[str, Any]) -> dict[s
             "reason": "NOT_AN_UNSEEN_REAL_SONG",
             "detail": (
                 "Open a duplicated working copy of a real song the system has never seen. "
-                "pista.als, pista_copilot_eval.als, and copilot_bootstrap_fixture.als are not this test."
+                "Development and plumbing fixtures are not this test."
             ),
             "project": identity,
             "working_copy_policy": policy,

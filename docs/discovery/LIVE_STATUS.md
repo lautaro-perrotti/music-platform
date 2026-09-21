@@ -15,9 +15,9 @@ Searched, without unbounded filesystem walks:
 
 - Uninstall registry (HKLM 64/32, HKCU)
 - `SOFTWARE\Ableton` HKLM/HKCU
-- `C:\Program Files\Ableton`, `C:\Program Files (x86)\Ableton`, `C:\ProgramData\Ableton`
-- `%LOCALAPPDATA%\Programs\Ableton`
-- `D:\Ableton`, `D:\Program Files\Ableton`
+- platform-native Ableton installation candidates discovered from the host
+  environment (Windows registry/known roots, macOS application bundles, or
+  Linux PATH/system locations)
 - `%APPDATA%\Ableton` prefs / User Remote Scripts
 - Start Menu `.lnk` whose name contains Ableton (ignored Windows LiveCaptions)
 - Running `Ableton Live*` processes

@@ -1,19 +1,40 @@
+from pathlib import Path
+
 from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
 from copilot.audio.capability_matrix_v1 import capability_matrix
 from copilot.audio.m4l_control_contract_v1 import FROZEN, control_contract
 from copilot.cli import CANONICAL_COMMANDS, HELP_EPILOG, main
+from copilot.importing.working_copy_manager_v1 import create_working_copy
 
 
-def test_working_copy_refuses_original() -> None:
-    policy = evaluate_working_copy(r"C:\x\pista.als")
+def _working_pair(tmp_path: Path) -> tuple[Path, Path]:
+    source_root = tmp_path / "Source"
+    source_root.mkdir()
+    source = source_root / "Source.als"
+    source.write_bytes(b"set")
+    copy = create_working_copy(
+        source_als=source,
+        project_root=source_root,
+        copy_scope="project_directory",
+        workspace=tmp_path / "CopilotProjects",
+    )
+    return source, Path(str(copy["working_als"]))
+
+
+def test_working_copy_refuses_original(tmp_path: Path, monkeypatch) -> None:
+    source, _working = _working_pair(tmp_path)
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
+    policy = evaluate_working_copy(str(source))
     assert policy["operate"] is False
     assert policy["refuse_original"] is True
     assert policy["autonomous_writes_ok"] is False
     assert policy["reason"] == "ORIGINAL_SET_OPEN"
 
 
-def test_working_copy_development_allows_autonomous() -> None:
-    policy = evaluate_working_copy(r"C:\x\pista_copilot_eval.als")
+def test_working_copy_development_allows_autonomous(tmp_path: Path, monkeypatch) -> None:
+    _source, working = _working_pair(tmp_path)
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
+    policy = evaluate_working_copy(str(working))
     assert policy["operate"] is True
     assert policy["autonomous_writes_ok"] is True
     assert policy["musical_holdout"] is False
@@ -33,10 +54,11 @@ def test_working_copy_fixture_is_plumbing_not_music() -> None:
 def test_working_copy_external_is_holdout_read_only() -> None:
     policy = evaluate_working_copy(r"C:\songs\new_song.als")
     assert policy["kind"] == "external"
-    assert policy["operate"] is True
+    assert policy["operate"] is False
     assert policy["read_only_ok"] is True
     assert policy["autonomous_writes_ok"] is False
     assert policy["musical_holdout"] is True
+    assert policy["reason"] == "WORKING_COPY_REQUIRED"
     assert policy["OPERATOR_MUST_DUPLICATE"] is True
 
 

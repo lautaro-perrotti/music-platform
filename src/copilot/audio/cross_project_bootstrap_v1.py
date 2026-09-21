@@ -7,6 +7,7 @@ taken over. Second complete run returns NO_CHANGES_REQUIRED.
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -30,7 +31,7 @@ from copilot.audio.live_capture import (
     set_tap_recording,
     set_tap_slot,
 )
-from copilot.audio.session_diagnose import ORIGINAL_SET_SUFFIX, WORKING_COPY_SUFFIX
+from copilot.importing.working_copy_manager_v1 import is_copilot_source, is_copilot_working_copy
 from copilot.audio.tap_trust import duplicate_slots, inventory_taps, routing_claim
 from copilot.audio.terminal_state_v1 import (
     BOOTSTRAP_JOURNAL_DIR,
@@ -67,11 +68,12 @@ def retain_tokens(session: SessionState) -> SessionState:
 def classify_project(project_path: str | None, project_name: str | None = None) -> dict[str, Any]:
     path = _path_norm(project_path or "")
     name = (project_name or "").lower()
-    blob = f"{path} {name}".replace("í", "i")
+    blob = unicodedata.normalize("NFKD", f"{path} {name}")
+    blob = "".join(ch for ch in blob if not unicodedata.combining(ch))
     kind = "unknown"
-    if path.endswith(WORKING_COPY_SUFFIX) or name.endswith("pista_copilot_eval"):
+    if is_copilot_working_copy(project_path or ""):
         kind = "development_working_copy"
-    elif path.endswith(ORIGINAL_SET_SUFFIX) and not path.endswith(WORKING_COPY_SUFFIX):
+    elif is_copilot_source(project_path or ""):
         kind = "development_original"
     elif path.endswith(FIXTURE_SUFFIX.lower()) or "copilot_bootstrap_fixture" in blob:
         kind = "bootstrap_fixture"
@@ -288,7 +290,7 @@ def missing_topology(discovery: dict[str, Any]) -> list[str]:
     if discovery.get("transport_playing"):
         missing.append("transport is playing; stop Live before bootstrap")
     if (discovery.get("project") or {}).get("refuse_original"):
-        missing.append("ORIGINAL_SET_OPEN: refuse bootstrap on pista.als")
+        missing.append("ORIGINAL_SET_OPEN: refuse bootstrap on the protected source project")
     if discovery.get("infra_name_collisions"):
         missing.append(
             "USER_TRACK_NAME_COLLISION: "

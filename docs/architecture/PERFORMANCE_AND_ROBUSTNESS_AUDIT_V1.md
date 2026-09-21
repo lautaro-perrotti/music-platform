@@ -1,7 +1,7 @@
 # PERFORMANCE_AND_ROBUSTNESS_AUDIT_V1
 
 Date: 2026-09-17
-Scope: `C:\Users\lsper\music-platform` @ `3caa792` (branch `main`)
+Scope: `<repo-root>` @ `3caa792` (branch `main`)
 Method: source tracing plus direct measurement against the live Ableton session
 on `127.0.0.1:9877`, plus 85 reasoning audits and recorded RPC counters already
 present in `logs/`.

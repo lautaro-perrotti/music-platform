@@ -82,7 +82,7 @@ KEEP / ADJUST / ROLLBACK is Core policy, not a model claim.
 | Grounded reasoning pipeline | OBSERVE → REASON → DIAGNOSE → CANDIDATE | `FIXTURE_VERIFIED` | `src/copilot/reasoning/pipeline.py`; fixtures A–F | LLM never writes Ableton; Core validates before ACCEPTED | Human labels are schema-only; not a unique musical ground truth |
 | Cache / audio_revision | reuse assets | `FIXTURE_VERIFIED` | `tests/test_state_trust.py` keyed by project + scoped audible token; Kick volume does not invalidate Vocal isolate | Mock + contract in `docs/core/STATE_TRUST.md` | Live reuse of a real WAV not re-run this slice; incorrect reuse fail-closed |
 | Version handshake | Live/Max/Tap/Core | `LIMITED` | TapProtocol=3 loaded; Remote Script batch `get_capture_topology` live after restart | This set | Max version still unread |
-| Project identity | Live set path token | `FIXTURE_VERIFIED` | `logs/live_state.json`: `live_set_path` `Sin título.als`; mismatch fail-closed in mock | Live 12.4.5 this lab set | Untitled sets still have a path; structural fallback is LIMITED |
+| Project identity | Live set path token | `FIXTURE_VERIFIED` | `logs/live_state.json`: the untitled fixture path; mismatch fail-closed in mock | Live 12.4.5 this lab set | Untitled sets still have a path; structural fallback is LIMITED |
 | Canonical state tokens | PROJECT / AUDIBLE / TARGET SHA-256 | `FIXTURE_VERIFIED` | `tests/test_state_trust.py`; Live smoke tokens on topology snapshot | `state-canon-1` | Integer revision is in-process only |
 | Reconnect identity | PersistentObjectRef without runtime id | `FIXTURE_VERIFIED` | `logs/live_state.json` RECONNECT Kick+probe RESOLVED; incarnation changed | Same Live Set, Core disconnect/connect | Control Surface reload not separately smoked |
 | Stale plan rejection | token compare, no write | `FIXTURE_VERIFIED` | mock volume/reorder/unrelated; Live volume `STALE_PLAN` | PlanEnvelope | No MusicPlan autonomy |
@@ -217,8 +217,8 @@ Next: RPC_OPTIMIZATION_V2 (Ableton round trips) and ROADMAP_100.
 grounded real-model reasoning, human listening comparison. Still no writes.
 
 Pending: **REAL SESSION DIAGNOSIS — PHASE 1** on a real song.
-Live currently has the lab set (`Sin título.als`). Real candidate on disk:
-`C:\Users\lsper\Desktop\pista Project\pista.als`. Do not capture the lab set
+Live currently has the development lab set. A real candidate must be supplied
+as a duplicated working copy. Do not capture the lab set
 as real music. Inspect: `copilot session-diagnose`. Still no writes.
 
 Only after real-session diagnosis survives:

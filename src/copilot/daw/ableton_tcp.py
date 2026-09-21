@@ -961,7 +961,7 @@ class AbletonTcpAdapter(DawAdapter):
         self, track_index: int, item_uri: str, clip_index: int | None = None
     ) -> dict[str, Any]:
         # The live bridge loads a BROWSER item, not a file path. Resolve local
-        # sample paths (e.g. /Volumes/Lucas/Samples/.../kick.wav) to a browser URI
+        # local sample paths to a browser URI
         # by searching the filename stem across all categories (incl. Places).
         # Non-query URIs are library-relative sample paths: navigate the user Places
         # by path (O(depth), fast) instead of a full recursive browser search.

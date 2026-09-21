@@ -131,13 +131,10 @@ def _wav_stats(path: Path) -> dict[str, Any]:
 
 
 def _als_path_from_preflight(preflight: dict[str, Any]) -> Path:
+    from copilot.importing.working_copy_manager_v1 import find_working_copy
+
     als_path = Path(str(preflight.get("live_set_path") or preflight.get("project_path") or ""))
-    if als_path.is_dir():
-        candidate = als_path / "pista_copilot_eval.als"
-        als_path = candidate if candidate.is_file() else Path(WORKING_COPY_CANDIDATE)
-    elif not als_path.is_file():
-        als_path = Path(WORKING_COPY_CANDIDATE)
-    return als_path
+    return find_working_copy(als_path) or find_working_copy(WORKING_COPY_CANDIDATE) or Path(WORKING_COPY_CANDIDATE)
 
 
 def inventory_active_sources(

@@ -246,7 +246,9 @@ def run_alignment_certification(
         raise AudioCaptureError("TARGET_AMBIGUOUS", "need Kick and Bass to restore routing")
     tempo = float(context.tempo or 120.0)
     sr = int(context.sample_rate or 44100)
-    wav_path = Path(r"D:\MusicCopilot\captures") / "_align_click.wav"
+    from copilot.platform.system import default_capture_dir
+
+    wav_path = default_capture_dir() / "_align_click.wav"
     report["click_wav"] = write_click_wav(wav_path, sr=sr, tempo=tempo)
 
     existing = context.session.track_by_name(CLICK_TRACK)

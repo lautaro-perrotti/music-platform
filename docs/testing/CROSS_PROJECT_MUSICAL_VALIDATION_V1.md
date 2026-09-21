@@ -5,8 +5,8 @@ until a real unseen song says they are needed.
 
 Status today: **WAITING_FOR_EXTERNAL_SONG**.
 
-There is no second real `.als` in this lab besides `pista` / its working copy /
-the bootstrap fixture. `Sin título.als` is the same 67 KB fixture, not a holdout.
+There is no second real `.als` in this lab besides the development fixture / its working copy /
+the bootstrap fixture. The untitled set is the same fixture, not a holdout.
 
 ## First pass (read-only)
 

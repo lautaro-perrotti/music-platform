@@ -19,8 +19,9 @@ def evaluate_working_copy(
 ) -> dict[str, Any]:
     identity = classify_project(project_path, project_name)
     kind = identity["kind"]
-    operate = not identity["refuse_original"]
-    read_only_ok = operate and kind in {
+    controlled = kind in {"development_working_copy", "bootstrap_fixture"}
+    operate = controlled and not identity["refuse_original"]
+    read_only_ok = kind in {
         "development_working_copy",
         "bootstrap_fixture",
         "external",
@@ -42,7 +43,7 @@ def evaluate_working_copy(
     elif kind == "bootstrap_fixture":
         reason = "FIXTURE_PLUMBING_ONLY"
     elif kind == "external":
-        reason = "EXTERNAL_WORKING_COPY"
+        reason = "WORKING_COPY_REQUIRED"
     elif kind == "development_working_copy":
         reason = "DEVELOPMENT_WORKING_COPY"
     return {

@@ -1758,6 +1758,7 @@ def _session_arrangement_start(evidence: Path, logger) -> int:
     from copilot.audio.arrangement_activity import inspect_tempo_contract, map_lowend_candidates
     from copilot.audio.arrangement_seek import TRANSPORT_PRIMITIVE_VERSION, run_atomic_transport_trust
     from copilot.audio.session_diagnose import WORKING_COPY_CANDIDATE
+    from copilot.importing.working_copy_manager_v1 import find_working_copy
     from copilot.daw.ableton_tcp import AbletonTcpAdapter
 
     adapter = AbletonTcpAdapter()
@@ -1771,11 +1772,7 @@ def _session_arrangement_start(evidence: Path, logger) -> int:
                 als = Path(session.project_path)
         except DawError:
             pass
-        if als.is_dir():
-            candidate = als / "pista_copilot_eval.als"
-            als = candidate if candidate.is_file() else Path(WORKING_COPY_CANDIDATE)
-        elif not als.is_file():
-            als = Path(WORKING_COPY_CANDIDATE)
+        als = find_working_copy(als) or find_working_copy(WORKING_COPY_CANDIDATE) or Path(WORKING_COPY_CANDIDATE)
         tempo = inspect_tempo_contract(als)
         payload = {
             "phase": "ARRANGEMENT PLAYBACK AT QN — PRODUCTION FIX",
@@ -2761,7 +2758,9 @@ def _doctor(evidence: Path, logger) -> int:
             except Exception:
                 pass
     logger.info("doctor status=%s session=%s", report.get("status"), probe.status)
-    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    # Console encodings on Windows are not guaranteed to represent all Live
+    # labels; JSON escaping keeps the machine-readable CLI path portable.
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
     return 0 if report.get("status") == "READY" else 2
 
 
@@ -2805,7 +2804,7 @@ def _track_build(evidence: Path, logger, argv: list[str], live: bool = False, le
     else:
         from copilot.daw.mock import MockAbletonAdapter
         daw = MockAbletonAdapter(); daw.connect()
-        daw.session_path = r"D:\sets\trackbuild_lab.als"
+        daw.session_path = "trackbuild_lab.als"
         daw.session_name = "trackbuild_lab"
     session = daw.snapshot()
     attach_tokens(session)
@@ -2883,7 +2882,7 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     else:
         from copilot.daw.mock import MockAbletonAdapter
         daw = MockAbletonAdapter(); daw.connect()
-        daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
+        daw.session_path = "vibe_lab.als"; daw.session_name = "vibe_lab"
     session = daw.snapshot(); attach_tokens(session)
 
     plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)

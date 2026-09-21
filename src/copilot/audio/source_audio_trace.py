@@ -520,7 +520,9 @@ def run_source_audio_trace(
     pos = daw.get_playback_position()
     tempo = float(pos.get("tempo") or preflight.get("tempo") or 167.0)
 
-    dest_root = Path(r"D:\MusicCopilot\captures")
+    from copilot.platform.system import default_capture_dir
+
+    dest_root = default_capture_dir()
     if not dest_root.is_dir():
         dest_root = Path("captures")
     dest_root.mkdir(parents=True, exist_ok=True)

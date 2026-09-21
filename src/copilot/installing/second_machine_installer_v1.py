@@ -1,11 +1,10 @@
-"""SECOND_MACHINE_INSTALLER_V1 — Windows local runtime. No secrets. No musical writes."""
+"""SECOND_MACHINE_INSTALLER_V1 — portable local runtime. No secrets or musical writes."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import platform
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +29,13 @@ from copilot.importing.m4l_runtime_v1 import (
     runtime_paths,
 )
 from copilot.reasoning.provider import configured_http_provider
+from copilot.platform.system import control_surface_steps as platform_control_surface_steps
+from copilot.platform.system import (
+    host_platform_info,
+    host_python_version,
+    user_environment_value,
+    windows_version,
+)
 
 MILESTONE = "SECOND_MACHINE_INSTALLER_V1"
 ARTIFACT = "second_machine_installer_v1.json"
@@ -60,7 +66,7 @@ CONTROL_SURFACE_STEPS = [
 
 
 def control_surface_steps() -> list[str]:
-    return list(CONTROL_SURFACE_STEPS if os.name == "nt" else CONTROL_SURFACE_STEPS_UNIX)
+    return platform_control_surface_steps()
 
 
 def repo_root() -> Path:
@@ -74,7 +80,7 @@ def _detect() -> Any:
 
 def discover_environment(*, repo: Path | None = None) -> dict[str, Any]:
     root = Path(repo or repo_root())
-    win = sys.getwindowsversion() if os.name == "nt" else None
+    win = windows_version()
     detection = _detect()
     library = discover_user_library(detection.prefs_root)
     documents = Path.home() / "Documents"
@@ -98,20 +104,21 @@ def discover_environment(*, repo: Path | None = None) -> dict[str, Any]:
         writable["remote_scripts_parent"] = os.access(
             parent if parent.exists() else parent.parent, os.W_OK
         )
+    host = host_platform_info()
     return {
         "windows_version": {
-            "platform": platform.platform(),
-            "release": platform.release(),
-            "version": platform.version(),
-            "major": None if win is None else win.major,
-            "minor": None if win is None else win.minor,
-            "build": None if win is None else win.build,
+            "platform": host["platform"],
+            "release": host["release"],
+            "version": host["version"],
+            "major": win["major"],
+            "minor": win["minor"],
+            "build": win["build"],
         },
-        "architecture": platform.machine(),
-        "system": platform.system(),
+        "architecture": host["architecture"],
+        "system": host["system"],
         "python": {
             "executable": sys.executable,
-            "version": platform.python_version(),
+            "version": host_python_version(),
             "version_info": list(sys.version_info[:3]),
             "compatible": sys.version_info[:2] >= SUPPORTED_PYTHON,
             "supported_target": "3.12",
@@ -322,7 +329,7 @@ def run_installer(
         "ts": now_iso(),
         "status": status,
         MILESTONE: status,
-        "WINDOWS DISCOVERY": "VERIFIED",
+        "PLATFORM DISCOVERY": "VERIFIED",
         "PYTHON": python_report.get("status"),
         "VENV": python_report.get("venv_status") or python_report.get("status"),
         "DEPENDENCIES": deps.get("status"),
@@ -491,7 +498,7 @@ def _prefs_mention_abletonmcp(prefs_root: str | None) -> bool:
 
 
 def _key_configured(name: str, repo: Path) -> bool:
-    if os.environ.get(name):
+    if user_environment_value(name):
         return True
     local = repo / LOCAL_ENV_REL
     if local.is_file():
@@ -502,16 +509,7 @@ def _key_configured(name: str, repo: Path) -> bool:
             key, value = stripped.split("=", 1)
             if key.strip() == name and value.strip():
                 return True
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as hive:
-            value, _ = winreg.QueryValueEx(hive, name)
-        return bool(str(value).strip())
-    except OSError:
-        return False
+    return False
 
 
 def _remote_script_on_disk(env: dict[str, Any]) -> dict[str, Any]:

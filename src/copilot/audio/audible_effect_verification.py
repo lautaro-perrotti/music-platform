@@ -127,7 +127,9 @@ def _relative_db(after_rms: float, before_rms: float) -> float:
 
 
 def _capture_dest_root() -> Path:
-    dest = Path(r"D:\MusicCopilot\captures")
+    from copilot.platform.system import default_capture_dir
+
+    dest = default_capture_dir()
     if not dest.is_dir():
         dest = Path("captures")
     dest.mkdir(parents=True, exist_ok=True)

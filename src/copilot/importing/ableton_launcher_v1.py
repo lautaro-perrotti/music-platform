@@ -8,29 +8,24 @@ import time
 from pathlib import Path
 from typing import Any
 
-from copilot.daw.ableton_tcp import AbletonTcpAdapter
+from copilot.daw.ableton_tcp import AbletonTcpAdapter, DEFAULT_HOST, DEFAULT_PORT
 from copilot.daw.detect import detect_ableton
 from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready, wait_for_session
 from copilot.importing.crash_recovery_v1 import (
     dismiss_live_blocking_dialogs,
     preserve_crash_recovery,
 )
+from copilot.platform.ableton import driver_for_system
 
 MILESTONE = "ABLETON_LAUNCHER_V1"
 CRASH_CFG_REL = Path("Preferences") / "CrashDetection.cfg"
-LIVE_IMAGE_NAMES = (
-    "Ableton Live 12 Trial.exe",
-    "Ableton Live 12.exe",
-    "Ableton Live 11 Trial.exe",
-    "Ableton Live 11.exe",
-)
-
-
 def launch_working_copy(
     working_als: str | Path,
     *,
     deadline_s: float = 12 * 60,
     force: bool = False,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
 ) -> dict[str, Any]:
     als = Path(working_als)
     if not als.is_file():
@@ -39,7 +34,7 @@ def launch_working_copy(
             "status": "WORKING_ALS_MISSING",
             "working_als": str(als),
         }
-    detection = detect_ableton()
+    detection = detect_ableton(port)
     exe = detection.exe_path
     if not exe:
         return {
@@ -48,13 +43,13 @@ def launch_working_copy(
             "working_als": str(als),
         }
 
-    already = probe_session_ready()
+    already = probe_session_ready(host, port)
     if (
         not force
         and already.status == SESSION_READY
         and (paths_match(already.project_path, als) or names_match(already.project_name, als))
     ):
-        if _snapshot_ok():
+        if _snapshot_ok(host, port):
             return {
                 "milestone": MILESTONE,
                 "status": SESSION_READY,
@@ -67,7 +62,7 @@ def launch_working_copy(
             }
 
     crash = preserve_crash_recovery(detection.prefs_root, quarantine=False)
-    _stop_live()
+    _stop_live(exe)
     crash_after = preserve_crash_recovery(detection.prefs_root, quarantine=True)
     _clear_crash_flag(detection.prefs_root)
     time.sleep(1.5)
@@ -101,6 +96,8 @@ def launch_working_copy(
             als,
             exe,
             detection.prefs_root,
+            host,
+            port,
             deadline_s=deadline_s,
             dialog_events=dialog_events,
         )
@@ -159,11 +156,11 @@ def names_match(opened_name: str | None, expected: Path) -> bool:
 
 
 def _norm_path(value: str | Path) -> str:
-    return str(value).replace("/", "\\").lower().strip()
+    return str(Path(str(value))).replace("\\", "/").rstrip("/").casefold().strip()
 
 
-def _snapshot_ok() -> bool:
-    daw = AbletonTcpAdapter()
+def _snapshot_ok(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
+    daw = AbletonTcpAdapter(host, port)
     try:
         daw.connect()
         daw.snapshot(include_notes=False)
@@ -175,18 +172,16 @@ def _snapshot_ok() -> bool:
 
 
 def _start_live(exe: str, als: Path) -> subprocess.Popen[bytes]:
-    return subprocess.Popen(
-        [exe, str(als)],
-        cwd=str(als.parent),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # Platform process semantics belong to the driver, not the launcher.
+    return driver_for_system().launch(exe, als)
 
 
 def _wait_ready_allowing_one_relaunch(
     als: Path,
     exe: str,
     prefs_root: str | None,
+    host: str,
+    port: int,
     *,
     deadline_s: float,
     dialog_events: list[dict[str, Any]],
@@ -198,14 +193,17 @@ def _wait_ready_allowing_one_relaunch(
         chunk = min(20.0, deadline - time.time())
         if chunk <= 0:
             break
-        last = wait_for_session(deadline_s=chunk)
+        last = wait_for_session(
+            deadline_s=chunk,
+            probe=lambda: probe_session_ready(host, port),
+        )
         if last.status == SESSION_READY:
             return last, relaunches
-        if detect_ableton().process_running:
+        if detect_ableton(port).process_running:
             continue
         if relaunches >= 1:
             break
-        _stop_live()
+        _stop_live(exe)
         preserve_crash_recovery(prefs_root, quarantine=True)
         _clear_crash_flag(prefs_root)
         time.sleep(2.0)
@@ -224,20 +222,11 @@ def _wait_ready_allowing_one_relaunch(
     return last, relaunches
 
 
-def _stop_live() -> None:
-    for image in LIVE_IMAGE_NAMES:
-        subprocess.run(
-            ["taskkill", "/IM", image, "/F"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    subprocess.run(
-        ["taskkill", "/IM", "Ableton Crash Reporter.exe", "/F"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _stop_live(exe: str | None = None) -> None:
+    """Stop only the discovered Live executable through the host driver."""
+    if not exe:
+        return
+    driver_for_system().terminate(exe)
     deadline = time.time() + 30
     while time.time() < deadline:
         if not detect_ableton().process_running:

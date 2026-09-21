@@ -19,6 +19,7 @@ from copilot.audio.tap_trust import (
     inventory_taps,
 )
 from copilot.human_eval.store import now_iso
+from copilot.platform.system import default_capture_dir
 
 OPEN_STATUSES = frozenset({PREPARED, RECORDING, FINALIZING})
 TERMINAL_STATUSES = frozenset({VERIFIED, FAILED, IN_DOUBT, RECOVERED})
@@ -92,7 +93,7 @@ def recover_stale_capture_journal(
 
     roots = search_roots or [
         Path("logs"),
-        Path("D:/MusicCopilot/captures"),
+        default_capture_dir(),
         Path("captures"),
     ]
     assets = _asset_candidates(pass_id, roots)

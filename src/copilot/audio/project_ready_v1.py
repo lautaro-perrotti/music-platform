@@ -39,7 +39,7 @@ def generic_preflight(
     discovery: dict[str, Any],
     terminal: dict[str, Any],
 ) -> dict[str, Any]:
-    """Read-only generic readiness. Not the pista-specific session-diagnose."""
+    """Read-only generic readiness. Not the development-lab preflight."""
     missing = list(missing_topology(discovery))
     if not terminal.get("ok"):
         missing.extend(f"terminal:{item}" for item in terminal.get("failures") or [])

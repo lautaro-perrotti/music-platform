@@ -206,15 +206,9 @@ def apply_reasoning_result(result: ReasoningResult) -> dict[str, Any]:
 
 
 def _als_path(session_path: str | None) -> Path | None:
-    raw = Path(session_path or WORKING_COPY_CANDIDATE)
-    if raw.is_file():
-        return raw
-    if raw.is_dir():
-        for name in ("pista_copilot_eval.als", "copilot_bootstrap_fixture.als"):
-            candidate = raw / name
-            if candidate.is_file():
-                return candidate
-    return raw if raw.is_file() else None
+    from copilot.importing.working_copy_manager_v1 import find_working_copy
+
+    return find_working_copy(session_path) or find_working_copy(WORKING_COPY_CANDIDATE)
 
 
 def _asset_from_wav(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,89 @@ from typing import Any
 MILESTONE = "WORKING_COPY_MANAGER_V1"
 DEFAULT_WORKSPACE = Path.home() / "CopilotProjects"
 MANIFEST_NAME = "copilot_import.json"
+
+
+def is_copilot_working_copy(path: str | Path) -> bool:
+    """Return true only for a manifest-backed, protected working copy."""
+    target = Path(path)
+    manifest = target.parent / MANIFEST_NAME
+    if not target.is_file() or not manifest.is_file():
+        return False
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    recorded = Path(str(payload.get("working_als") or ""))
+    try:
+        same_target = recorded.resolve() == target.resolve()
+    except OSError:
+        same_target = str(recorded) == str(target)
+    return same_target and payload.get("ORIGINAL_UNTOUCHED") is True
+
+
+def is_copilot_source(path: str | Path) -> bool:
+    """Return true when a protected working-copy manifest names ``path`` as source."""
+    target = Path(path)
+    roots = {DEFAULT_WORKSPACE}
+    configured = os.environ.get("COPILOT_WORKING_COPY_ROOT")
+    if configured:
+        roots.add(Path(configured))
+    try:
+        target_resolved = target.resolve()
+    except OSError:
+        target_resolved = target
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for manifest in root.glob(f"*/{MANIFEST_NAME}"):
+            try:
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                source = Path(str(payload.get("source_als") or ""))
+                working = Path(str(payload.get("working_als") or ""))
+                if not source.is_file() or not working.is_file():
+                    continue
+                if source.resolve() == target_resolved and payload.get("ORIGINAL_UNTOUCHED") is True:
+                    return True
+            except (OSError, json.JSONDecodeError):
+                continue
+    return False
+
+
+def default_working_copy_candidate() -> Path:
+    root = Path(os.environ.get("COPILOT_WORKING_COPY_ROOT", Path.home() / "CopilotProjects"))
+    return root / "working_copy.als"
+
+
+def find_working_copy(candidate: str | Path | None = None) -> Path | None:
+    """Resolve only manifest-backed working copies; never guess a project name."""
+    if candidate is not None:
+        path = Path(candidate)
+        if path.is_file() and is_copilot_working_copy(path):
+            return path
+        if path.is_dir():
+            manifests = sorted(path.glob(f"*/{MANIFEST_NAME}"))
+            for manifest in manifests:
+                try:
+                    payload = json.loads(manifest.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                working = Path(str(payload.get("working_als") or ""))
+                if working.is_file() and is_copilot_working_copy(working):
+                    return working
+    fallback = default_working_copy_candidate()
+    if fallback.is_file() and is_copilot_working_copy(fallback):
+        return fallback
+    root = fallback.parent
+    if root.is_dir():
+        for manifest in sorted(root.glob(f"*/{MANIFEST_NAME}")):
+            try:
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            working = Path(str(payload.get("working_als") or ""))
+            if working.is_file() and is_copilot_working_copy(working):
+                return working
+    return None
 
 
 def create_working_copy(

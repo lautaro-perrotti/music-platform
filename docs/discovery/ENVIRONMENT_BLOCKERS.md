@@ -6,7 +6,7 @@
 | --- | --- |
 | Python | 3.12.10 `VERIFIED` |
 | Ableton registry | empty |
-| Program Files / D: Ableton | missing |
+| Ableton installation candidates | missing at the time of this historical report |
 | `%APPDATA%\Ableton` | missing |
 | Ableton process | not running |
 | TCP 9877 | closed |

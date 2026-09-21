@@ -16,6 +16,7 @@ copilot.runtime             Producer, graph, registry, OperationContext,
 copilot.audio               capture, bootstrap, project-ready, DSP, journals
 copilot.reasoning           Astra prompt / provider / parse / grounding
 copilot.daw                 AbletonTcpAdapter, protocol, tokens, timeouts
+copilot.platform            host discovery, Ableton lifecycle, files, modals
 copilot.schemas             SessionState, EvidencePack, diagnosis
         ↓
 Ableton Live (Remote Script TCP 127.0.0.1:9877)

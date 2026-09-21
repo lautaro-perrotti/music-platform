@@ -17,6 +17,8 @@ __all__ = [
     "TaskResult",
     "TaskStatus",
     "compile_analyze_project",
+    "discover_environment",
+    "ensure_ableton_ready",
 ]
 
 
@@ -58,4 +60,14 @@ def __getattr__(name: str) -> Any:
             "TaskStatus": TaskStatus,
         }
         return mapping[name]
+    if name in {"discover_environment", "ensure_ableton_ready"}:
+        from copilot.runtime.environment_autonomy_v1 import (
+            discover_environment,
+            ensure_ableton_ready,
+        )
+
+        return {
+            "discover_environment": discover_environment,
+            "ensure_ableton_ready": ensure_ableton_ready,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

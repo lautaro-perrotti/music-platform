@@ -12,7 +12,7 @@ reproducible bug.
 | ID | Status | Notes |
 |---|---|---|
 | `LIVE_SESSION_READINESS_V1` | VERIFIED / FROZEN | TCP + hello/request-id + light snapshot + identity. Port ≠ session. |
-| Working copy policy | VERIFIED | Refuse original sets. Fixture ≠ musical holdout. |
+| Working copy policy | VERIFIED | Require a manifest-backed working copy; refuse unprotected originals. Fixture ≠ musical holdout. |
 | `CROSS_PROJECT_BOOTSTRAP_V1` | VERIFIED | Infra only. Second run `NO_CHANGES_REQUIRED`. |
 | `PROJECT_READY_V1` | VERIFIED | Identity → bootstrap → preflight. |
 
@@ -57,7 +57,8 @@ reproducible bug.
 
 | ID | Status | Notes |
 |---|---|---|
-| Windows/macOS installer | IMPLEMENTED | No secrets. Remote Script + M4L. |
+| `ENVIRONMENT_AUTONOMY_POLICY_V1` | VERIFIED / CURRENT-HOST | Runtime platform discovery, idempotent Remote Script provisioning, native launch, bridge/readiness lifecycle, and working-copy reconciliation. |
+| Windows/macOS/Linux installer | IMPLEMENTED | No secrets. Remote Script + M4L; platform paths are discovered at runtime. |
 | Second-machine proof | WAITING | Needs a friend machine. |
 | `REGRESSION_V1` | VERIFIED | Offline supported-envelope suite. |
 
@@ -68,7 +69,7 @@ reproducible bug.
 | `CROSS_PROJECT_MUSICAL_VALIDATION_V1` | WAITING_FOR_EXTERNAL_SONG |
 | Musical generalization | UNPROVEN |
 
-pista / fixture / untitled are not that test.
+Development fixtures and untitled sets are not that test.
 
 ## Explicitly not capabilities yet
 

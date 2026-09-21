@@ -118,6 +118,18 @@ Ableton protocol is versioned by handshake capabilities (`session.read`, future 
 
 Localhost only (`127.0.0.1:9877`). No secrets in git. Working-copy policy refuses originals (`pista.als` and equivalents). Do not operate on an unsaved/untitled set as if it were a durable project identity.
 
+## Environment autonomy
+
+`ENVIRONMENT_AUTONOMY_POLICY_V1` is platform-agnostic. Discover the host and
+Ableton installation at runtime; never copy another developer's OS paths,
+executable names, or preferences into a global rule. Normal certification
+must use `copilot.runtime.ensure_ableton_ready(...)`, which owns discovery,
+idempotent integration provisioning, native process launch, bounded bridge
+wait, handshake, capability negotiation, and working-copy project
+reconciliation. It may return `HUMAN_ACTION_REQUIRED` only after reporting a
+genuinely interactive boundary such as an OS permission or Live Control
+Surface selection. `PROJECT_READY` requires authoritative session readback.
+
 ## Generated code
 
 Do not hand-edit generated evidence packs to make a run look verified. Runtime > logs > docs when they disagree; then fix the stale layer.

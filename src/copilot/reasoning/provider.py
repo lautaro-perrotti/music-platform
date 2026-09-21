@@ -244,19 +244,9 @@ def _dotenv_value(name: str) -> str | None:
 
 
 def _windows_user_env(name: str) -> str | None:
-    if os.name != "nt":
-        return None
-    try:
-        import winreg
-    except ImportError:
-        return None
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as hive:
-            value, _ = winreg.QueryValueEx(hive, name)
-    except OSError:
-        return None
-    text = str(value).strip()
-    return text or None
+    from copilot.platform.system import user_environment_value
+
+    return user_environment_value(name)
 
 
 def _uses_responses_api(model: str) -> bool:

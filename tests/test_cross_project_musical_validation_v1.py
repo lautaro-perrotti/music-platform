@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from copilot.audio.cross_project_bootstrap_v1 import classify_project
 from copilot.audio.cross_project_musical_validation_v1 import (
     NEXT_AUDIT_ACTION,
@@ -9,12 +11,24 @@ from copilot.audio.cross_project_musical_validation_v1 import (
     refuse_known_lab,
 )
 from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
+from copilot.importing.working_copy_manager_v1 import create_working_copy
 
 
-def test_refuses_fixture_pista_and_dev_copy() -> None:
+def test_refuses_fixture_pista_and_dev_copy(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Source"
+    source_root.mkdir()
+    source = source_root / "Source.als"
+    source.write_bytes(b"set")
+    copy = create_working_copy(
+        source_als=source,
+        project_root=source_root,
+        copy_scope="project_directory",
+        workspace=tmp_path / "CopilotProjects",
+    )
+    monkeypatch.setenv("COPILOT_WORKING_COPY_ROOT", str(tmp_path / "CopilotProjects"))
     for path in (
-        r"C:\x\pista.als",
-        r"C:\x\pista_copilot_eval.als",
+        str(source),
+        str(copy["working_als"]),
         r"C:\x\copilot_bootstrap_fixture.als",
         r"C:\Users\lsper\Desktop\pista Project\Sin título.als",
     ):

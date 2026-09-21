@@ -4,7 +4,7 @@
   "confidence": "MEASURED",
   "method": "Two traced producer-analyze runs on the same open project (Groove Rider working copy, 32 tracks, 126 BPM), same auto-selected region AUTO_36_68 (32 qn = 15.238 s of audio), same 4 eligible sources, read-only, MUSICAL WRITES = 0. Only the capture sequencing changed.",
   "project": {
-    "path": "C:/Users/lsper/CopilotProjects/Abletunes - Groove Rider Project/Abletunes - Groove Rider.als",
+    "path": "<working-copy-path>/Abletunes - Groove Rider.als",
     "policy": "EXTERNAL_WORKING_COPY (operate=True, autonomous_writes_ok=False)",
     "tracks": 32,
     "tempo": 126.0

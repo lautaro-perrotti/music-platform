@@ -224,12 +224,10 @@ def run_session_run1(daw: AbletonTcpAdapter, evidence: Path) -> dict[str, Any]:
         "rose_bass_isolated": False,
         "slot2": "Sub Sub Bass Post Mixer, not all bass",
     }
+    from copilot.importing.working_copy_manager_v1 import find_working_copy
+
     als_path = Path(str(preflight.get("live_set_path") or preflight.get("project_path") or ""))
-    if als_path.is_dir():
-        candidate = als_path / "pista_copilot_eval.als"
-        als_path = candidate if candidate.is_file() else Path(WORKING_COPY_CANDIDATE)
-    elif not als_path.is_file():
-        als_path = Path(WORKING_COPY_CANDIDATE)
+    als_path = find_working_copy(als_path) or find_working_copy(WORKING_COPY_CANDIDATE) or Path(WORKING_COPY_CANDIDATE)
     try:
         if not als_path.is_file():
             raise FileNotFoundError(f"working copy not readable: {als_path}")

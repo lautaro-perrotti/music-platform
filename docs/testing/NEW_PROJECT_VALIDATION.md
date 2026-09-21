@@ -12,11 +12,11 @@ Live is ready only after `SESSION_READY`. A listening port is not enough.
 Core never duplicates the song. The operator does.
 
 1. Duplicate the `.als` (never operate on the only copy).
-2. Open **that working copy** in Ableton Live.
+2. Open **that manifest-backed working copy** in Ableton Live.
 3. Stop the transport.
 4. Wait until `doctor` reports `SESSION_READY` (Control Surface `AbletonMCP`).
 
-Refuse `pista.als`. The development working copy remains `pista_copilot_eval.als`.
+Refuse the original source set. Only a manifest-backed working copy is eligible.
 The bootstrap fixture is plumbing, not a musical holdout.
 
 ## 2. Health
@@ -37,11 +37,11 @@ python -m copilot.cli onboard-project
 Alias of `project-ready`. This is the only onboarding command:
 
 1. identify current project + working-copy policy
-2. refuse `pista.als` if it is still open
+2. refuse the original source set if it is still open
 3. discover topology
 4. bootstrap missing observation infrastructure
 5. validate bootstrap (second plan must be `NO_CHANGES_REQUIRED`)
-6. run preflight (generic, not the pista lab contract)
+6. run preflight (generic, not the development-lab contract)
 7. persist `logs/project_ready_v1.json`
 
 Do not run Astra here. Do not write music.
@@ -93,7 +93,7 @@ python -m copilot.cli production-write --first-autonomous-musical-improvement
 ## Stop conditions
 
 - transport playing
-- original `pista.als` still open
+- original source set still open
 - doctor BLOCKED / not `SESSION_READY`
 - onboard-project BLOCKED
 - open capture journals or IN_DOUBT transactions

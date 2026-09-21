@@ -26,6 +26,7 @@ from copilot.daw.detect import detect_ableton, live_block_status
 from copilot.daw.session_ready_v1 import SESSION_READY, SessionReadyProbe
 from copilot.human_eval.store import now_iso
 from copilot.reasoning.provider import configured_http_provider
+from copilot.platform.system import user_environment_value
 
 MILESTONE = "COPILOT_DOCTOR_V1"
 ARTIFACT = "doctor_v1.json"
@@ -34,18 +35,7 @@ MIN_FREE_BYTES = 256 * 1024 * 1024
 
 
 def _env_configured(name: str) -> bool:
-    if os.environ.get(name):
-        return True
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as hive:
-            value, _ = winreg.QueryValueEx(hive, name)
-        return bool(str(value).strip())
-    except OSError:
-        return False
+    return bool(user_environment_value(name))
 
 
 def doctor(

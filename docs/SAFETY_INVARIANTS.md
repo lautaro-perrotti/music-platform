@@ -56,6 +56,6 @@ Detail for capture views: `docs/audio/SUPPORTED_CAPTURE_ENVELOPE.md`.
 
 ## Working copy
 
-30. Refuse original sets (`pista.als` and policy equivalents).
+30. Refuse original source sets and policy equivalents.
 31. Autonomous musical writes: development working copy only, after gate.
 32. External songs: read-only until `CROSS_PROJECT_MUSICAL_VALIDATION_V1`.

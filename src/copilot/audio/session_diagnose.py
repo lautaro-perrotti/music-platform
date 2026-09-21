@@ -13,6 +13,11 @@ from copilot.audio.batch_capture import (
 from copilot.audio.live_capture import EXPECTED_TAP_PROTOCOL, master_tap_position
 from copilot.audio.tap_trust import duplicate_slots, inventory_taps, routing_claim
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
+from copilot.importing.working_copy_manager_v1 import (
+    default_working_copy_candidate,
+    find_working_copy,
+    is_copilot_working_copy,
+)
 
 LAB_TRACK_MARKERS = (
     "LIVE22 Kick",
@@ -22,10 +27,7 @@ LAB_TRACK_MARKERS = (
 )
 KICK_PAD = "Kick 808 Deep"
 BASS_TARGET = "Sub Sub Bass"
-WORKING_COPY_SUFFIX = "pista_copilot_eval.als"
-ORIGINAL_SET_SUFFIX = "pista.als"
-REAL_SET_CANDIDATE = r"C:\Users\lsper\Desktop\pista Project\pista.als"
-WORKING_COPY_CANDIDATE = r"C:\Users\lsper\Desktop\pista Project\pista_copilot_eval.als"
+WORKING_COPY_CANDIDATE = default_working_copy_candidate()
 REAL_KICK_NAMES = (KICK_PAD,)
 REAL_BASS_NAMES = (BASS_TARGET,)
 EXPECTED_SLOTS = {
@@ -138,9 +140,8 @@ def preflight_session(
     session = daw.snapshot(include_notes=False)
     names = [track.name for track in session.tracks]
     path = session.project_path or ""
-    norm = _path_norm(path)
-    working_copy = norm.endswith(WORKING_COPY_SUFFIX)
-    original_open = norm.endswith(ORIGINAL_SET_SUFFIX) and not working_copy
+    working_copy = is_copilot_working_copy(path)
+    original_open = bool(path) and not working_copy
     exclusions = frozenset(lab_track_exclusions or ())
     unknown_excl = sorted(exclusions - frozenset(LAB_TRACK_MARKERS))
     lab_hits = [item for item in names if item in LAB_TRACK_MARKERS]
@@ -184,11 +185,11 @@ def preflight_session(
 
     if original_open:
         missing.append(
-            "ORIGINAL_SET_OPEN: pista.als is loaded. Use working copy pista_copilot_eval.als."
+            "UNCONTROLLED_PROJECT_OPEN: use a manifest-backed Copilot working copy."
         )
     elif not working_copy:
         missing.append(
-            f"working copy not open (expected …\\{WORKING_COPY_SUFFIX}, open={path or session.project_name!r})"
+            f"working copy not open (manifest required, open={path or session.project_name!r})"
         )
     if lab_hits_blocking:
         missing.append(f"lab tracks still present: {lab_hits_blocking}")
@@ -464,7 +465,7 @@ def inspect_session(daw: AbletonTcpAdapter) -> dict[str, Any]:
     names = [track.name for track in session.tracks]
     name = session.project_name or ""
     path = session.project_path or ""
-    lab_project = "título" in name.lower() or "titulo" in name.lower() or "Sin título.als" in path
+    lab_project = "título" in name.lower() or "titulo" in name.lower() or "untitled" in path.lower()
     lab_hits = [item for item in names if item in LAB_TRACK_MARKERS]
     kick = _first_named(session, REAL_KICK_NAMES)
     bass = _first_named(session, REAL_BASS_NAMES)
@@ -494,10 +495,10 @@ def inspect_session(daw: AbletonTcpAdapter) -> dict[str, Any]:
             if lab_hits or lab_project
             else "NEED_KICK_AND_BASS_TRACKS"
         ),
-        "real_set_on_disk": REAL_SET_CANDIDATE,
+        "real_set_on_disk": None,
         "instruction": (
-            "Open pista.als in Live (the real song). Leave this lab set. "
-            "Do not capture Sin título as real-session diagnosis."
+            "Open a duplicated external working copy in Live and leave the lab set. "
+            "Do not capture an untitled set as real-session diagnosis."
             if (lab_hits or lab_project)
             else "Session looks ready for capture."
         ),

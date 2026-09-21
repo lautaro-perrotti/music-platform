@@ -25,7 +25,7 @@ ROWS: tuple[dict[str, Any], ...] = (
     {
         "id": WORKING_COPY_MILESTONE,
         "command": "onboard-project",
-        "claim": "Refuse pista.als; treat open .als as the working copy; fixture is plumbing",
+        "claim": "Require a manifest-backed working copy; refuse unprotected originals; fixture is plumbing",
         "status": "VERIFIED",
         "frozen": False,
         "writes": False,
@@ -172,7 +172,7 @@ ROWS: tuple[dict[str, Any], ...] = (
         "status": "WAITING_FOR_EXTERNAL_SONG",
         "frozen": False,
         "writes": False,
-        "note": "pista / fixture / untitled are not this test.",
+        "note": "Development fixtures and untitled sets are not this test.",
     },
     {
         "id": M4L_MILESTONE,

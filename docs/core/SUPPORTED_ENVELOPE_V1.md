@@ -9,12 +9,12 @@ It does **not** mean every Ableton or music-production feature exists.
 | Area | What is supported |
 | --- | --- |
 | Ableton | Live 12.x with Remote Script TCP JSON (protocol 1) and Copilot Audio Tap (TapProtocol 3). **`LIVE_SESSION_READINESS_V1` = VERIFIED / FROZEN.** |
-| Project assumptions | Any .als that Core can snapshot. Development original `pista.als` is refused. Working copy `pista_copilot_eval.als` still uses the frozen pista preflight. |
+| Project assumptions | Any .als that Core can snapshot. The original source set is refused. A manifest-backed development working copy may use the frozen lab preflight. |
 | Bootstrap | `python -m copilot.cli project-bootstrap` installs Main tap + `Copilot Capture` / `Copilot Capture Bass`, unique slots 0/1/2, OFF_MIX_GRAPH routing to generic eligible sources. Second complete run returns `NO_CHANGES_REQUIRED`. Lookalike user tracks are never taken over. |
 | Preflight | `project-ready` orchestrates identity → bootstrap → validate → preflight. Development working copy reuses `session-diagnose`. Other projects use `GENERIC_PREFLIGHT_V1`. |
 | Discovery | PersistentObjectRef + arrangement clip overlap. Track index is a locator, never identity. |
 | Capture | Main `MAIN_FINAL`. Isolated Post Mixer via OFF_MIX_GRAPH hosts. Alignment remains **LIMITED ±52 ms**. Silence is valid evidence. |
-| Source isolation | Frozen `ARRANGEMENT_ACTIVE_SOURCE_ISOLATION_V1` stays pista-specific. Generic inventory is `GENERIC_SOURCE_ISOLATION_V1` (no development-song names). |
+| Source isolation | Frozen `ARRANGEMENT_ACTIVE_SOURCE_ISOLATION_V1` stays development-lab-specific. Generic inventory is `GENERIC_SOURCE_ISOLATION_V1` (no development-song names). |
 | Source capture pool | Bounded sequential pool wrapping existing `capture_source_post_mixer`. Core API: `capture_source_post_mixer_ref(target_ref, region)`. |
 | DSP | Frozen `lowend-obs-1` and `fullmix-obs-1` only when the caller supplies the required views. No hidden analyzer calls. |
 | Astra | One structured call via `reason()`. Statuses stay distinct. |

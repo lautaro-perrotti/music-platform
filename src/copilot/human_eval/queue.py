@@ -74,7 +74,7 @@ def create_run_from_session(
     preflight = report.get("PRE-FLIGHT") or {}
     project_token = str(tokens.get("project_token") or preflight.get("project_token") or "")
     project_id = str(preflight.get("live_set_path") or "")
-    song_id = Path(project_id or "pista").stem
+    song_id = Path(project_id or "song").stem
     run_id = source_run
     created = now_iso()
     items: list[EvalCase] = []
