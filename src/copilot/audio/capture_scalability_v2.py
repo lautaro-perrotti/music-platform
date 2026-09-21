@@ -64,6 +64,53 @@ def is_capture_host_name(name: str) -> bool:
     return slot_for_host_name(name) is not None
 
 
+def validate_capture_pool_transition(before: Any, after: Any) -> dict[str, Any]:
+    """Validate the only project-topology change capture setup may introduce.
+
+    Capture capacity can provision additional Copilot-owned hosts.  Those
+    tracks are an explicit observation-infrastructure transition, not an
+    arbitrary project mutation.  State Trust must still reject every other
+    topology change instead of accepting the post-capture token blindly.
+    """
+    from copilot.daw.state_tokens import canonical_project, project_token
+
+    before_canon = canonical_project(before)
+    after_canon = canonical_project(after)
+    before_tracks = list(before_canon.get("tracks") or [])
+    after_tracks = list(after_canon.get("tracks") or [])
+    before_header = {key: value for key, value in before_canon.items() if key != "tracks"}
+    after_header = {key: value for key, value in after_canon.items() if key != "tracks"}
+    added = after_tracks[len(before_tracks) :]
+    prefix_matches = after_tracks[: len(before_tracks)] == before_tracks
+    added_names = [str(row.get("name") or "") for row in added]
+    added_hosts = [name for name in added_names if is_capture_host_name(name)]
+    unexpected_added = [name for name in added_names if not is_capture_host_name(name)]
+    duplicate_names = sorted(
+        name
+        for name in set(added_names)
+        if name and added_names.count(name) > 1
+    )
+    ok = (
+        before_header == after_header
+        and prefix_matches
+        and not unexpected_added
+        and not duplicate_names
+    )
+    return {
+        "ok": ok,
+        "kind": "CAPTURE_POOL_EXPANSION" if added else "NO_PROJECT_TOPOLOGY_CHANGE",
+        "added_hosts": added_hosts,
+        "unexpected_added": unexpected_added,
+        "duplicate_added_names": duplicate_names,
+        "prefix_matches": prefix_matches,
+        "header_matches": before_header == after_header,
+        "before_track_count": len(before_tracks),
+        "after_track_count": len(after_tracks),
+        "before_project_token": project_token(before),
+        "after_project_token": project_token(after),
+    }
+
+
 def staging_for_slot(slot: int) -> str:
     mapping = {0: STAGING_NAME, 1: STAGING_KICK, 2: STAGING_BASS}
     if int(slot) in mapping:

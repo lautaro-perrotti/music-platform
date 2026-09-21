@@ -220,6 +220,8 @@ def cap_plan_observation(ctx: OperationContext, blackboard: dict[str, Any], node
 
 
 def cap_capture_sources(ctx: OperationContext, blackboard: dict[str, Any], node: GraphNode) -> dict[str, Any]:
+    from copilot.audio.capture_scalability_v2 import validate_capture_pool_transition
+    from copilot.audio.cross_project_bootstrap_v1 import retain_tokens
     from copilot.audio.producer_analyze_v1 import capture_bounded_sources
 
     daw = blackboard["daw"]
@@ -237,6 +239,37 @@ def cap_capture_sources(ctx: OperationContext, blackboard: dict[str, Any], node:
         evidence=evidence,
         cancellation=ctx.cancellation,
     )
+    # Capture setup may provision additional Copilot-owned hosts.  Rebind the
+    # operation only after proving that the observed topology delta is exactly
+    # that known pool expansion; never overwrite State Trust with an arbitrary
+    # post-capture snapshot.
+    post_capture = daw.snapshot(include_notes=False)
+    retain_tokens(post_capture)
+    transition = validate_capture_pool_transition(session, post_capture)
+    if not transition.get("ok") or post_capture.project_identity != session.project_identity:
+        raise TaskBlocked(
+            "PROJECT_MISMATCH",
+            {
+                "expected": {
+                    "project_identity": session.project_identity,
+                    "project_token": session.project_token,
+                    "audible_token": session.audible_token,
+                    "track_count": len(session.tracks),
+                },
+                "actual": {
+                    "project_identity": post_capture.project_identity,
+                    "project_token": post_capture.project_token,
+                    "audible_token": post_capture.audible_token,
+                    "track_count": len(post_capture.tracks),
+                },
+                "transition": transition,
+            },
+        )
+    ctx.bind_tokens(post_capture)
+    blackboard["session"] = post_capture
+    view = blackboard.get("read_view")
+    if view is not None:
+        view.bind(daw, post_capture)
     blackboard["captures"] = captures
     groups = plan_batches(list(isolation.get("bounded_targets") or []), session)
     return {
@@ -245,6 +278,7 @@ def cap_capture_sources(ctx: OperationContext, blackboard: dict[str, Any], node:
         "max_batch_sources": CAPTURE_MAX_BATCH_SOURCES,
         "pre_roll_qn": CAPTURE_PRE_ROLL_QN,
         "ok": sum(1 for row in captures if row.get("ok")),
+        "state_transition": transition,
     }
 
 
@@ -413,6 +447,20 @@ def cap_terminal(ctx: OperationContext, blackboard: dict[str, Any], node: GraphN
             "ok": False,
             "failures": ["PROJECT_MISMATCH"],
             "transport_playing": session.transport.playing,
+            "project_mismatch": {
+                "expected": {
+                    "project_identity": ctx.project_identity,
+                    "project_token": ctx.project_state_token,
+                    "audible_token": ctx.audible_state_token,
+                    "target_token": ctx.target_state_token,
+                },
+                "actual": {
+                    "project_identity": session.project_identity,
+                    "project_token": session.project_token,
+                    "audible_token": session.audible_token,
+                    "target_token": session.target_token,
+                },
+            },
         }
     else:
         terminal = verify_terminal_state(
