@@ -14,7 +14,7 @@ Code license ≠ model license ≠ commercial right to outputs or datasets.
 | MERT weights | huggingface.co/m-a-p/MERT-v1-330M | checkpoints | n/a | CC-BY-NC-4.0 | training data not fully open | no | NC | NC | n/a | NC | REJECT | HF card |
 | MERT-v2-30s | huggingface.co/m-a-p/MERT-v2-30s | checkpoints | n/a | CC-BY-NC-4.0 | — | no | NC | NC | n/a | NC | REJECT | HF card |
 | OpenL3 | github.com/torchcreatives/openl3 (upstream) | embeddings | MIT | CC-BY-4.0 | AudioSet-ish | yes with attribution | yes with BY | yes | n/a | older | WRAP | web license notes |
-| LAION CLAP music | huggingface.co/laion/larger_clap_music | embeddings | MIT listed | MIT listed | LAION data caveats | likely yes | check card | yes | n/a | confirm on pin | WRAP | MTEB + HF listing |
+| LAION CLAP HTSAT unfused | huggingface.co/laion/clap-htsat-unfused | embeddings | Apache-2.0 integration | Apache-2.0 (model card) | LAION data caveats; default revision 8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a | yes, subject to card/terms | yes | yes | n/a | checkpoint/runtime size | WRAP | HF model card checked 2026-09-21 |
 | MuQ / MuQ-MuLan | github.com/tencent-ailab/MuQ | code + weights | MIT code | CC-BY-NC-4.0 | MSD | weights no | NC | NC | n/a | NC | REJECT | HF + LICENSE_weights |
 | Basic Pitch | github.com/spotify/basic-pitch | AMT | Apache-2.0 | Apache-2.0 (in-repo) | Spotify paper data | yes | yes | yes | n/a | quality limits | WRAP | GitHub LICENSE |
 | Qwen3-ASR | github.com/QwenLM/Qwen3-ASR | code | Apache-2.0 | Apache-2.0 | Qwen data | yes | yes | yes | n/a | VRAM | WRAP | HF cards apache-2.0 |

@@ -32,7 +32,7 @@ reproducible bug.
 | `PHYSICAL_DSP_V2` | VERIFIED / FROZEN | Factual measurement layer. No mix-quality judgments. FullMix/LowEnd wrapped, not rewritten. |
 | `MUSIC_ANALYZER_V1` | VERIFIED / FROZEN | Real WAV and real Ableton captured-project analysis produce persisted read-only evidence through `AudioAnalysisInput`; staging-WAV finalization, provenance, and terminal restoration passed. Scope limitations remain explicit in the pack. |
 | `DEEP_CAUSAL_V2` | VERIFIED / FROZEN | Facts → observed events → read-only SessionState signal graph → candidate hypotheses → before/during/after evaluation. Real controlled-working-copy validation generated 8 events, 88 candidates and preserved unresolved alternatives with zero writes. |
-| `ADVANCED_PERCEPTION_V1` | PROVIDER_LIMITED | Local Analyzer provider and EvidenceGraph fusion are real/read-only. CLAP and semantic-ear providers are unavailable. |
+| `ADVANCED_PERCEPTION_V1` | VERIFIED / FROZEN | Local Analyzer plus real optional LAION CLAP audio/text embeddings and EvidenceGraph fusion are read-only. Semantic-ear remains an explicit unavailable limitation. |
 
 ## Runtime / agent
 
@@ -79,7 +79,7 @@ Development fixtures and untitled sets are not that test.
 
 EQ, compressor, MIDI editing, arrangement editing, unbounded plugin control,
 web UI, silent mock success, collapsing producer statuses, autonomous writes on
-an unvalidated external song, Music Flamingo, semantic CLAP similarity, mix,
+an unvalidated external song, Music Flamingo semantic-ear descriptions, mix,
 master.
 
 Those must register on Producer Runtime when they exist. They do not get a

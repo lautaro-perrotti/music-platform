@@ -15,7 +15,9 @@ from typing import Any
 
 from copilot.runtime.evidence import EvidenceGraph, EvidenceNode
 from copilot.sample_library.embeddings import (
+    Embedding,
     EmbeddingProviderUnavailable,
+    cosine_similarity,
     get_embedding_provider,
 )
 from copilot.schemas.advanced_perception import (
@@ -159,10 +161,16 @@ class EmbeddingPerceptionProvider:
 
     def __init__(self, provider_name: str = "clap") -> None:
         self.provider_name = provider_name
+        self.last_error: str | None = None
 
     def availability(self) -> ProviderAvailability:
+        self.last_error = None
+        probe_result: Embedding | None = None
         try:
             provider = get_embedding_provider(self.provider_name)
+            probe = getattr(provider, "probe", None)
+            if callable(probe):
+                probe_result = probe()
         except (EmbeddingProviderUnavailable, ValueError) as exc:
             return ProviderAvailability(
                 name=self.provider_name,
@@ -179,15 +187,24 @@ class EmbeddingPerceptionProvider:
             capabilities=["audio_embedding", "text_embedding"] if provider.is_semantic else [],
             reason=None if provider.is_semantic else "provider is deterministic non-semantic stub",
             semantic=provider.is_semantic,
+            metadata={
+                "model": provider.model,
+                "runtime": provider.__class__.__name__,
+                "device": getattr(provider, "device_name", None),
+                "dim": probe_result.dim if probe_result is not None else None,
+                "license": "Apache-2.0 (laion/clap-htsat-unfused model card)" if provider.name == "clap" else None,
+            },
         )
 
     def observe(self, path: Path, source_token: str) -> PerceptionObservation | None:
+        self.last_error = None
         try:
             provider = get_embedding_provider(self.provider_name)
             if not provider.is_semantic:
                 return None
             embedding = provider.embed_audio(path)
-        except (EmbeddingProviderUnavailable, ValueError):
+        except (EmbeddingProviderUnavailable, ValueError) as exc:
+            self.last_error = str(exc)
             return None
         return PerceptionObservation(
             observation_id=f"perception.{provider.name}.audio-embedding",
@@ -195,7 +212,15 @@ class EmbeddingPerceptionProvider:
             provider_version=provider.version,
             domain="embedding",
             question="embedding.audio_vector",
-            value={"dim": embedding.dim, "model": embedding.model},
+            value={
+                "dim": embedding.dim,
+                "model": embedding.model,
+                "sample_rate": embedding.sample_rate,
+                "duration_s": embedding.duration_s,
+                "window_start_s": embedding.window_start_s,
+                "window_end_s": embedding.window_end_s,
+                "preprocessing": embedding.preprocessing,
+            },
             source_token=source_token,
             confidence=None,
             evidence_refs=["advanced_perception.audio_embedding"],
@@ -218,6 +243,26 @@ class SemanticEarProvider:
             reason="no semantic-ear provider is installed or configured",
             semantic=True,
         )
+
+
+def compare_embeddings(left: Embedding, right: Embedding) -> dict[str, Any]:
+    """Return a measured similarity or an explicit NOT_COMPARABLE result."""
+    try:
+        return {
+            "status": "COMPARABLE",
+            "similarity": cosine_similarity(left, right),
+            "provider": left.provider,
+            "model": left.model,
+            "version": left.version,
+        }
+    except ValueError as exc:
+        return {
+            "status": "NOT_COMPARABLE",
+            "similarity": None,
+            "reason": str(exc),
+            "left": {"provider": left.provider, "model": left.model, "version": left.version, "dim": left.dim},
+            "right": {"provider": right.provider, "model": right.model, "version": right.version, "dim": right.dim},
+        }
 
 
 def build_perception_graph(
@@ -277,6 +322,11 @@ def run_advanced_perception(
         embedding_observation = embedding.observe(Path(audio_path), pack.tokens.reference_state_token)
         if embedding_observation is not None:
             observations.append(embedding_observation)
+        if embedding.last_error:
+            embedding_status = embedding_status.model_copy(update={
+                "available": False,
+                "reason": f"audio observation failed: {embedding.last_error}",
+            })
     observations.extend(additional_observations)
     graph = build_perception_graph(pack, observations)
     fusions = [record.to_dict() for record in graph.fuse_comparable()]
@@ -290,7 +340,7 @@ def run_advanced_perception(
         result_status = AdvancedPerceptionStatus.BLOCKED
     elif contradictions:
         result_status = AdvancedPerceptionStatus.PARTIAL
-    elif any(not status.available for status in (embedding_status, semantic_status)):
+    elif not embedding_status.available:
         result_status = AdvancedPerceptionStatus.PROVIDER_LIMITED
     else:
         result_status = AdvancedPerceptionStatus.VERIFIED
@@ -308,6 +358,7 @@ def run_advanced_perception(
             "graph_nodes": len(graph.nodes),
             "contradiction_count": len(contradictions),
             "baseline_pack_schema": pack.schema_version,
+            "MUSICAL_WRITES": 0,
         },
     )
 

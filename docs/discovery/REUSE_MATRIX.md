@@ -15,7 +15,7 @@ Decisions are exclusive. Status is evidence-based.
 | Agent transactions | Live undo | PARTIALLY_VERIFIED | No | No | No | Yes | — | Global undo | BUILD |
 | LUFS/RMS/peak | pyloudnorm + numpy | VERIFIED | Yes | No | Yes | Feature set | MIT | No true-peak yet | WRAP |
 | Full MIR suite | Essentia | DOCUMENTED_ONLY | No | No | Separate process only | Prefer DSP | AGPL-3.0 | Copyleft | REJECT |
-| Music embeddings | LAION CLAP | DOCUMENTED_ONLY | No | No | Yes | — | MIT weights | Confirm card per update | WRAP |
+| Music embeddings | LAION CLAP HTSAT unfused | VERIFIED (provider) | No | No | Yes | Transformers boundary | Apache-2.0 model card | Pin revision per release | WRAP |
 | Music embeddings | OpenL3 | DOCUMENTED_ONLY | No | No | Yes | — | MIT + CC-BY-4.0 | Older | WRAP |
 | Music embeddings | MERT / MuQ | DOCUMENTED_ONLY | No | No | No | — | CC-BY-NC-4.0 | Non-commercial weights | REJECT |
 | Transcription | Basic Pitch | DOCUMENTED_ONLY | No | No | Yes | — | Apache-2.0 | Weak velocity; mixture errors | WRAP |

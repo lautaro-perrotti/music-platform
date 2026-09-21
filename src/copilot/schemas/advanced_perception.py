@@ -26,6 +26,7 @@ class ProviderAvailability(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     reason: str | None = None
     semantic: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PerceptionObservation(BaseModel):

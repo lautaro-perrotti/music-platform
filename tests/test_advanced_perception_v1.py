@@ -4,6 +4,7 @@ import numpy as np
 import soundfile as sf
 import pytest
 
+import copilot.audio.advanced_perception_v1 as advanced_perception
 from copilot.audio.advanced_perception_v1 import (
     build_multi_reference_bundle,
     run_advanced_perception,
@@ -31,16 +32,43 @@ def _pack(tmp_path: Path, token: str, frequency: float = 110.0):
     return pack, path
 
 
-def test_advanced_perception_is_provider_limited_without_semantic_providers(tmp_path: Path):
+def test_advanced_perception_keeps_semantic_ear_limit_explicit(tmp_path: Path):
     pack, path = _pack(tmp_path, "reference:a")
     result = run_advanced_perception(pack, audio_path=path)
 
-    assert result.status.value == "PROVIDER_LIMITED"
+    assert result.status.value in {"VERIFIED", "PROVIDER_LIMITED"}
     assert result.no_write is True
     assert any(item.question == "section.non_template_boundary" for item in result.observations)
-    assert any(item.name == "clap" and not item.available for item in result.providers)
+    clap = next(item for item in result.providers if item.name == "clap")
+    assert clap.available or "CLAP" in (clap.reason or "")
     assert any(item.name == "music-flamingo" and not item.available for item in result.providers)
     assert result.metadata["graph_nodes"] == len(result.observations)
+    assert result.metadata["MUSICAL_WRITES"] == 0
+
+
+def test_embedding_audio_failure_isolated_and_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pack, path = _pack(tmp_path, "reference:provider-failure")
+
+    class FailingProvider:
+        name = "clap"
+        model = "test-model"
+        version = "test"
+        is_semantic = True
+
+        def embed_audio(self, _path: Path):
+            raise ValueError("fixture decode failure")
+
+        def embed_text(self, _text: str):
+            raise ValueError("not used")
+
+    monkeypatch.setattr(advanced_perception, "get_embedding_provider", lambda _name: FailingProvider())
+    result = run_advanced_perception(pack, audio_path=path)
+
+    assert result.status.value == "PROVIDER_LIMITED"
+    clap = next(item for item in result.providers if item.name == "clap")
+    assert clap.available is False
+    assert "fixture decode failure" in (clap.reason or "")
+    assert result.metadata["MUSICAL_WRITES"] == 0
 
 
 def test_fusion_preserves_contradiction_instead_of_selecting_a_fact(tmp_path: Path):

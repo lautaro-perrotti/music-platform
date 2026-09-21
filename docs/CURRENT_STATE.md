@@ -106,8 +106,15 @@ existing Analyzer is exposed as a real local provider, structural regions are
 kept separate from section hypotheses, provider availability is explicit,
 EvidenceGraph fusion preserves `CONTRADICT`, and distinct reference tokens can
 form a `ReferenceIntentBundle` without merging facts. The current real run is
-`PROVIDER_LIMITED`: CLAP and semantic-ear providers are unavailable on this
-host; the non-semantic embedding stub is not counted as semantic perception.
+`VERIFIED / FROZEN`: the real optional LAION CLAP provider now loads the
+`laion/clap-htsat-unfused` checkpoint pinned at
+`8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a`, produces 512-dimensional
+audio/text embeddings with explicit preprocessing and provenance, and participates in
+read-only EvidenceGraph fusion. The controlled-project validation covered
+real audio-to-audio and audio-to-text comparison, caching, and
+`MUSICAL_WRITES = 0`. The semantic-ear provider remains unavailable and is
+reported as a limitation; the non-semantic embedding stub is never counted
+as semantic perception.
 
 `PLATFORM_HARDCODE_AUDIT_V1` is now VERIFIED / FROZEN on the controlled
 working copy. The Trial modal was acknowledged, the manifest-backed project
@@ -176,7 +183,8 @@ Do not reopen Live capture to manufacture that pack.
   returned unresolved grades where Main-side matched evidence was unavailable.
 - Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
-- Reference capture orchestration, Music Flamingo, CLAP, mix, master
+- Reference capture orchestration, Music Flamingo semantic-ear provider, mix,
+  master
 - `RUNTIME_LAUNCH_PATH_OPTIMIZATION` (unconditional launcher sleep / backoff)
 
 ## Agent command count

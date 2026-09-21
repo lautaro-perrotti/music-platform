@@ -83,10 +83,10 @@ Limitation: LUFS skipped below ~0.4 s. True-peak oversampling not implemented ye
 
 | Field | Finding |
 | --- | --- |
-| `laion/larger_clap_music` | Listed **MIT** on MTEB audio-text table |
+| `laion/clap-htsat-unfused` | Apache-2.0 model card; selected provider checkpoint |
 | capabilities | Music-text similarity, retrieval, reference matching |
-| VRAM | ~0.7 GB listed for the 194M music checkpoint |
-| decision | `WRAP` as PRIMARY embedding model |
+| input contract | 48 kHz processor input, 10-second windows |
+| decision | `WRAP` as the real optional embedding provider |
 
 Microsoft CLAP variants exist; check each card. Do not assume all CLAP checkpoints are MIT.
 

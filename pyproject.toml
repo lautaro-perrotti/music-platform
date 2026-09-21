@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+perception = ["torch>=2.0", "transformers>=5.0"]
 
 [project.scripts]
 copilot = "copilot.cli:main"

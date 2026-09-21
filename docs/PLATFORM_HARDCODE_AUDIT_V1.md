@@ -212,5 +212,7 @@ Because `PROJECT_READY` and the read-only smoke did not complete, the audit
 must remain `CODE_VERIFIED / LIVE_REVALIDATION_BLOCKED`. No additional launch
 or exploratory retry is authorized in this checkpoint.
 
-`ADVANCED_PERCEPTION_V1` remains `PROVIDER_LIMITED`; this audit does not add
-CLAP, MIR, or semantic providers and does not reopen the frozen Analyzer.
+At the time of this platform audit, `ADVANCED_PERCEPTION_V1` was still
+`PROVIDER_LIMITED`; this audit did not add CLAP, MIR, or semantic providers and
+did not reopen the frozen Analyzer. The later Advanced Perception completion
+adds the optional real CLAP provider in its own milestone.
