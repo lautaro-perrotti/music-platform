@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copilot.daw.mock import MockAbletonAdapter
+import copilot.producer.soniq_surface as ss
 from copilot.producer.soniq_surface import (
     VstParamWatcher,
     coalesce_writes,
@@ -264,3 +265,48 @@ def test_apply_patch_contract_auto_mode_routes_full_for_large_surface() -> None:
     )
     assert rep["ok"] is True
     assert rep["routing_mode"] == "full_surface"
+
+
+def test_auto_mode_tries_soniq_for_limited_complex_plugin(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(ss, "_apply_patch_via_soniq_ws", lambda contract: {"ok": True, "applied": 1})
+
+    rep = apply_patch_contract_auto_mode(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [{"index": 1, "value": 0.6}],
+            "constraints": {},
+        },
+        throttle_ms=0,
+    )
+    assert rep["ok"] is True
+    assert rep["routing_mode"] == "soniq_full_surface"
+    assert rep["soniq"]["applied"] == 1
+
+
+def test_auto_mode_falls_back_when_soniq_fails(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(ss, "_apply_patch_via_soniq_ws", lambda contract: {"ok": False, "error": "down"})
+
+    rep = apply_patch_contract_auto_mode(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [{"index": 1, "value": 0.6}],
+            "constraints": {},
+        },
+        throttle_ms=0,
+    )
+    assert rep["ok"] is True
+    assert rep["routing_mode"] == "fallback_surface"
+    assert rep["soniq_attempted"] is True
+    assert rep["soniq"]["error"] == "down"
