@@ -15,6 +15,7 @@ from copilot.integration.lucas_core_v1 import (
     normalize_sample_uri_for_working_copy,
     rebind_sample_load_action,
     rebind_sample_load_plan,
+    run_lucas_critique,
     run_lucas_planner,
 )
 from copilot.musicplan import build_create_track_action, build_pattern_action, build_sample_load_action
@@ -152,6 +153,32 @@ def test_lucas_planner_output_is_typed_and_grounded(tmp_path: Path):
     assert run.plan.schema_version == "musicplan-v1"
     assert "reference:integration" in run.plan.notes[-2]
     assert run.planner_metadata["lucas"] == "stable-test"
+
+
+def test_lucas_critique_adapter_calls_lucas_surface_without_write(monkeypatch):
+    _, session = _session()
+    plan = _plan(session, [])
+    observed = {}
+
+    def fake_critique(**kwargs):
+        observed.update(kwargs)
+        from copilot.musicplan.critique import CritiqueResult
+
+        return CritiqueResult(verdict="improve")
+
+    monkeypatch.setattr("copilot.musicplan.critique.critique_track", fake_critique)
+    result = run_lucas_critique(
+        plan=plan,
+        session=session,
+        provider=object(),
+        timeout_s=7.0,
+    )
+
+    assert result is not None
+    assert result.verdict == "improve"
+    assert observed["plan"] is plan
+    assert observed["session"] is session
+    assert observed["timeout_s"] == 7.0
 
 
 def test_stale_project_context_fails_closed(tmp_path: Path):

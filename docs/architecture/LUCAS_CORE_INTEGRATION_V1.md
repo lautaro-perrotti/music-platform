@@ -24,8 +24,11 @@ Core owns:
 - Ableton access and post-write analysis.
 
 The stable Lucas entry points are `build_plan_from_prompt`,
-`SampleSetContext`, and `critique_track`. The Core adapter invokes them without
-giving Lucas a DAW object or write authority.
+`SampleSetContext`, and `critique_track`. The Core adapter invokes the planner
+through `run_lucas_planner` and the advisory critic through
+`run_lucas_critique`, without giving Lucas a DAW object or write authority.
+`build_plan_from_prompt` is Lucas-owned code; Astra is an internal provider used
+by that Lucas function, not a Core-side bypass.
 
 ## Typed handoff
 
@@ -46,11 +49,14 @@ Astra provider:
 
 - Ableton `PROJECT_READY`: passed; 34 tracks before and after rollback;
 - Lucas planner: Astra used, 52 actions returned;
-- bounded execution: `CREATE_TRACK` + matching `SAMPLE_LOAD` accepted;
+- bounded execution: `CREATE_TRACK` + matching Lucas `SAMPLE_LOAD` accepted;
 - compiler: both actions compiled;
 - SafeWrite: both actions reached `KEEP`, authoritative readback matched;
 - sample URI: resolved to the working copy's Live browser URI;
-- post-write `Producer.analyze_project`: `SUCCEEDED`, `MUSICAL WRITES = 0`;
+- execution writes: 2 musical writes attempted and 2 verified (`CREATE_TRACK`,
+  then sample load), followed by 2 rollback mutations;
+- post-write `Producer.analyze_project`: `SUCCEEDED`,
+  `post-analysis MUSICAL WRITES = 0` (analysis is read-only);
 - Lucas critique: advisory `improve`, no invented issue list;
 - rollback: both transactions `ROLLED_BACK`, terminal identity unchanged;
 - original project: untouched; only the manifest-backed working copy was used.
@@ -60,6 +66,15 @@ selected Lucas sample intent was paired with an audio-track plan, the Core
 validation mapped the temporary execution host to MIDI/Simpler while preserving
 the Lucas sample selection and action identity. This is an execution adapter,
 not a change to Lucas's plan or musical logic.
+
+## Action vocabulary boundary
+
+Lucas's existing producer plan uses `SAMPLE_LOAD`. The frozen Core producer
+execution surface is named `LOAD_SAMPLE`. The `ProductionCompiler` accepts the
+Lucas plan action and emits the canonical SafeWrite mutation
+`action_type="LOAD_SAMPLE"`; no second SafeWrite operation or second journal is
+created. `SAMPLE_LOAD` is therefore an existing Lucas input vocabulary, while
+`LOAD_SAMPLE` is the Core execution vocabulary.
 
 ## Frozen scope
 

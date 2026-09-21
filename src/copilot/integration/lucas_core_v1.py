@@ -276,6 +276,30 @@ def run_lucas_planner(
     return PlannerRun(plan=validated, planner_metadata=dict(metadata), input_context=input_context)
 
 
+def run_lucas_critique(
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    provider: Any = None,
+    timeout_s: float = 120.0,
+):
+    """Invoke Lucas's advisory critique surface through a Core read-only boundary.
+
+    The critique may use Astra internally, but it never receives a DAW adapter and
+    never authorizes a write. Keeping this call in the Core adapter makes the
+    planner and critique call chains explicit instead of calling the Lucas module
+    ad hoc from a validation script.
+    """
+    from copilot.musicplan.critique import critique_track
+
+    return critique_track(
+        plan=plan,
+        session=session,
+        provider=provider,
+        timeout_s=timeout_s,
+    )
+
+
 def bound_plan_to_certified_actions(
     plan: MusicPlan,
     *,

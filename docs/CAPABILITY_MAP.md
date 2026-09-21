@@ -42,7 +42,7 @@ reproducible bug.
 | `EVIDENCE_SYSTEM_V2` | VERIFIED / FROZEN | Graph above immutable packs. Fusion keeps contradictions. Limitations propagate. |
 | `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
 | `PRODUCER_EXECUTION_V1` | VERIFIED / FROZEN | `MusicPlan → ProductionCompiler → SafeWrite` six-action minimum passed Live readback/rollback on the controlled working copy. |
-| `LUCAS_CORE_INTEGRATION_V1` | VERIFIED / FROZEN | Existing Lucas planner/sample/critique surfaces connect through typed Core handoff, explicit certified-action bounding, ProductionCompiler, SafeWrite, real Live readback, post-analysis, critique, and rollback. No Lucas-owned files were changed. |
+| `LUCAS_CORE_INTEGRATION_V1` | VERIFIED / FROZEN | Lucas `build_plan_from_prompt` and `critique_track` are called through typed Core handoff; Astra remains internal to Lucas planning. Real Live bounded run verified 2 execution writes, 2 rollback mutations, authoritative readback, and post-analysis with 0 writes. `SAMPLE_LOAD` is Lucas input vocabulary; compiler emits canonical SafeWrite `LOAD_SAMPLE`. No Lucas-owned files were changed. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | VERIFIED | DSP → EvidenceGraph adapter. AnalyzeProject remains read-only. Not a new feature. |
 | `PRODUCER_ANALYZE_V1` | COMMAND_VERIFIED | Debug CLI. Fixture `INSUFFICIENT_EVIDENCE` on empty arrangement. |
 | `PRODUCER_RUN_V1` | COMMAND_VERIFIED | Autonomous volume only on development working copy. |
