@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from copilot.audio.music_analyzer import analyze_reference_file
+from copilot.audio.music_analyzer import analyze_reference_file, analyze_reference_music
 
 
 def test_analyze_reference_file_is_windowed_and_no_write(tmp_path: Path):
@@ -21,3 +21,70 @@ def test_analyze_reference_file_is_windowed_and_no_write(tmp_path: Path):
     assert pack.raw_audio_included is False
     assert pack.tokens.reference_state_token != pack.tokens.target_state_token
     assert len(pack.windows) == 1
+
+
+def test_real_music_analyzer_infers_sections_outside_measurement_windows(tmp_path: Path):
+    sample_rate = 16000
+    duration_s = 16.0
+    time = np.arange(int(sample_rate * duration_s)) / sample_rate
+    signal = np.zeros_like(time, dtype=np.float64)
+    for start, end, amplitude, frequency in (
+        (0.0, 4.0, 0.10, 110.0),
+        (4.0, 8.0, 0.80, 220.0),
+        (8.0, 12.0, 0.12, 110.0),
+        (12.0, 16.0, 0.65, 330.0),
+    ):
+        mask = (time >= start) & (time < end)
+        signal[mask] = amplitude * np.sin(2 * np.pi * frequency * time[mask])
+    path = tmp_path / "reference_sections.wav"
+    sf.write(path, signal.astype(np.float32), sample_rate)
+
+    pack = analyze_reference_music(
+        path,
+        reference_state_token="reference:real",
+        target_state_token="target:real",
+        tempo_bpm=120,
+        use_cache=False,
+    )
+
+    assert pack.no_write is True
+    assert pack.windows[0].end_beat == 32.0  # bounded tail; the configured window is 32 bars
+    assert len(pack.sections) >= 2  # independently inferred boundaries
+    assert any(section.function in {"INTRO", "BREAK", "DROP", "BUILD"} for section in pack.sections)
+    assert any(section.end_beat != 128.0 for section in pack.sections)
+    assert pack.windows[0].timbre.spectral_centroid_hz is not None
+    assert pack.windows[0].harmony.key_candidate is not None
+    assert any(item.startswith("32-bar windows aggregate evidence") for item in pack.limitations)
+
+
+def test_real_music_analyzer_reports_lowend_relationship_when_stems_exist(tmp_path: Path):
+    sample_rate = 16000
+    length = sample_rate * 8
+    kick = np.zeros(length, dtype=np.float32)
+    for position in range(0, length, sample_rate):
+        kick[position:position + 160] = np.hanning(160).astype(np.float32)
+    bass_time = np.arange(length) / sample_rate
+    bass = (0.25 * np.sin(2 * np.pi * 55.0 * bass_time)).astype(np.float32)
+    master = (kick + bass).astype(np.float32)
+    master_path = tmp_path / "master.wav"
+    kick_path = tmp_path / "kick.wav"
+    bass_path = tmp_path / "bass.wav"
+    sf.write(master_path, master, sample_rate)
+    sf.write(kick_path, kick, sample_rate)
+    sf.write(bass_path, bass, sample_rate)
+
+    pack = analyze_reference_music(
+        master_path,
+        reference_state_token="reference:lowend",
+        target_state_token="target:lowend",
+        tempo_bpm=120,
+        kick_path=kick_path,
+        bass_path=bass_path,
+        use_cache=False,
+    )
+
+    window = pack.windows[0]
+    assert window.lowend_measurement_status == "STEMS_ENERGY_ONLY"
+    assert window.kick_energy is not None
+    assert window.bass_energy is not None
+    assert window.kick_bass_overlap_duration_s is not None

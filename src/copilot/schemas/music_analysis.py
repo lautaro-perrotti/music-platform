@@ -19,7 +19,11 @@ class SectionEvidence(BaseModel):
     end_beat: float = Field(gt=0)
     function: str = "UNKNOWN"
     energy_mean_db: float | None = None
+    energy_slope_db_per_s: float | None = None
+    contrast_db: float | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
     active_sources: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def valid_span(self) -> "SectionEvidence":
@@ -33,6 +37,10 @@ class GrooveEvidence(BaseModel):
     onset_density_per_s: float | None = Field(default=None, ge=0)
     median_ioi_s: float | None = Field(default=None, ge=0)
     swing_ratio: float | None = Field(default=None, ge=0)
+    offbeat_ratio: float | None = Field(default=None, ge=0, le=1)
+    syncopation_proxy: float | None = Field(default=None, ge=0, le=1)
+    repetition_strength: float | None = Field(default=None, ge=0, le=1)
+    variation_score: float | None = Field(default=None, ge=0, le=1)
     event_locations: list[float] = Field(default_factory=list)
 
 
@@ -109,6 +117,9 @@ class MusicAnalysisWindow(BaseModel):
     low_band_energy: float | None = Field(default=None, ge=0)
     kick_energy: float | None = Field(default=None, ge=0)
     bass_energy: float | None = Field(default=None, ge=0)
+    kick_bass_overlap_ratio: float | None = Field(default=None, ge=0, le=1)
+    kick_bass_overlap_duration_s: float | None = Field(default=None, ge=0)
+    lowend_measurement_status: str = "MASTER_ONLY"
     decay_trajectory: list[float] = Field(default_factory=list)
     groove: GrooveEvidence = Field(default_factory=GrooveEvidence)
     harmony: HarmonyEvidence = Field(default_factory=HarmonyEvidence)

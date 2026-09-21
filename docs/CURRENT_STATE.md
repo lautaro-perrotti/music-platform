@@ -75,10 +75,12 @@ DUPLICATE_CLIP_TO_ARRANGEMENT, LOAD_DEVICE, SET_DEVICE_PARAMETER, and
 SET_TRACK_VOLUME. Each action passed compiler → SafeWrite → authoritative
 readback → rollback, and the final baseline was restored.
 
-`MUSIC_ANALYZER_V1` now has a typed, read-only evidence pack and separate
-`ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. This is the
-analysis/planning boundary; it does not yet run a reference capture or build
-an autonomous Alpha production.
+`MUSIC_ANALYZER_V1` has a typed, read-only evidence pack, a real local WAV
+analysis pass, independent energy/spectral section inference, groove/chroma/
+timbre features, optional kick+bass relationship measurements, and separate
+`ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. It remains
+FOUNDATION / NOT VERIFIED for real Ableton reference capture: no real user
+reference has yet been run through the full Live capture → analyzer path.
 
 ## Physical DSP (factual, not judgment)
 
