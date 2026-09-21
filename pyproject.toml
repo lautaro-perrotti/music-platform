@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 perception = ["torch>=2.0", "transformers>=5.0"]
+soniq = ["websocket-client>=1.9"]
 
 [project.scripts]
 copilot = "copilot.cli:main"
