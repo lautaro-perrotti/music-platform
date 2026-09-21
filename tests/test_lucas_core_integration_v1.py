@@ -12,6 +12,8 @@ from copilot.integration.lucas_core_v1 import (
     build_lucas_input,
     build_project_context,
     build_reference_context,
+    execute_lucas_patch_contracts_through_core,
+    execute_lucas_plan_through_core,
     normalize_sample_uri_for_working_copy,
     rebind_sample_load_action,
     rebind_sample_load_plan,
@@ -272,3 +274,101 @@ def test_sample_uri_normalization_stays_in_core_adapter():
     assert normalize_sample_uri_for_working_copy("query:CurrentProject#Samples:Imported/kick.wav").startswith(
         "query:"
     )
+
+
+def test_supported_lucas_plan_uses_core_safe_write_authority(tmp_path: Path):
+    daw = MockAbletonAdapter()
+    daw.connect()
+    session = daw.snapshot()
+    attach_tokens(session)
+    action = build_create_track_action(
+        project_identity=session.project_identity,
+        track_name="Core Lucas Smoke",
+        track_kind="audio",
+        reason="supported Lucas create intent",
+        evidence_refs=[],
+    )
+    report = execute_lucas_plan_through_core(
+        plan=_plan(session, [action]),
+        session=session,
+        daw=daw,
+        persist_dir=tmp_path,
+        rollback_after=True,
+    )
+
+    assert report["status"] == "SAFE_WRITE_COMPLETE"
+    assert [item["action_type"] for item in report["accepted"]] == ["CREATE_TRACK"]
+    assert report["direct_lucas_writes"] == 0
+    assert report["write_authority"] == "SafeWriteExecutor"
+    assert report["rollback_verified"] is True
+    assert daw.snapshot().track_by_name("Core Lucas Smoke") is None
+
+
+def test_supported_lucas_parameter_intent_uses_core_safe_write(tmp_path: Path):
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_audio_track("Existing")
+    daw.load_instrument_or_effect(0, "Operator")
+    session = daw.snapshot()
+    attach_tokens(session)
+
+    report = execute_lucas_patch_contracts_through_core(
+        contracts=[
+            {
+                "operation": "set_device_parameter",
+                "track": "Existing",
+                "device": "Operator",
+                "writes": [{"index": 1, "value": 0.6}],
+            }
+        ],
+        session=session,
+        daw=daw,
+        persist_dir=tmp_path,
+    )
+
+    assert report["status"] == "SAFE_WRITE_COMPLETE"
+    assert report["accepted"][0]["action_type"] == "SET_DEVICE_PARAMETER"
+    assert report["direct_lucas_writes"] == 0
+    assert daw.snapshot().tracks[0].devices[1].parameters[1].value == pytest.approx(0.6)
+
+
+def test_unsupported_lucas_soniq_intent_is_deferred_without_write(tmp_path: Path):
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_audio_track("Existing")
+    daw.load_instrument_or_effect(0, "Operator")
+    session = daw.snapshot()
+    attach_tokens(session)
+    before = daw.snapshot()
+
+    report = execute_lucas_patch_contracts_through_core(
+        contracts=[
+            {
+                "operation": "load_device_preset",
+                "track": "Existing",
+                "device": "Operator",
+                "preset_uri": "preset:unsupported",
+            }
+        ],
+        session=session,
+        daw=daw,
+        persist_dir=tmp_path,
+    )
+
+    after = daw.snapshot()
+    assert report["status"] == "EXECUTION_DEFERRED"
+    assert report["accepted"] == []
+    assert report["direct_lucas_writes"] == 0
+    assert after.state_hash == before.state_hash
+
+
+def test_vibe_production_path_has_no_direct_soniq_writer():
+    import inspect
+
+    from copilot import cli
+
+    source = inspect.getsource(cli._vibe)
+    assert "apply_patch_contract_auto_mode" not in source
+    assert "copilot.producer.soniq_surface" not in source
+    assert "execute_lucas_plan_through_core" in source
+    assert "execute_lucas_patch_contracts_through_core" in source

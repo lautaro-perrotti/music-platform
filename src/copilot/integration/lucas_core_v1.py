@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 from copilot.schemas.advanced_perception import AdvancedPerceptionResult
@@ -25,9 +26,17 @@ from copilot.schemas.lucas_integration import (
     UserIntent,
 )
 from copilot.schemas.music_analysis import MusicAnalysisPack
-from copilot.schemas.musicplan import MusicPlan, PlanAction, ProductionActionKind, SCHEMA_VERSION
+from copilot.schemas.musicplan import (
+    DiagnosisBinding,
+    MusicPlan,
+    PlanAction,
+    PlanIntentClass,
+    ProductionActionKind,
+    SCHEMA_VERSION,
+)
 from copilot.schemas.session import SessionState
-from copilot.daw.state_tokens import target_token
+from copilot.daw.state_tokens import attach_tokens, target_token
+from copilot.human_eval.store import now_iso
 from copilot.sample_library.schemas import LibraryIndex, SampleSetContext
 
 CERTIFIED_ACTIONS = frozenset({
@@ -298,6 +307,279 @@ def run_lucas_critique(
         provider=provider,
         timeout_s=timeout_s,
     )
+
+
+def _single_action_plan(action: PlanAction, *, session: SessionState, plan_id: str) -> MusicPlan:
+    """Wrap one Lucas intent in the canonical Core MusicPlan envelope."""
+    target_tokens: dict[str, str] = {}
+    name = str(action.target.ref.get("name", ""))
+    track = session.track_by_name(name) if name else None
+    if track is not None:
+        target_tokens[track.name] = target_token(track)
+    return MusicPlan(
+        plan_id=plan_id,
+        status="DRAFT",
+        intent_class=PlanIntentClass.AUTONOMOUS_MUSICAL_IMPROVEMENT,
+        diagnosis=DiagnosisBinding(
+            diagnosis_id="lucas-core-execution",
+            diagnosis_status="SUPPORTED",
+            diagnosis_accepted=True,
+        ),
+        project_state_token=session.project_token or session.project_identity or "",
+        audible_state_token=session.audible_token or "",
+        target_state_tokens=target_tokens,
+        created_at=now_iso(),
+        actions=[action],
+    )
+
+
+def execute_lucas_plan_through_core(
+    *,
+    plan: MusicPlan,
+    session: SessionState,
+    daw,
+    persist_dir: Path,
+    rollback_after: bool = False,
+) -> dict[str, Any]:
+    """Execute only a bounded Lucas subset through Compiler -> SafeWrite.
+
+    This is the production entrypoint used by the Core-owned CLI path. The
+    planner may return a large plan, but this function deliberately executes
+    only one create/sample pair and reports every other action as deferred.
+    It never calls Lucas's DAW-facing surfaces.
+    """
+    from copilot.runtime.production_compiler import ProductionCompiler
+    from copilot.runtime.safe_write import build_safe_write_executor
+
+    attach_tokens(session)
+    create = next(
+        (a for a in plan.actions if a.action_type is ProductionActionKind.CREATE_TRACK),
+        None,
+    )
+    sample = None
+    if create is not None:
+        track_name = str(create.params.track_name)
+        sample = next(
+            (
+                a for a in plan.actions
+                if a.action_type is ProductionActionKind.SAMPLE_LOAD
+                and str(a.target.ref.get("name", "")) == track_name
+            ),
+            None,
+        )
+
+    selected_ids = [a.action_id for a in (create, sample) if a is not None]
+    bounded = bound_plan_to_certified_actions(plan, action_ids=selected_ids)
+    deferred = [
+        {
+            "action_id": item.action_id,
+            "action_type": item.action_type,
+            "status": "EXECUTION_DEFERRED",
+            "reason": item.reason,
+        }
+        for item in bounded.deferred
+    ]
+    executor = build_safe_write_executor(
+        daw,
+        journal_path=persist_dir / "lucas_core_safe_write.jsonl",
+        persist_dir=persist_dir,
+    )
+    compiler = ProductionCompiler()
+    accepted: list[dict[str, Any]] = []
+    applied: list[tuple[Any, Any]] = []
+    current = session
+
+    for action in (create, sample):
+        if action is None:
+            continue
+        current = daw.snapshot()
+        attach_tokens(current)
+        executable = action
+        if action.action_type is ProductionActionKind.SAMPLE_LOAD:
+            if create is None:
+                deferred.append({
+                    "action_id": action.action_id,
+                    "action_type": action.action_type.value,
+                    "status": "EXECUTION_DEFERRED",
+                    "reason": "sample target has no Core-created authoritative track",
+                })
+                continue
+            target = current.track_by_name(str(create.params.track_name))
+            if target is None:
+                deferred.append({
+                    "action_id": action.action_id,
+                    "action_type": action.action_type.value,
+                    "status": "EXECUTION_DEFERRED",
+                    "reason": "created track was not found in authoritative readback",
+                })
+                continue
+            executable = rebind_sample_load_action(
+                action.model_copy(update={
+                    "params": action.params.model_copy(update={
+                        "sample_uri": normalize_sample_uri_for_working_copy(action.params.sample_uri),
+                    })
+                }),
+                track=target,
+                session=current,
+            )
+        single = _single_action_plan(
+            executable,
+            session=current,
+            plan_id=re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{plan.plan_id}_{action.action_id}"),
+        )
+        compiled = compiler.compile(single, session=current)
+        if compiled.status != "COMPILED" or compiled.intent is None:
+            deferred.append({
+                "action_id": action.action_id,
+                "action_type": action.action_type.value,
+                "status": "EXECUTION_DEFERRED",
+                "reason": "; ".join(compiled.reasons) or compiled.status,
+            })
+            continue
+        result = executor.run(compiled.intent)
+        if not result.ok:
+            return {
+                "status": "SAFE_WRITE_FAILED",
+                "accepted": accepted,
+                "deferred": deferred,
+                "error": result.error,
+                "direct_lucas_writes": 0,
+                "write_authority": "SafeWriteExecutor",
+            }
+        accepted.append({
+            "action_id": action.action_id,
+            "action_type": action.action_type.value,
+            "status": "VERIFIED",
+            "readbacks": [row.model_dump(mode="json") for row in result.readbacks],
+        })
+
+        if rollback_after:
+            applied.append((result, compiled.intent))
+
+    rollback_error = ""
+    if rollback_after:
+        for result, intent in reversed(applied):
+            rollback_error = executor._rollback_applied(result, intent)
+            if rollback_error:
+                break
+
+    return {
+        "status": "SAFE_WRITE_COMPLETE" if not rollback_error else "SAFE_WRITE_ROLLBACK_FAILED",
+        "accepted": accepted,
+        "deferred": deferred,
+        "after_track_count": len(daw.snapshot().tracks),
+        "direct_lucas_writes": 0,
+        "write_authority": "SafeWriteExecutor",
+        "rollback_verified": rollback_after and not rollback_error,
+        "rollback_error": rollback_error,
+    }
+
+
+def execute_lucas_patch_contracts_through_core(
+    *,
+    contracts: list[dict[str, Any]],
+    session: SessionState,
+    daw,
+    persist_dir: Path,
+) -> dict[str, Any]:
+    """Map conservative parameter intents to DEVICE_TWEAK/SafeWrite.
+
+    Presets, routing, WebSocket operations, and unknown units are explicitly
+    deferred. This function is Core-owned and does not call ``soniq_surface``.
+    """
+    from copilot.musicplan import build_device_tweak_action
+    from copilot.runtime.production_compiler import ProductionCompiler
+    from copilot.runtime.safe_write import build_safe_write_executor
+
+    attach_tokens(session)
+    compiler = ProductionCompiler()
+    executor = build_safe_write_executor(
+        daw,
+        journal_path=persist_dir / "lucas_core_patch_safe_write.jsonl",
+        persist_dir=persist_dir,
+    )
+    accepted: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    current = session
+    for cidx, contract in enumerate(contracts or []):
+        operation = str(contract.get("operation", "parameter_patch"))
+        if operation not in {"parameter_patch", "set_device_parameter", ""}:
+            deferred.append({"index": cidx, "status": "EXECUTION_DEFERRED", "reason": "UNSUPPORTED_OPERATION"})
+            continue
+        track_name = str(contract.get("track", ""))
+        device_name = str(contract.get("device", ""))
+        current = daw.snapshot()
+        attach_tokens(current)
+        track = current.track_by_name(track_name)
+        device = next((d for d in track.devices if d.name.lower() == device_name.lower()), None) if track else None
+        if track is None or device is None:
+            deferred.append({"index": cidx, "status": "EXECUTION_DEFERRED", "reason": "TARGET_NOT_FOUND"})
+            continue
+        constraints = dict(contract.get("constraints") or {})
+        max_delta = float(constraints.get("max_delta_norm", 0.35))
+        max_writes = max(1, min(16, int(constraints.get("max_writes", 8))))
+        forbid_toggle = bool(constraints.get("forbid_device_on_toggle", True))
+        for widx, write in enumerate(list(contract.get("writes") or [])[:max_writes]):
+            try:
+                pidx = int(write["index"]) if "index" in write else None
+                param = next((p for p in device.parameters if p.index == pidx), None) if pidx is not None else next(
+                    (p for p in device.parameters if p.name.lower() == str(write.get("name", "")).lower()), None
+                )
+                if param is None:
+                    raise ValueError("PARAMETER_NOT_FOUND")
+                normalized = float(write["value"])
+                if not 0.0 <= normalized <= 1.0:
+                    raise ValueError("VALUE_OUT_OF_RANGE")
+                if forbid_toggle and (param.index == 0 or param.name.lower() == "device on"):
+                    raise ValueError("DEVICE_TOGGLE_FORBIDDEN")
+                span = float(param.max) - float(param.min)
+                target = float(param.min) + normalized * span if span > 0 else normalized
+                delta_norm = abs(target - float(param.value)) / span if span > 0 else abs(target - float(param.value))
+                if delta_norm > max_delta:
+                    raise ValueError("MAX_DELTA_EXCEEDED")
+            except (KeyError, TypeError, ValueError) as exc:
+                deferred.append({
+                    "index": cidx,
+                    "write": widx,
+                    "status": "EXECUTION_DEFERRED",
+                    "reason": str(exc),
+                })
+                continue
+            action = build_device_tweak_action(
+                track=track,
+                project_identity=current.project_identity,
+                device_index=device.index,
+                parameter_name=param.name,
+                expected_before=float(param.value),
+                intended_after=target,
+                unit="native",
+                reason="Lucas parameter intent via Core SafeWrite",
+                evidence_refs=[],
+                session_incarnation_id=current.session_incarnation_id,
+                allowed_min=float(param.min),
+                allowed_max=float(param.max),
+            )
+            single = _single_action_plan(
+                action,
+                session=current,
+                plan_id=f"lucas_patch_{cidx}_{widx}",
+            )
+            compiled = compiler.compile(single, session=current)
+            if compiled.status != "COMPILED" or compiled.intent is None:
+                deferred.append({"index": cidx, "write": widx, "status": "EXECUTION_DEFERRED", "reason": "; ".join(compiled.reasons)})
+                continue
+            result = executor.run(compiled.intent)
+            if not result.ok:
+                deferred.append({"index": cidx, "write": widx, "status": "EXECUTION_DEFERRED", "reason": result.error or "SAFE_WRITE_FAILED"})
+                continue
+            accepted.append({"index": cidx, "write": widx, "status": "VERIFIED", "action_type": "SET_DEVICE_PARAMETER"})
+    return {
+        "status": "SAFE_WRITE_COMPLETE" if accepted or not deferred else "EXECUTION_DEFERRED",
+        "accepted": accepted,
+        "deferred": deferred,
+        "direct_lucas_writes": 0,
+        "write_authority": "SafeWriteExecutor",
+    }
 
 
 def bound_plan_to_certified_actions(

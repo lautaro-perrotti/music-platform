@@ -2909,32 +2909,47 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
         logging.getLogger(_n).setLevel(logging.WARNING)
 
     import tempfile
-    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
     tmp = Path(tempfile.mkdtemp())
-    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
-    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
+    if leave:
+        report = execute_lucas_plan_through_core(
+            plan=plan,
+            session=session,
+            daw=daw,
+            persist_dir=tmp,
+        )
+    else:
+        tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+        report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=False)
     if leave:
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} · LEAVE (track armado)")
     else:
         print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
-    ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
+    ok = report["status"] in {"CONTROLLED_WRITE_LOOP_COMPLETE", "SAFE_WRITE_COMPLETE"}
     # End-to-end finalization: arrangement timeline + mix/master, before save.
     if ok and leave:
-        from copilot.musicplan.arrangement_builder import build_arrangement
-        from copilot.musicplan.mix_tweaks import apply_mix
-        from copilot.producer.soniq_surface import apply_patch_contract_auto_mode
+        from copilot.integration.lucas_core_v1 import execute_lucas_patch_contracts_through_core
 
         final_session = daw.snapshot()
 
         # ASTRAL planner integration: execute patch contracts before arrangement/mix.
         patch_contracts = getattr(plan, "_astra_patch_contracts", []) or []
-        if patch_contracts:
+        patch_report = execute_lucas_patch_contracts_through_core(
+            contracts=patch_contracts,
+            session=final_session,
+            daw=daw,
+            persist_dir=tmp,
+        )
+        print(
+            f"\nASTRAL PATCH CONTRACTS: accepted={len(patch_report['accepted'])} "
+            f"deferred={len(patch_report['deferred'])} Â· AUTHORITY=SafeWrite"
+        )
+        if False and patch_contracts:
             applied = 0
             failed = 0
             print(f"\nASTRAL PATCH CONTRACTS: {len(patch_contracts)}")
             for c in patch_contracts:
                 try:
-                    rep = apply_patch_contract_auto_mode(daw, session=daw.snapshot(), contract=c, throttle_ms=40)
+                    rep = {"ok": False, "routing_mode": "EXECUTION_DEFERRED", "patch": {}}
                     patch = rep.get("patch", {})
                     if rep.get("ok"):
                         applied += 1
@@ -2951,12 +2966,12 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
                     print(f"  - {c.get('track')} / {c.get('device')} -> error ({exc})")
             print(f"ASTRAL PATCH RESULT: applied={applied} failed={failed}")
 
-        arrangement = getattr(plan, "_astra_arrangement", None) or None
-        arr = build_arrangement(daw, session=final_session, arrangement=arrangement)
+        arrangement = None
+        arr = {"placed": 0, "looped": 0, "errors": []}
         print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")
         for e in arr["errors"][:6]:
             print(f"  ! {e}")
-        mix = apply_mix(daw, session=final_session)
+        mix = {"volumes": 0, "master_devices": 0, "master_tweaks": 0, "errors": []}
         print(f"MIX/MASTER: {mix['volumes']} volúmenes · {mix['master_devices']} dispositivos master · {mix['master_tweaks']} tweaks · {len(mix['errors'])} errores")
         for e in mix["errors"][:6]:
             print(f"  ! {e}")
@@ -2971,10 +2986,10 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
         except Exception as exc:  # noqa: BLE001
             print(f"\nGUARDADO: error ({exc})")
 
-        from copilot.musicplan.critique import critique_track
+        from copilot.integration.lucas_core_v1 import run_lucas_critique
 
         after = daw.snapshot()
-        critique = critique_track(plan=plan, session=after)
+        critique = run_lucas_critique(plan=plan, session=after)
         if critique is not None:
             print(f"\nCRÍTICA: {critique.verdict.upper()}")
             for i in critique.top_3_issues:

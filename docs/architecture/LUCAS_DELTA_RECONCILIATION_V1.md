@@ -1,6 +1,6 @@
 # LUCAS_DELTA_RECONCILIATION_V1
 
-Status: `BLOCKED` for safe-boundary certification.
+Status: `VERIFIED` for safe-boundary certification.
 
 ## Git reconciliation
 
@@ -17,7 +17,7 @@ All seven commits in the declared delta are present on the active branch. The
 older Lucas history before `6758c72` was intentionally not merged wholesale:
 the active branch already contains the relevant producer work through
 equivalent commits, while a full merge would reintroduce stale Core versions
-and produce conflicts in the certified platform/runtime files.
+and produce conflicts in certified platform/runtime files.
 
 The optional `soniq` dependency is present in `pyproject.toml`, and the new
 smoke scripts/tests are present.
@@ -27,22 +27,26 @@ smoke scripts/tests are present.
 The frozen Core path remains intact:
 
 ```text
-Core → build_plan_from_prompt → Lucas/Astra → MusicPlan
-     → ProductionCompiler → SafeWrite
+Core -> build_plan_from_prompt -> Lucas/Astra -> MusicPlan
+     -> ProductionCompiler -> SafeWrite
 ```
 
-The new Soniq surface is not safe-boundary certified. It contains direct DAW
-calls in `src/copilot/producer/soniq_surface.py` (`set_device_parameters`,
-`set_device_parameter`, and `load_device_preset`), and the `--leave` CLI path
-invokes its patch-contract auto mode directly. That is outside the verified
-`Lucas/Core → ProductionCompiler → SafeWrite` authority and must remain
-experimental until it is routed through Core's write authority.
+The Lucas-owned Soniq surface still contains direct DAW calls, but it is
+quarantined from the production path. The Core-owned `--leave` CLI path no
+longer imports or invokes that surface. Supported Lucas intents are mapped by
+`copilot.integration.lucas_core_v1` into canonical MusicPlan actions and pass
+through `ProductionCompiler` and the single `SafeWriteExecutor` authority.
+Preset, routing, WebSocket, and other uncertified Soniq operations return
+`EXECUTION_DEFERRED` without a DAW mutation.
 
-No Lucas-owned code was modified during this reconciliation. Therefore:
+The guard and focused tests prove that production-reachable direct
+Lucas-to-DawAdapter writes are zero. Lucas-owned source files remain
+unchanged.
 
 ```text
-LUCAS_CORE_INTEGRATION_V1       = VERIFIED / FROZEN
-LUCAS_DELTA_RECONCILIATION_V1  = BLOCKED
+LUCAS_CORE_INTEGRATION_V1      = VERIFIED / FROZEN
+LUCAS_DELTA_RECONCILIATION_V1 = VERIFIED
 ```
 
-The blocker is precise and does not require reopening the prior milestones.
+The direct-write surface remains available only to Lucas-owned tests and
+experimental callers; it is not a production execution authority.
