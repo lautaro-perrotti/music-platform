@@ -130,6 +130,23 @@ bridge's sample-load capability is represented as MIDI/Simpler execution when
 the selected library action is an audio-track intent; this is a Core execution
 mapping, not a change to Lucas musical logic.
 
+`MIXING_MASTERING_EXECUTION_V1` is now `VERIFIED / FROZEN` for execution and
+real post-audio verification. The controlled working-copy run used a generic
+active-region selector, produced non-silent comparable captures, verified two
+mix actions and two master actions through `ProductionCompiler` and the single
+`SafeWriteExecutor` authority, passed authoritative readback and rollback,
+and kept direct Lucas writes at zero. The mix consequence was measurable
+(`delta RMS=-0.014214`). The real validation strategy was an explicitly
+constructed Core `CONTROLLED_FIXTURE`, not output from
+`build_plan_from_prompt`; autonomous Lucas mix/master planning remains an
+Alpha requirement.
+
+`LUCAS_POST_CHANGE_CRITIQUE_PROVIDER` is `PROVIDER_LIMITED`. The unchanged
+Lucas critique contract and Core bounded provider failover are implemented and
+tested. Real MIX and MASTER critique attempts used persisted evidence, but the
+only configured compatible provider (`gpt-6-astra`) timed out, so no verdict
+was fabricated.
+
 `PLATFORM_HARDCODE_AUDIT_V1` is now VERIFIED / FROZEN on the controlled
 working copy. The Trial modal was acknowledged, the manifest-backed project
 reached `PROJECT_READY`, real capture and EvidencePack generation passed, and
@@ -197,8 +214,10 @@ Do not reopen Live capture to manufacture that pack.
   returned unresolved grades where Main-side matched evidence was unavailable.
 - Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
-- Reference capture orchestration, Music Flamingo semantic-ear provider, mix,
-  master
+- `AUTONOMOUS_PRODUCER_ALPHA_V1`: requires real Lucas planner output from a
+  reference/project/sample/intent request, followed by execution, listening,
+  critique, and correction.
+- Reference capture orchestration and Music Flamingo semantic-ear provider
 - `RUNTIME_LAUNCH_PATH_OPTIMIZATION` (unconditional launcher sleep / backoff)
 
 ## Agent command count

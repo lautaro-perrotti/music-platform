@@ -2,10 +2,11 @@
 
 ## Scope
 
-Core-owned execution of one Lucas mix iteration and one Lucas master iteration:
+Core-owned execution of one Lucas-compatible mix iteration and one
+Lucas-compatible master iteration:
 
 ```text
-Lucas strategy
+grounded mix/master intent
   -> MusicPlan
   -> ProductionCompiler
   -> SafeWriteExecutor
@@ -16,6 +17,15 @@ Lucas strategy
 Lucas planning and musical strategy remain unchanged. This boundary does not
 add a second DAW writer, a second transaction authority, or new SafeWrite
 action kinds.
+
+## Strategy provenance
+
+The bounded real Ableton validation in this milestone used an explicitly
+constructed Core validation strategy fixture. It was not produced by
+`build_plan_from_prompt` or `run_lucas_planner`. Therefore this milestone
+certifies the execution and audio-verification boundary, not autonomous Lucas
+mix/master planning. `AUTONOMOUS_PRODUCER_ALPHA_V1` must prove the complete
+reference/project/sample/intent path and use real Lucas planner output.
 
 ## Implemented boundary
 
@@ -82,20 +92,31 @@ was available and returned a read-only observation.
 
 The configured Astra critique provider (`gpt-6-astra`) timed out on the real
 critique request. No verdict was invented and both phases were rolled back.
-Core now has bounded provider failover around the unchanged Lucas critique
-contract. On this host only one compatible provider was discoverable, so the
-offline MIX and MASTER closure attempts both ended with typed
-`CRITIQUE_PROVIDER_UNAVAILABLE` / `MODEL_TIMEOUT`; no alternate provider was
-available to try. The remaining closure blocker is this external provider
-timeout, not audio capture or SafeWrite.
+Core has bounded provider failover around the unchanged Lucas critique
+contract, and that failover is covered by focused tests. On this host only one
+compatible provider was discoverable, so the offline MIX and MASTER closure
+attempts both ended with typed `CRITIQUE_PROVIDER_UNAVAILABLE` /
+`MODEL_TIMEOUT`; no alternate provider was available to try. Critique remains
+provider-limited; it does not invalidate the verified execution/audio boundary.
+
+The post-audio physical DSP, Music Analyzer, and CLAP-based Advanced
+Perception observations were independently verified as read-only. The
+Music Flamingo semantic-ear provider remains unavailable.
 
 ## Current status
 
 ```text
 MIXING_MASTERING_EXECUTION_V1
-= EXECUTION_VERIFIED
-= REAL_AUDIO_VERIFIED
-= CRITIQUE_BLOCKED_EXTERNAL_PROVIDER_TIMEOUT
+= VERIFIED / FROZEN
+
+LUCAS_POST_CHANGE_CRITIQUE_PROVIDER
+= PROVIDER_LIMITED
+
+MIX_STRATEGY_PROVENANCE
+= CONTROLLED_FIXTURE
+
+MASTER_STRATEGY_PROVENANCE
+= CONTROLLED_FIXTURE
 ```
 
 No musical state was intentionally kept by this validation.

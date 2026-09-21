@@ -43,7 +43,8 @@ reproducible bug.
 | `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
 | `PRODUCER_EXECUTION_V1` | VERIFIED / FROZEN | `MusicPlan → ProductionCompiler → SafeWrite` six-action minimum passed Live readback/rollback on the controlled working copy. |
 | `LUCAS_CORE_INTEGRATION_V1` | VERIFIED / FROZEN | Lucas `build_plan_from_prompt` and `critique_track` are called through typed Core handoff; Astra remains internal to Lucas planning. Real Live bounded run verified 2 execution writes, 2 rollback mutations, authoritative readback, and post-analysis with 0 writes. `SAMPLE_LOAD` is Lucas input vocabulary; compiler emits canonical SafeWrite `LOAD_SAMPLE`. No Lucas-owned files were changed. |
-| `MIXING_MASTERING_EXECUTION_V1` | EXECUTION / AUDIO VERIFIED; CRITIQUE BLOCKED EXTERNAL | Core-owned one-pass mix/master runner maps volume, device load, and parameter intent through ProductionCompiler and SafeWrite. Generic active-region selection fixed the silent-region bug; real working-copy validation produced non-silent comparable captures, measurable mix consequence, 4 verified writes, rollback, and 0 direct Lucas writes. Core has bounded provider failover around the unchanged Lucas critique contract; this host exposes only `gpt-6-astra`, which timed out, so no verdict was invented. |
+| `MIXING_MASTERING_EXECUTION_V1` | VERIFIED / FROZEN | Core-owned bounded mix/master execution maps volume, device load, and parameter intent through ProductionCompiler and SafeWrite. Generic active-region selection fixed the silent-region bug; real working-copy validation produced non-silent comparable captures, measurable mix consequence, 4 verified writes, authoritative readback, rollback, and 0 direct Lucas writes. Validation strategy provenance was `CONTROLLED_FIXTURE`, not `build_plan_from_prompt` output; this freezes execution/audio verification, not autonomous Lucas mix/master planning. |
+| `LUCAS_POST_CHANGE_CRITIQUE_PROVIDER` | PROVIDER_LIMITED | The unchanged Lucas critique contract and Core bounded provider failover are implemented and tested. Real mix/master critique attempts used persisted evidence, but the only configured compatible provider (`gpt-6-astra`) timed out; no verdict was fabricated. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | VERIFIED | DSP → EvidenceGraph adapter. AnalyzeProject remains read-only. Not a new feature. |
 | `PRODUCER_ANALYZE_V1` | COMMAND_VERIFIED | Debug CLI. Fixture `INSUFFICIENT_EVIDENCE` on empty arrangement. |
 | `PRODUCER_RUN_V1` | COMMAND_VERIFIED | Autonomous volume only on development working copy. |
@@ -81,8 +82,8 @@ Development fixtures and untitled sets are not that test.
 
 EQ, compressor, MIDI editing, arrangement editing, unbounded plugin control,
 web UI, silent mock success, collapsing producer statuses, autonomous writes on
-an unvalidated external song, Music Flamingo semantic-ear descriptions, mix,
-master.
+an unvalidated external song, Music Flamingo semantic-ear descriptions, and
+autonomous Lucas mix/master planning from a real producer request.
 
 Those must register on Producer Runtime when they exist. They do not get a
 sidecar orchestrator.
