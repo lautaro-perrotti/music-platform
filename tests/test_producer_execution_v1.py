@@ -13,7 +13,7 @@ def test_producer_execution_v1_has_exact_minimum_surface():
         ProductionActionKind.LOAD_SAMPLE,
         ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
         ProductionActionKind.LOAD_DEVICE,
-        ProductionActionKind.SET_DEVICE_PARAMETER,
+        "SET_DEVICE_PARAMETER",
         ProductionActionKind.SET_TRACK_VOLUME,
     }
 

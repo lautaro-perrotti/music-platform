@@ -11,7 +11,7 @@ PRODUCER_EXECUTION_V1 = "PRODUCER_EXECUTION_V1"
 
 @dataclass(frozen=True)
 class ProductionActionSpec:
-    kind: ProductionActionKind
+    kind: str
     operation: str
     certified: bool = False
     note: str = ""
@@ -26,7 +26,7 @@ MINIMUM_PRODUCTION_ACTIONS: tuple[ProductionActionSpec, ...] = (
     ),
     ProductionActionSpec(ProductionActionKind.LOAD_DEVICE, "load_device"),
     ProductionActionSpec(
-        ProductionActionKind.SET_DEVICE_PARAMETER,
+        "SET_DEVICE_PARAMETER",
         "set_device_parameter",
     ),
     ProductionActionSpec(
@@ -42,5 +42,6 @@ CERTIFIED_PRODUCTION_ACTION_KINDS = frozenset(
 )
 
 
-def spec_for(kind: ProductionActionKind) -> ProductionActionSpec | None:
-    return next((item for item in MINIMUM_PRODUCTION_ACTIONS if item.kind is kind), None)
+def spec_for(kind: ProductionActionKind | str) -> ProductionActionSpec | None:
+    value = kind.value if isinstance(kind, ProductionActionKind) else str(kind)
+    return next((item for item in MINIMUM_PRODUCTION_ACTIONS if item.kind == value), None)
