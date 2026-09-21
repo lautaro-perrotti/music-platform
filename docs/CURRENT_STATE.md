@@ -147,6 +147,20 @@ tested. Real MIX and MASTER critique attempts used persisted evidence, but the
 only configured compatible provider (`gpt-6-astra`) timed out, so no verdict
 was fabricated.
 
+`AUTONOMOUS_PRODUCER_ALPHA_V1` completed its first real end-to-end pass on the
+controlled Groove Rider working copy. The request went through real Lucas
+`build_plan_from_prompt` (`strategy_provenance=REAL_LUCAS`), the real project
+reference and sample-library context, `ProductionCompiler`, the single
+`SafeWriteExecutor`, authoritative Live readback, capture, Music Analyzer,
+CLAP, Evidence, and the unchanged Lucas critique boundary. The pass verified
+23 execution writes, deferred 29 unsupported/ambiguous actions explicitly,
+reported zero direct Lucas/Soniq writes, zero unresolved `IN_DOUBT`, and left
+transport stopped. The critique provider timed out, so the truthful terminal
+status is `PRODUCTION_PASS_VERIFIED / REVISION_PROVIDER_LIMITED`; no second
+revision was fabricated. The current bridge does not advertise `browser.load`,
+so audio-file sample loads remain explicit deferred actions until that
+capability is available.
+
 `PLATFORM_HARDCODE_AUDIT_V1` is now VERIFIED / FROZEN on the controlled
 working copy. The Trial modal was acknowledged, the manifest-backed project
 reached `PROJECT_READY`, real capture and EvidencePack generation passed, and
@@ -214,9 +228,8 @@ Do not reopen Live capture to manufacture that pack.
   returned unresolved grades where Main-side matched evidence was unavailable.
 - Groove Rider evidence-pack re-seed into `fixtures/frozen/` (optional; not capture)
 - Musical generalization (second real song)
-- `AUTONOMOUS_PRODUCER_ALPHA_V1`: requires real Lucas planner output from a
-  reference/project/sample/intent request, followed by execution, listening,
-  critique, and correction.
+- Autonomous producer revision/correction after the first Alpha pass; the
+  first pass is verified, but the Lucas critique provider remains limited.
 - Reference capture orchestration and Music Flamingo semantic-ear provider
 - `RUNTIME_LAUNCH_PATH_OPTIMIZATION` (unconditional launcher sleep / backoff)
 

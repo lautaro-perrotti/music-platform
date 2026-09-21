@@ -127,7 +127,13 @@ class TransactionManager:
         txn = self._open
         self.history.append(txn)
         self._open = None
-        self._journal(kind="supersede", status=TransactionStatus.SUPERSEDED, error=reason)
+        self._journal(
+            kind="supersede",
+            status=TransactionStatus.SUPERSEDED,
+            transaction_id=txn.transaction_id,
+            session_incarnation_id=txn.session_incarnation_id,
+            error=reason,
+        )
         return txn
 
     def mark_in_doubt(self, error: str, command_id: str = "") -> AgentTransaction:
@@ -142,6 +148,8 @@ class TransactionManager:
             kind="write",
             status=TransactionStatus.IN_DOUBT,
             command_id=command_id,
+            transaction_id=txn.transaction_id,
+            session_incarnation_id=txn.session_incarnation_id,
             error=error,
         )
         logger.error("in_doubt %s: %s", txn.transaction_id, error)
@@ -214,6 +222,8 @@ class TransactionManager:
         self._journal(
             kind="commit",
             status=TransactionStatus.VERIFIED,
+            transaction_id=txn.transaction_id,
+            session_incarnation_id=txn.session_incarnation_id,
             verification=verification or {},
         )
         logger.info("commit %s actions=%s", txn.transaction_id, len(txn.actions))
@@ -257,7 +267,13 @@ class TransactionManager:
         txn = self._open
         self.history.append(txn)
         self._open = None
-        self._journal(kind="fail", status=TransactionStatus.FAILED, error=error)
+        self._journal(
+            kind="fail",
+            status=TransactionStatus.FAILED,
+            transaction_id=txn.transaction_id,
+            session_incarnation_id=txn.session_incarnation_id,
+            error=error,
+        )
         logger.error("fail %s: %s", txn.transaction_id, error)
         return txn
 
@@ -280,6 +296,8 @@ class TransactionManager:
             self._journal(
                 kind="rollback",
                 status=TransactionStatus.ROLLBACK_CONFLICT,
+                transaction_id=txn.transaction_id,
+                session_incarnation_id=txn.session_incarnation_id,
                 error=txn.error,
             )
             logger.error("abort %s ROLLBACK_CONFLICT", txn.transaction_id)
@@ -289,14 +307,26 @@ class TransactionManager:
             txn.error = f"{error}; rollback incomplete: {exc}"
             self.history.append(txn)
             self._open = None
-            self._journal(kind="rollback", status=TransactionStatus.FAILED, error=txn.error)
+            self._journal(
+                kind="rollback",
+                status=TransactionStatus.FAILED,
+                transaction_id=txn.transaction_id,
+                session_incarnation_id=txn.session_incarnation_id,
+                error=txn.error,
+            )
             logger.error("abort %s FAILED", txn.transaction_id)
             return txn
         txn.status = TransactionStatus.ROLLED_BACK
         txn.error = error
         self.history.append(txn)
         self._open = None
-        self._journal(kind="rollback", status=TransactionStatus.ROLLED_BACK, error=error)
+        self._journal(
+            kind="rollback",
+            status=TransactionStatus.ROLLED_BACK,
+            transaction_id=txn.transaction_id,
+            session_incarnation_id=txn.session_incarnation_id,
+            error=error,
+        )
         logger.error("abort %s ROLLED_BACK", txn.transaction_id)
         return txn
 

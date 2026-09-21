@@ -53,6 +53,20 @@ def test_crash_classifications(tmp_path: Path) -> None:
     assert "Whether Live applied" in reports["b"]["unknown"]
 
 
+def test_terminal_commit_keeps_transaction_identity(tmp_path: Path) -> None:
+    daw = MockAbletonAdapter()
+    daw.connect()
+    journal = DurableJournal(tmp_path / "journal.jsonl")
+    manager = TransactionManager(daw, journal=journal)
+    session = daw.snapshot()
+    transaction = manager.begin("terminal identity", session)
+    manager.commit(session=session)
+    terminal = journal.read_all()[-1]
+    assert terminal["status"] == "VERIFIED"
+    assert terminal["transaction_id"] == transaction.transaction_id
+    assert classify_journal(journal.read_all())[-1]["recovery"] == RecoveryStatus.VERIFIED.value
+
+
 def test_corrupt_trailing_line_is_skipped(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
     path.write_text('{"seq":1,"transaction_id":"x","status":"VERIFIED"}\n{truncated', encoding="utf-8")
