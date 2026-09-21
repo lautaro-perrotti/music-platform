@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from copilot.platform.modals import classify_modal_text, modal_driver_for_system
+from copilot.platform.modals import KnownModalHandler, classify_modal_text, modal_driver_for_system
 
 MILESTONE = "CRASH_RECOVERY_V1"
 KEEP_ROOT = Path.home() / "CopilotProjects" / "_crash_recovery_keep"
@@ -209,7 +209,29 @@ def dismiss_live_blocking_dialogs(
         return {"status": "NO_DIALOG", "milestone": MILESTONE, "kind": "NONE", "hwnds": hwnds}
     text = str(found.get("text") or kind)
     if kind == "TRIAL_STATUS_ACKNOWLEDGEMENT":
-        target = "accept"
+        observation = {
+            "status": "MODAL_PRESENT",
+            "kind": kind,
+            "hwnds": hwnds,
+            "dialog": text,
+            "raw": found,
+        }
+        acknowledged = KnownModalHandler(modal_driver_for_system()).acknowledge_trial(
+            observation
+        )
+        return {
+            "milestone": MILESTONE,
+            "status": "DISMISSED" if acknowledged.get("status") == "ACKNOWLEDGED" else "MODAL_ACK_FAILED",
+            "kind": kind,
+            "action": "accept",
+            "dialog": text,
+            "clicked": acknowledged.get("clicked"),
+            "fallback_used": acknowledged.get("fallback_used", False),
+            "postcondition": acknowledged.get("postcondition"),
+            "buttons": buttons,
+            "recover_policy": recover_policy,
+            "hwnds": hwnds,
+        }
     elif kind == "RECOVER_WORK" and recover_policy == "match_expected":
         target = recover_click_target(text, expected_als, recover_policy=recover_policy)
     elif kind == "RECOVER_WORK":

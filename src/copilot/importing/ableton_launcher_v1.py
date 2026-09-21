@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ CRASH_CFG_REL = Path("Preferences") / "CrashDetection.cfg"
 PROCESS_POLL_S = 0.25
 DIALOG_POLL_S = 0.25
 SHUTDOWN_TIMEOUT_S = 30.0
+MAX_AUTOMATIC_RESTARTS = 1
+READY_STABILITY_S = 5.0
 
 
 def launch_working_copy(
@@ -116,12 +119,19 @@ def launch_working_copy(
 
     dialog_events: list[dict[str, Any]] = []
     stop = threading.Event()
+    modal_ack_failed = False
 
     def _poll_crash_dialog() -> None:
+        nonlocal modal_ack_failed
         while True:
             result = dismiss_live_blocking_dialogs(als, recover_policy="open_command_line")
             if result.get("status") != "NO_DIALOG":
-                dialog_events.append(result)
+                if result.get("status") == "MODAL_ACK_FAILED":
+                    if not modal_ack_failed:
+                        dialog_events.append(result)
+                        modal_ack_failed = True
+                else:
+                    dialog_events.append(result)
             if stop.wait(DIALOG_POLL_S):
                 break
 
@@ -138,6 +148,15 @@ def launch_working_copy(
             dialog_events=dialog_events,
             process=process,
         )
+        if ready is not None and ready.status == SESSION_READY:
+            ready = _wait_for_stable_ready(
+                ready,
+                host,
+                port,
+                process,
+                dialog_events=dialog_events,
+                modal_ack_failed=lambda: modal_ack_failed,
+            )
     finally:
         stop.set()
     payload_crash = crash_after or crash
@@ -145,6 +164,10 @@ def launch_working_copy(
         "crash_recovery": payload_crash,
         "dialog_events": dialog_events[-8:],
         "controlled_relaunches": relaunches,
+        "restart_required": bool(force),
+        "restart_count": 0,
+        "max_automatic_restarts": MAX_AUTOMATIC_RESTARTS,
+        "same_process_pid": process.pid,
     }
     if ready is None or ready.status != SESSION_READY:
         shutdown = _shutdown_owned_process(process)
@@ -184,8 +207,60 @@ def launch_working_copy(
             "pid": process.pid,
             "owned": True,
             "left_running": True,
+            "same_pid_preserved_after_ack": True,
         },
+        "restart_required": bool(force),
+        "restart_count": 0,
+        "max_automatic_restarts": MAX_AUTOMATIC_RESTARTS,
+        "remote_script_restart_policy": "ONE_RESTART_ONLY_IF_VERSION_CHANGED",
     }
+
+
+def _wait_for_stable_ready(
+    initial: Any,
+    host: str,
+    port: int,
+    process: subprocess.Popen[bytes],
+    *,
+    dialog_events: list[dict[str, Any]],
+    modal_ack_failed: Any,
+) -> Any:
+    """Keep the startup watcher alive after the first handshake.
+
+    Trial UI can appear after the Remote Script answers its first request.  A
+    first successful handshake is therefore not enough to declare readiness.
+    This bounded stability window never relaunches Live; it only lets the
+    existing modal watcher acknowledge a known safe dialog in-place.
+    """
+    deadline = time.monotonic() + READY_STABILITY_S
+    stable_since: float | None = None
+    last = initial
+    while time.monotonic() < deadline:
+        if modal_ack_failed():
+            return replace(
+                last,
+                status="MODAL_ACK_FAILED",
+                reason="Known Trial modal did not satisfy the dismissal postcondition",
+                writes_permitted=False,
+            )
+        if process.poll() is not None:
+            return replace(
+                last,
+                status="LIVE_UNAVAILABLE",
+                reason="Ableton exited during readiness stability window",
+                writes_permitted=False,
+            )
+        current = probe_session_ready(host, port)
+        if current.status == SESSION_READY:
+            last = current
+            stable_since = stable_since or time.monotonic()
+            if time.monotonic() - stable_since >= READY_STABILITY_S:
+                return current
+        else:
+            last = current
+            stable_since = None
+        time.sleep(DIALOG_POLL_S)
+    return last
 
 
 def paths_match(opened: str | None, expected: Path) -> bool:

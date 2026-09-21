@@ -10,6 +10,7 @@ import json
 import platform
 import re
 import subprocess
+import time
 from typing import Any
 
 
@@ -53,6 +54,12 @@ class PlatformModalDriver:
 
     def invoke_button(self, hwnds: list[int], expected: set[str]) -> str | None:
         return None
+
+    def invoke_button_verified(
+        self, hwnds: list[int], expected: set[str], *, trial_fallback: bool = False
+    ) -> dict[str, Any]:
+        clicked = self.invoke_button(hwnds, expected)
+        return {"clicked": clicked, "fallback_used": False}
 
 
 class WindowsModalDriver(PlatformModalDriver):
@@ -100,11 +107,26 @@ class WindowsModalDriver(PlatformModalDriver):
         return _run_uia_script(_uia_from_handles(hwnds, click=()))
 
     def invoke_button(self, hwnds: list[int], expected: set[str]) -> str | None:
-        if not hwnds or not expected:
-            return None
-        payload = _run_uia_script(_uia_from_handles(hwnds, click=tuple(sorted(expected))))
-        clicked = payload.get("clicked")
+        result = self.invoke_button_verified(hwnds, expected, trial_fallback=False)
+        clicked = result.get("clicked")
         return str(clicked) if clicked else None
+
+    def invoke_button_verified(
+        self, hwnds: list[int], expected: set[str], *, trial_fallback: bool = False
+    ) -> dict[str, Any]:
+        if not hwnds or not expected:
+            return {"clicked": None, "fallback_used": False}
+        payload = _run_uia_script(
+            _uia_from_handles(
+                hwnds,
+                click=tuple(sorted(expected)),
+                trial_fallback=trial_fallback,
+            )
+        )
+        return {
+            "clicked": payload.get("clicked") or None,
+            "fallback_used": bool(payload.get("fallback_used")),
+        }
 
 
 class MacOSModalDriver(PlatformModalDriver):
@@ -127,14 +149,21 @@ def modal_driver_for_system(system: str | None = None) -> PlatformModalDriver:
 class KnownModalHandler:
     """Bounded modal policy shared by launchers and certification flows."""
 
-    def __init__(self, driver: PlatformModalDriver | None = None) -> None:
+    def __init__(
+        self, driver: PlatformModalDriver | None = None, *, verify_timeout_s: float = 3.0
+    ) -> None:
         self.driver = driver or modal_driver_for_system()
+        self.verify_timeout_s = verify_timeout_s
 
     def inspect(self) -> dict[str, Any]:
         handles = self.driver.window_handles()
         if not handles:
             return {"status": "NO_MODAL", "kind": "NONE", "hwnds": []}
         payload = self.driver.find_buttons(handles)
+        # The main Live window exposes the browser/arrangement text tree too.
+        # Without an actionable control it is content, not a blocking modal.
+        if not payload.get("buttons"):
+            return {"status": "NO_MODAL", "kind": "NONE", "hwnds": handles}
         text = str(payload.get("text") or "")
         classification = classify_modal_text(text)
         return {"status": "MODAL_PRESENT", "hwnds": handles, **classification, "raw": payload}
@@ -142,23 +171,66 @@ class KnownModalHandler:
     def acknowledge_trial(self, observation: dict[str, Any]) -> dict[str, Any]:
         if observation.get("kind") != "TRIAL_STATUS_ACKNOWLEDGEMENT":
             return {**observation, "status": "NOT_APPLICABLE"}
-        clicked = self.driver.invoke_button(observation.get("hwnds") or [], {"OK", "Ok", "Aceptar"})
-        return {"status": "ACKNOWLEDGED" if clicked else "DIALOG_PRESENT", "clicked": clicked, **observation}
+        action = self.driver.invoke_button_verified(
+            observation.get("hwnds") or [],
+            {"OK", "Ok", "Aceptar"},
+            trial_fallback=True,
+        )
+        deadline = time.monotonic() + self.verify_timeout_s
+        remaining: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            handles = self.driver.window_handles()
+            if not handles:
+                remaining = {"kind": "NONE"}
+                break
+            payload = self.driver.find_buttons(handles)
+            remaining = classify_modal_text(str(payload.get("text") or ""))
+            if remaining.get("kind") != "TRIAL_STATUS_ACKNOWLEDGEMENT":
+                break
+            time.sleep(0.1)
+        dismissed = remaining.get("kind") != "TRIAL_STATUS_ACKNOWLEDGEMENT"
+        return {
+            **observation,
+            "status": "ACKNOWLEDGED" if dismissed else "MODAL_ACK_FAILED",
+            "clicked": action.get("clicked"),
+            "fallback_used": bool(action.get("fallback_used")),
+            "postcondition": "KNOWN_MODAL_ABSENT" if dismissed else "KNOWN_MODAL_PRESENT",
+        }
 
 
-def _uia_from_handles(hwnds: list[int], *, click: tuple[str, ...]) -> str:
+def _uia_from_handles(
+    hwnds: list[int], *, click: tuple[str, ...], trial_fallback: bool = False
+) -> str:
     hwnd_list = ",".join(str(int(item)) for item in hwnds)
     want = ", ".join("'" + item.replace("'", "''") + "'" for item in click)
     click_block = ""
     if click:
         click_block = (
             f"$want = @({want})\n"
-            "        if ($btn -and ($want -contains $btn.Current.Name)) {\n"
-            "          $inv = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)\n"
-            "          $inv.Invoke()\n"
-            "          $clicked = $btn.Current.Name\n"
-            "        }\n"
+        "        if ($btn -and ($want -contains $btn.Current.Name)) {\n"
+            "          try {\n"
+            "            $inv = $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)\n"
+            "            $inv.Invoke()\n"
+            "            $clicked = $btn.Current.Name\n"
+            "          } catch {}\n"
+        "        }\n"
         )
+        if trial_fallback:
+            click_block += (
+                "        if ($clicked -and (($texts -join '`n') -match '(?i)(time\\s+remaining|tiempo\\s+restante)')) {\n"
+                "          Add-Type @'\n"
+                "using System;\n"
+                "using System.Runtime.InteropServices;\n"
+                "public static class CopilotModalNative {\n"
+                "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+                "}\n"
+                "'@\n"
+                "          [CopilotModalNative]::SetForegroundWindow([IntPtr]$h) | Out-Null\n"
+                "          Add-Type -AssemblyName System.Windows.Forms\n"
+                "          [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')\n"
+                "          $fallback_used = $true\n"
+                "        }\n"
+            )
     script = f"""
 Add-Type -AssemblyName UIAutomationClient
 $hwnds = @({hwnd_list})
@@ -172,6 +244,7 @@ $textCond = New-Object System.Windows.Automation.PropertyCondition(
   [System.Windows.Automation.ControlType]::Text)
 $texts = @()
 $clicked = ''
+$fallback_used = $false
 foreach ($h in $hwnds) {{
   try {{ $el = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h) }} catch {{ continue }}
   if (-not $el) {{ continue }}
@@ -191,7 +264,7 @@ CLICK_PLACEHOLDER
 }}
 $uniq = @($found | Select-Object -Unique)
 $uniqTexts = @($texts | Select-Object -Unique)
-$result = @{{ buttons = $uniq; clicked = $clicked; text = ($uniqTexts -join "`n") }}
+$result = @{{ buttons = $uniq; clicked = $clicked; fallback_used = $fallback_used; text = ($uniqTexts -join "`n") }}
 $result | ConvertTo-Json -Compress
 """
     return script.replace("CLICK_PLACEHOLDER", click_block)

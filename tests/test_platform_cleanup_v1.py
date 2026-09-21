@@ -65,6 +65,61 @@ def test_unknown_modal_never_invokes_a_default_button() -> None:
     assert KnownModalHandler(FakeDriver()).acknowledge_trial(observation)["status"] == "NOT_APPLICABLE"
 
 
+class _TrialDriver:
+    def __init__(self, *, dismisses: bool, fallback: bool = False) -> None:
+        self.dismisses = dismisses
+        self.fallback = fallback
+        self.visible = True
+        self.invocations: list[set[str]] = []
+
+    def window_handles(self):
+        return [7] if self.visible else []
+
+    def find_buttons(self, hwnds):
+        return {
+            "text": (
+                "Guardar y exportar se activaron con éxito. "
+                "Tiempo restante: 23 días."
+                if self.visible
+                else ""
+            ),
+            "buttons": ["OK", "Comprar ahora"] if self.visible else [],
+        }
+
+    def invoke_button_verified(self, hwnds, expected, *, trial_fallback=False):
+        self.invocations.append(set(expected))
+        if self.dismisses:
+            self.visible = False
+        return {"clicked": "OK", "fallback_used": self.fallback and trial_fallback}
+
+
+def test_trial_modal_requires_verified_postcondition() -> None:
+    driver = _TrialDriver(dismisses=True, fallback=True)
+    result = KnownModalHandler(driver, verify_timeout_s=0.01).acknowledge_trial(
+        {
+            "kind": "TRIAL_STATUS_ACKNOWLEDGEMENT",
+            "hwnds": [7],
+        }
+    )
+    assert result["status"] == "ACKNOWLEDGED"
+    assert result["postcondition"] == "KNOWN_MODAL_ABSENT"
+    assert result["fallback_used"] is True
+    assert {"OK", "Ok", "Aceptar"} in driver.invocations
+
+
+def test_trial_modal_failure_is_terminal_without_restart_signal() -> None:
+    driver = _TrialDriver(dismisses=False)
+    result = KnownModalHandler(driver, verify_timeout_s=0.01).acknowledge_trial(
+        {
+            "kind": "TRIAL_STATUS_ACKNOWLEDGEMENT",
+            "hwnds": [7],
+        }
+    )
+    assert result["status"] == "MODAL_ACK_FAILED"
+    assert result["postcondition"] == "KNOWN_MODAL_PRESENT"
+    assert result["clicked"] == "OK"
+
+
 def test_source_has_no_os_specific_implementation_outside_platform_package() -> None:
     forbidden = (
         re.compile(r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]|/(?:Users|home|Applications)/)"),

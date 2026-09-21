@@ -129,6 +129,10 @@ def ensure_ableton_ready(
     except Exception as exc:  # noqa: BLE001
         integration = {"status": "FAILED", "error": str(exc)}
     report["integration"] = integration
+    report["remote_script_hash"] = integration.get("sha256") or integration.get("source_sha256")
+    report["restart_required"] = str(integration.get("status")) in {"INSTALLED", "UPDATED"}
+    report["restart_count"] = 0
+    report["max_automatic_restarts"] = 1
     if str(integration.get("status")) in {"BLOCKED", "BLOCKED_BY_ENVIRONMENT", "FAILED"}:
         return _blocked(report, "INTEGRATION_PROVISION_FAILED")
 
@@ -147,6 +151,10 @@ def ensure_ableton_ready(
     except Exception as exc:  # noqa: BLE001
         launch = {"status": "LAUNCH_FAILED", "reason": str(exc)}
     report["launch"] = launch
+    report["restart_count"] = launch.get("restart_count", report["restart_count"])
+    report["same_process_pid"] = launch.get("same_process_pid") or (
+        launch.get("process_lifecycle") or {}
+    ).get("pid")
     report["lifecycle"].append("WAIT_PROCESS")
     report["lifecycle"].append("WAIT_BRIDGE")
     if launch.get("status") != SESSION_READY:
