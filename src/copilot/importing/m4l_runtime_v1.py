@@ -14,6 +14,8 @@ from typing import Any
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.detect import detect_ableton, default_user_library_candidates
 from copilot.human_eval.store import now_iso
+from copilot.platform.system import default_capture_dir
+from devices.build_amxd import build_audio_effect_amxd_bytes
 
 MILESTONE = "M4L_RUNTIME_PROVISIONING_V1"
 DEVICE_NAME = "Copilot Audio Tap"
@@ -24,6 +26,8 @@ MANIFEST_NAME = "copilot_m4l_runtime.json"
 CANONICAL_SOURCE = (
     Path(__file__).resolve().parents[3] / "devices" / "Copilot Audio Tap.amxd"
 )
+CANONICAL_MAXPAT = CANONICAL_SOURCE.with_name("Copilot Audio Tap.maxpat")
+CAPTURE_DIR_TOKEN = b"__COPILOT_CAPTURE_DIR__"
 RUNTIME_REL = Path("Presets") / "Audio Effects" / "Max Audio Effect" / "Copilot"
 LEGACY_REL = Path("Presets") / "Audio Effects" / "Max Audio Effect" / "Copilot Audio Tap.amxd"
 BROWSER_BACKOFF = (1.0, 2.0, 4.0, 8.0)
@@ -48,6 +52,35 @@ def canonical_tap_asset(source: Path | None = None) -> dict[str, Any]:
         "size": path.stat().st_size,
         "version": digest[:16],
     }
+
+
+def _configured_tap_asset(
+    *,
+    template: dict[str, Any],
+    capture_root: Path,
+) -> tuple[dict[str, Any], bytes]:
+    """Build a host-specific device from the portable patcher template."""
+    if not CANONICAL_MAXPAT.is_file():
+        raise FileNotFoundError(CANONICAL_MAXPAT)
+    patcher = CANONICAL_MAXPAT.read_bytes()
+    if CAPTURE_DIR_TOKEN not in patcher:
+        raise ValueError("Copilot Audio Tap patcher has no capture-dir token")
+    root = capture_root.expanduser().resolve().as_posix().replace(" ", "\\ ")
+    configured_patcher = patcher.replace(CAPTURE_DIR_TOKEN, root.encode("utf-8"))
+    payload = build_audio_effect_amxd_bytes(configured_patcher)
+    digest = hashlib.sha256(payload).hexdigest()
+    return (
+        {
+            **template,
+            "source": str(CANONICAL_MAXPAT.resolve()),
+            "sha256": digest,
+            "version": digest[:16],
+            "capture_dir": str(capture_root.resolve()),
+            "configured_for_host": True,
+            "template_sha256": template.get("sha256"),
+        },
+        payload,
+    )
 
 
 def discover_user_library(prefs_root: str | Path | None = None) -> dict[str, Any]:
@@ -110,13 +143,13 @@ def ensure_m4l_runtime(
     source: Path | None = None,
     evidence: Path | None = None,
 ) -> dict[str, Any]:
-    asset = canonical_tap_asset(source)
-    if asset.get("status") != "VERIFIED":
+    template = canonical_tap_asset(source)
+    if template.get("status") != "VERIFIED":
         report = {
-            **asset,
+            **template,
             "status": "BLOCKED",
             "M4L_RUNTIME_PROVISIONING_V1": "BLOCKED",
-            "reason": asset.get("status"),
+            "reason": template.get("status"),
         }
         _persist(report, evidence)
         return report
@@ -144,6 +177,24 @@ def ensure_m4l_runtime(
             "rule": "explicit",
         }
 
+    try:
+        asset, payload = _configured_tap_asset(
+            template=template,
+            capture_root=default_capture_dir(),
+        )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        report = {
+            "milestone": MILESTONE,
+            "status": "BLOCKED",
+            "M4L_RUNTIME_PROVISIONING_V1": "BLOCKED",
+            "reason": "CAPTURE_PATH_CONFIGURATION_FAILED",
+            "detail": str(exc),
+            "asset": template,
+            "library": library,
+        }
+        _persist(report, evidence)
+        return report
+
     paths = runtime_paths(library_root)
     dest = paths["device"]
     alias = dest.with_name(f"{DEVICE_ALIAS_V4}.amxd")
@@ -157,7 +208,7 @@ def ensure_m4l_runtime(
         if current == expected:
             status = "ALREADY_CURRENT"
         elif owned:
-            _atomic_copy(Path(str(asset["asset_path"])), dest)
+            _atomic_write_bytes(payload, dest)
             status = "UPDATED"
         else:
             report = {
@@ -173,11 +224,11 @@ def ensure_m4l_runtime(
             _persist(report, evidence)
             return report
     else:
-        _atomic_copy(Path(str(asset["asset_path"])), dest)
+        _atomic_write_bytes(payload, dest)
         status = "INSTALLED"
 
     _retire_legacy_duplicate(paths["legacy"], expected)
-    _provision_identical_alias(Path(str(asset["asset_path"])), alias, expected)
+    _provision_identical_alias_bytes(payload, alias, expected)
     _retire_probe_aliases(dest.parent)
     manifest = {
         "milestone": MILESTONE,
@@ -185,7 +236,7 @@ def ensure_m4l_runtime(
         "tap_protocol_expected": EXPECTED_TAP_PROTOCOL,
         "sha256": expected,
         "version": asset["version"],
-        "source": asset["asset_path"],
+        "source": asset["source"],
         "installed": str(dest),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "COPILOT_OWNED": True,
@@ -303,11 +354,24 @@ def _atomic_copy(source: Path, dest: Path) -> None:
     tmp.replace(dest)
 
 
+def _atomic_write_bytes(payload: bytes, dest: Path) -> None:
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp.write_bytes(payload)
+    tmp.replace(dest)
+
+
 def _provision_identical_alias(source: Path, alias: Path, expected_sha: str) -> None:
     """Same bytes, different User Library URI. Live caches compiled M4L by URI."""
     if alias.is_file() and hashlib.sha256(alias.read_bytes()).hexdigest() == expected_sha:
         return
     _atomic_copy(source, alias)
+
+
+def _provision_identical_alias_bytes(payload: bytes, alias: Path, expected_sha: str) -> None:
+    """Install the same host-configured bytes under Live's cache-busting URI."""
+    if alias.is_file() and hashlib.sha256(alias.read_bytes()).hexdigest() == expected_sha:
+        return
+    _atomic_write_bytes(payload, alias)
 
 
 def _retire_probe_aliases(folder: Path) -> None:

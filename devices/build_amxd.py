@@ -8,8 +8,8 @@ from pathlib import Path
 AUDIO_EFFECT = b"aaaa"
 
 
-def build_audio_effect_amxd(maxpat_path: Path, amxd_path: Path) -> int:
-    json_bytes = maxpat_path.read_bytes()
+def build_audio_effect_amxd_bytes(json_bytes: bytes) -> bytes:
+    """Wrap a C74 patcher payload without changing its dialect or JSON."""
     header = (
         b"ampf"
         + struct.pack("<I", 4)
@@ -20,7 +20,12 @@ def build_audio_effect_amxd(maxpat_path: Path, amxd_path: Path) -> int:
         + b"ptch"
         + struct.pack("<I", len(json_bytes))
     )
-    payload = header + json_bytes
+    return header + json_bytes
+
+
+def build_audio_effect_amxd(maxpat_path: Path, amxd_path: Path) -> int:
+    json_bytes = maxpat_path.read_bytes()
+    payload = build_audio_effect_amxd_bytes(json_bytes)
     amxd_path.write_bytes(payload)
     return len(payload)
 

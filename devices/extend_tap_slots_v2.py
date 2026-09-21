@@ -19,6 +19,7 @@ LEGACY_OPEN = {0: "obj-open", 1: "obj-openk", 2: "obj-openb"}
 V3_SEL = '"text" : "sel 0 1 2"'
 V4_SEL = '"text" : "sel 0 1 2 3 4 5 6 7 8"'
 GIT_AMXD = "devices/Copilot Audio Tap.amxd"
+CAPTURE_DIR_TOKEN = "__COPILOT_CAPTURE_DIR__"
 
 
 def extract_ptch(amxd: bytes) -> bytes:
@@ -35,7 +36,11 @@ def extract_ptch(amxd: bytes) -> bytes:
 
 def v3_baseline_ptch() -> bytes:
     raw = subprocess.check_output(["git", "show", f"HEAD:{GIT_AMXD}"], cwd=ROOT.parent)
-    return extract_ptch(raw)
+    # Older committed templates used a developer-specific Windows path. Keep
+    # the surgical upgrader portable even when its baseline comes from HEAD.
+    return extract_ptch(raw).replace(
+        b"D:/MusicCopilot/captures", CAPTURE_DIR_TOKEN.encode("ascii")
+    )
 
 
 def _c74_open_box(slot: int) -> str:
@@ -50,7 +55,7 @@ def _c74_open_box(slot: int) -> str:
         '\t\t\t\t\t"numoutlets" : 1,\n'
         '\t\t\t\t\t"outlettype" : [ "" ],\n'
         f'\t\t\t\t\t"patching_rect" : [ 56.0, {y}, 290.0, 22.0 ],\n'
-        f'\t\t\t\t\t"text" : "open D:/MusicCopilot/captures/{name}"\n'
+        f'\t\t\t\t\t"text" : "open {CAPTURE_DIR_TOKEN}/{name}"\n'
         "\t\t\t\t}\n"
         "\n"
         "\t\t\t}\n"

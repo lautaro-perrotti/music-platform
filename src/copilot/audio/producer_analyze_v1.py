@@ -14,6 +14,7 @@ from typing import Any
 from copilot.audio.arrangement_activity import load_arrangement_clips
 from copilot.audio.evidence_pack_v1 import build_evidence_pack, persist_evidence_pack
 from copilot.audio.fullmix import compute_fullmix_observation
+from copilot.audio.music_analyzer import analyze_audio_input
 from copilot.audio.generic_source_isolation_v1 import (
     inventory_generic_sources,
     select_activity_region,
@@ -28,6 +29,7 @@ from copilot.audio.source_capture_pool_v1 import (
 )
 from copilot.audio.source_capture_batch_v1 import plan_batches
 from copilot.audio.terminal_state_v1 import verify_terminal_state
+from copilot.schemas.music_analysis import AudioAnalysisInput
 from copilot.schemas.observation import CaptureView, ObservationSource, SignalPoint
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
@@ -356,6 +358,76 @@ def observations_from_captures(
     }
 
 
+def music_analysis_from_captures(
+    captures: list[dict[str, Any]],
+    *,
+    session: Any,
+    region: dict[str, Any],
+    evidence: Path,
+) -> dict[str, Any]:
+    """Feed project capture assets through the shared Music Analyzer.
+
+    Capture ingestion owns source discovery; the Analyzer sees the same typed
+    ``AudioAnalysisInput`` as a standalone reference file.  Source roles are
+    used only when the capture metadata names them explicitly; Main alone
+    remains MASTER_ONLY.
+    """
+    main_row = next((row for row in captures if row.get("main_wav_path")), None)
+    if main_row is None:
+        return {"status": "BLOCKED", "reason": "MAIN_CAPTURE_MISSING"}
+    main_path = Path(str(main_row["main_wav_path"]))
+    if not main_path.is_file():
+        return {"status": "BLOCKED", "reason": "MAIN_CAPTURE_NOT_FOUND", "path": str(main_path)}
+    source_paths: dict[str, Path] = {}
+    for row in captures:
+        wav = row.get("wav_path")
+        if not wav:
+            continue
+        ref = row.get("ref") or {}
+        label = " ".join(
+            str(ref.get(key) or row.get(key) or "")
+            for key in ("display_name", "name", "source")
+        ).lower()
+        if "kick" in label and "kick" not in source_paths:
+            source_paths["kick"] = Path(str(wav))
+        elif "bass" in label and "bass" not in source_paths:
+            source_paths["bass"] = Path(str(wav))
+    capture_id = str(main_row.get("pass_id") or main_path.stem)
+    audio_input = AudioAnalysisInput(
+        main_path=main_path,
+        reference_state_token=f"reference:project-capture:{capture_id}",
+        target_state_token=str(session.project_token),
+        tempo_bpm=float(session.transport.tempo),
+        source_paths=source_paths,
+        project_identity=session.project_identity,
+        capture_id=capture_id,
+    )
+    try:
+        pack = analyze_audio_input(audio_input)
+    except Exception as exc:  # noqa: BLE001 - analysis is read-only and fail-closed
+        return {"status": "BLOCKED", "reason": f"MUSIC_ANALYZER_FAILED:{exc}"}
+    artifact = {
+        "status": "PROJECT_CAPTURE_ANALYZED",
+        "region": region,
+        "pack": pack.model_dump(mode="json"),
+        "NO_WRITE": True,
+    }
+    path = evidence / "music_analysis_v1_project.json"
+    path.write_text(json.dumps(artifact, indent=2, default=str), encoding="utf-8")
+    return {
+        "status": "PROJECT_CAPTURE_ANALYZED",
+        "artifact": str(path),
+        "audio_sha256": pack.provenance.get("audio_sha256"),
+        "capture_id": capture_id,
+        "window_count": len(pack.windows),
+        "structural_region_count": len(pack.structural_regions),
+        "section_hypothesis_count": len(pack.section_hypotheses),
+        "lowend_modes": sorted({window.lowend_measurement_status for window in pack.windows}),
+        "reference_state_token": pack.tokens.reference_state_token,
+        "target_state_token": pack.tokens.target_state_token,
+    }
+
+
 def plan_observation(
     session,
     *,
@@ -546,6 +618,12 @@ def producer_analyze(
         region=region,
         evidence=evidence,
     )
+    music_analysis = music_analysis_from_captures(
+        captures,
+        session=session,
+        region=region,
+        evidence=evidence,
+    )
 
     derived = observations_from_captures(
         captures,
@@ -624,6 +702,7 @@ def producer_analyze(
             }
             for row in captures
         ],
+        "music_analysis": music_analysis,
         "evidence_pack_id": built["pack"]["pack_id"],
         "diagnosis": diagnosis,
         "gate": gate,

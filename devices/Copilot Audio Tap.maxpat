@@ -185,7 +185,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 144.0, 250.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next.wav"
 				}
 
 			}
@@ -363,7 +363,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 168.0, 270.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_kick.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_kick.wav"
 				}
 
 			}
@@ -375,7 +375,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 192.0, 270.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_bass.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_bass.wav"
 				}
 
 			}
@@ -387,7 +387,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 216.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s3.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s3.wav"
 				}
 
 			}
@@ -399,7 +399,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 240.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s4.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s4.wav"
 				}
 
 			}
@@ -411,7 +411,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 264.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s5.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s5.wav"
 				}
 
 			}
@@ -423,7 +423,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 288.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s6.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s6.wav"
 				}
 
 			}
@@ -435,7 +435,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 312.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s7.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s7.wav"
 				}
 
 			}
@@ -447,7 +447,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 336.0, 290.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_s8.wav"
+					"text" : "open __COPILOT_CAPTURE_DIR__/_next_s8.wav"
 				}
 
 			}

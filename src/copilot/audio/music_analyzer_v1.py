@@ -12,6 +12,8 @@ from copilot.schemas.music_analysis import (
     MusicAnalysisWindow,
     ProminenceEvidence,
     SectionEvidence,
+    SectionHypothesis,
+    StructuralRegion,
     SourceActivityEvidence,
     TextureEvidence,
     TimbreEvidence,
@@ -31,6 +33,8 @@ def build_music_analysis_pack(
     texture_windows: Sequence[Mapping[str, Any]] = (),
     prominence_windows: Sequence[Mapping[str, Any]] = (),
     sections: Sequence[Mapping[str, Any] | SectionEvidence] = (),
+    structural_regions: Sequence[Mapping[str, Any] | StructuralRegion] = (),
+    section_hypotheses: Sequence[Mapping[str, Any] | SectionHypothesis] = (),
     source_activity: Sequence[Mapping[str, Any] | SourceActivityEvidence] = (),
     transitions: Sequence[Mapping[str, Any] | TransitionEvidence] = (),
     analyzer_ids: Mapping[str, str] | None = None,
@@ -87,6 +91,14 @@ def build_music_analysis_pack(
         ))
 
     parsed_sections = [item if isinstance(item, SectionEvidence) else SectionEvidence(**item) for item in sections]
+    parsed_regions = [
+        item if isinstance(item, StructuralRegion) else StructuralRegion(**item)
+        for item in structural_regions
+    ]
+    parsed_hypotheses = [
+        item if isinstance(item, SectionHypothesis) else SectionHypothesis(**item)
+        for item in section_hypotheses
+    ]
     parsed_activity = [item if isinstance(item, SourceActivityEvidence) else SourceActivityEvidence(**item) for item in source_activity]
     parsed_transitions = [item if isinstance(item, TransitionEvidence) else TransitionEvidence(**item) for item in transitions]
     return MusicAnalysisPack(
@@ -94,6 +106,8 @@ def build_music_analysis_pack(
         tempo_bpm=tempo_bpm,
         window_bars=int(round(reference.window_beats / 4.0)),
         windows=windows,
+        structural_regions=parsed_regions,
+        section_hypotheses=parsed_hypotheses,
         sections=parsed_sections,
         source_activity=parsed_activity,
         transitions=parsed_transitions,

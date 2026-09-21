@@ -25,6 +25,11 @@ python -c "from copilot.audio.live_capture import rebuild_audio_tap_device; prin
 Do not `json.dumps` the patcher. Live does not enumerate `live.numbox`
 parameters from a standard-JSON rewrite of this homemade `.amxd`.
 
+The checked-in patcher uses the portable `__COPILOT_CAPTURE_DIR__` token. The
+runtime replaces that token with the discovered host capture directory while
+provisioning the User Library device. The repository must not contain a
+developer-specific Windows or macOS capture path.
+
 ## Verification
 
 Repo `devices/Copilot Audio Tap.amxd` and User Library

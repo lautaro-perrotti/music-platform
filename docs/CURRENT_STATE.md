@@ -1,6 +1,6 @@
 # CURRENT_STATE.md
 
-Date: 2026-09-18. Runtime > this file when they disagree.
+Date: 2026-09-21. Runtime > this file when they disagree.
 
 ## What the product is
 
@@ -78,9 +78,13 @@ readback → rollback, and the final baseline was restored.
 `MUSIC_ANALYZER_V1` has a typed, read-only evidence pack, a real local WAV
 analysis pass, independent energy/spectral section inference, groove/chroma/
 timbre features, optional kick+bass relationship measurements, and separate
-`ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. It remains
-FOUNDATION / NOT VERIFIED for real Ableton reference capture: no real user
-reference has yet been run through the full Live capture → analyzer path.
+`ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. `AudioAnalysisInput`
+is now the shared ingestion boundary for file and captured-project analysis;
+project capture no longer routes through the development-lab preflight contract.
+It remains PARTIAL / NOT VERIFIED for a fresh Ableton reference capture: the
+latest live attempt reached capture orchestration but produced no staging WAV
+(`CAPTURE_FINALIZATION_TIMEOUT`), so no project pack was certified from that
+run.
 
 Latest checkpoint (2026-09-21): the analyzer was run against the persisted
 15.238 s Main/Kick/Bass capture from the controlled Groove Rider working copy.
@@ -92,12 +96,12 @@ current set is `TARGET_SOURCE_UNSUPPORTED` for a fresh reference capture, so
 this is real-capture validation evidence—not a full MUSIC_ANALYZER_V1 freeze.
 
 `ADVANCED_PERCEPTION_V1` now has a bounded read-only provider boundary. The
-existing Analyzer is exposed as a real local provider, provider availability
-is explicit, EvidenceGraph fusion preserves `CONTRADICT`, and distinct
-reference tokens can form a `ReferenceIntentBundle` without merging facts.
-The real capture run is `PROVIDER_LIMITED`: CLAP and semantic-ear providers
-are unavailable on this host; the non-semantic embedding stub is not counted
-as semantic perception.
+existing Analyzer is exposed as a real local provider, structural regions are
+kept separate from section hypotheses, provider availability is explicit,
+EvidenceGraph fusion preserves `CONTRADICT`, and distinct reference tokens can
+form a `ReferenceIntentBundle` without merging facts. The current real run is
+`PROVIDER_LIMITED`: CLAP and semantic-ear providers are unavailable on this
+host; the non-semantic embedding stub is not counted as semantic perception.
 
 ## Physical DSP (factual, not judgment)
 

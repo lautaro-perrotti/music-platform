@@ -6,11 +6,30 @@ separate from ``MusicPlan``: analysis and planning do not authorize writes.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from copilot.schemas.reference_analysis import ReferenceStateTokens
+
+
+class AudioAnalysisInput(BaseModel):
+    """Common ingest boundary for reference files and project captures."""
+
+    main_path: Path
+    reference_state_token: str
+    target_state_token: str
+    tempo_bpm: float = Field(gt=0)
+    source_paths: dict[str, Path] = Field(default_factory=dict)
+    project_identity: str | None = None
+    capture_id: str | None = None
+
+    @model_validator(mode="after")
+    def distinct_state_tokens(self) -> "AudioAnalysisInput":
+        if self.reference_state_token == self.target_state_token:
+            raise ValueError("reference and target state tokens must remain distinct")
+        return self
 
 
 class SectionEvidence(BaseModel):
@@ -30,6 +49,37 @@ class SectionEvidence(BaseModel):
         if self.end_beat <= self.start_beat:
             raise ValueError("section end must be after section start")
         return self
+
+
+class StructuralRegion(BaseModel):
+    """Observed region facts, deliberately independent from a label."""
+
+    region_id: str
+    start_beat: float = Field(ge=0)
+    end_beat: float = Field(gt=0)
+    energy_mean_db: float | None = None
+    energy_slope_db_per_s: float | None = None
+    contrast_db: float | None = None
+    feature_summary: dict[str, Any] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_span(self) -> "StructuralRegion":
+        if self.end_beat <= self.start_beat:
+            raise ValueError("structural region end must be after start")
+        return self
+
+
+class SectionHypothesis(BaseModel):
+    """A semantic interpretation of a structural region, never a fact."""
+
+    region_id: str
+    label: str = "UNKNOWN"
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    supporting_evidence: list[str] = Field(default_factory=list)
+    contradicting_evidence: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
 
 
 class GrooveEvidence(BaseModel):
@@ -147,6 +197,8 @@ class MusicAnalysisPack(BaseModel):
     tempo_bpm: float = Field(gt=0)
     window_bars: int = Field(default=32, ge=1)
     windows: list[MusicAnalysisWindow] = Field(default_factory=list)
+    structural_regions: list[StructuralRegion] = Field(default_factory=list)
+    section_hypotheses: list[SectionHypothesis] = Field(default_factory=list)
     sections: list[SectionEvidence] = Field(default_factory=list)
     source_activity: list[SourceActivityEvidence] = Field(default_factory=list)
     transitions: list[TransitionEvidence] = Field(default_factory=list)

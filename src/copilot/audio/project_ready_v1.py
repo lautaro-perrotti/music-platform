@@ -23,7 +23,6 @@ from copilot.audio.cross_project_bootstrap_v1 import (
     retain_tokens,
 )
 from copilot.audio.live_capture import master_tap_position
-from copilot.audio.session_diagnose import preflight_session, write_preflight
 from copilot.audio.tap_trust import inventory_taps
 from copilot.audio.terminal_state_v1 import verify_terminal_state
 from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
@@ -112,16 +111,16 @@ def project_ready(
         host_infos=host_infos,
     )
 
-    if identity["is_development_working_copy"]:
-        preflight = preflight_session(daw)
-        write_preflight(preflight, evidence)
-        preflight_kind = "SESSION_DIAGNOSE"
-    else:
-        preflight = generic_preflight(discovery=discovery, terminal=terminal)
-        (evidence / "generic_preflight_v1.json").write_text(
-            json.dumps(preflight, indent=2, default=str), encoding="utf-8"
-        )
-        preflight_kind = "GENERIC_PREFLIGHT_V1"
+    # ``preflight_session`` is a legacy Groove Rider/lab diagnosis.  It
+    # intentionally requires named Drums/Kick/Bass tracks and must not gate
+    # generic onboarding of another working copy.  Project readiness only
+    # proves identity + observation topology + terminal safety; capture
+    # planning discovers the actual project sources afterwards.
+    preflight = generic_preflight(discovery=discovery, terminal=terminal)
+    (evidence / "generic_preflight_v1.json").write_text(
+        json.dumps(preflight, indent=2, default=str), encoding="utf-8"
+    )
+    preflight_kind = "GENERIC_PREFLIGHT_V1"
 
     second = plan_bootstrap(discovery)
     bootstrap_ok = bootstrap.get("CROSS_PROJECT_BOOTSTRAP_V1") in {

@@ -11,10 +11,43 @@ from pathlib import Path
 
 
 def _exclusive_open_ok(path: Path) -> dict[str, object]:
-    """True when no other process holds the file (Win32 share-none open)."""
+    """Probe whether the file can be opened without a conflicting lock.
+
+    Windows has an authoritative share-none probe.  POSIX does not expose an
+    equivalent mandatory share mode, so use an advisory non-blocking lock when
+    available and otherwise report the file as readable/unguarded rather than
+    importing a Windows-only API on macOS or Linux.
+    """
     if not path.exists():
         return {"exists": False, "exclusive": True, "error": None, "size": None}
     size = int(path.stat().st_size)
+    if os.name != "nt":
+        try:
+            import fcntl
+
+            with path.open("rb") as handle:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return {
+                        "exists": True,
+                        "exclusive": False,
+                        "error": "advisory_lock_conflict",
+                        "size": size,
+                    }
+                finally:
+                    try:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+            return {"exists": True, "exclusive": True, "error": None, "size": size}
+        except (ImportError, OSError) as exc:
+            return {
+                "exists": True,
+                "exclusive": True,
+                "error": f"advisory_lock_unavailable: {exc}",
+                "size": size,
+            }
     import ctypes
 
     generic_rw = ctypes.c_uint32(0x80000000 | 0x40000000).value
@@ -31,6 +64,11 @@ def _exclusive_open_ok(path: Path) -> dict[str, object]:
         return {"exists": True, "exclusive": False, "error": f"winerror={err}", "size": size}
     ctypes.windll.kernel32.CloseHandle(handle)
     return {"exists": True, "exclusive": True, "error": None, "size": size}
+
+
+def exclusive_open_ok(path: Path) -> dict[str, object]:
+    """Public platform-neutral file-lock probe used by audio capture."""
+    return _exclusive_open_ok(path)
 
 
 def wav_shared_read_ok(path: Path) -> dict[str, object]:
@@ -65,6 +103,11 @@ def wav_shared_read_ok(path: Path) -> dict[str, object]:
         return {"exists": True, "readable": False, "error": f"winerror={err}", "size": size}
     ctypes.windll.kernel32.CloseHandle(handle)
     return {"exists": True, "readable": True, "error": None, "size": size}
+
+
+def shared_read_ok(path: Path) -> dict[str, object]:
+    """Public platform-neutral shared-read probe used by audio capture."""
+    return wav_shared_read_ok(path)
 
 
 def wav_lock_owners(path: Path) -> list[dict[str, object]]:
@@ -138,3 +181,8 @@ def wav_lock_owners(path: Path) -> list[dict[str, object]]:
         return []
     finally:
         rstrtmgr.RmEndSession(session)
+
+
+def lock_owners(path: Path) -> list[dict[str, object]]:
+    """Public platform-neutral best-effort lock-owner lookup."""
+    return wav_lock_owners(path)

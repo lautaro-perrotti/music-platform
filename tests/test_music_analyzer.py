@@ -3,7 +3,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from copilot.audio.music_analyzer import analyze_reference_file, analyze_reference_music
+from copilot.audio.music_analyzer import (
+    analyze_audio_input,
+    analyze_reference_file,
+    analyze_reference_music,
+)
+from copilot.schemas.music_analysis import AudioAnalysisInput
 
 
 def test_analyze_reference_file_is_windowed_and_no_write(tmp_path: Path):
@@ -58,6 +63,17 @@ def test_real_music_analyzer_infers_sections_outside_measurement_windows(tmp_pat
     assert pack.windows[0].section_label == "MIXED"
     assert pack.windows[0].evidence_refs == pack.evidence_refs
     assert pack.windows[0].provenance["audio_sha256"] == pack.provenance["audio_sha256"]
+    assert pack.structural_regions
+    assert len(pack.structural_regions) == len(pack.sections)
+    assert len(pack.section_hypotheses) == len(pack.structural_regions)
+    assert {region.region_id for region in pack.structural_regions} == {
+        hypothesis.region_id for hypothesis in pack.section_hypotheses
+    }
+    assert all(
+        "semantic label is a hypothesis" in limitation.lower()
+        for hypothesis in pack.section_hypotheses
+        for limitation in hypothesis.limitations
+    )
     assert pack.windows[0].timbre.spectral_centroid_hz is not None
     assert pack.windows[0].harmony.key_candidate is not None
     assert any(item.startswith("32-bar windows aggregate evidence") for item in pack.limitations)
@@ -94,3 +110,25 @@ def test_real_music_analyzer_reports_lowend_relationship_when_stems_exist(tmp_pa
     assert window.kick_energy is not None
     assert window.bass_energy is not None
     assert window.kick_bass_overlap_duration_s is not None
+
+
+def test_audio_analysis_input_is_the_shared_project_and_reference_boundary(tmp_path: Path):
+    path = tmp_path / "boundary.wav"
+    sf.write(path, np.zeros(16000, dtype=np.float32), 16000)
+    audio_input = AudioAnalysisInput(
+        main_path=path,
+        reference_state_token="reference:boundary",
+        target_state_token="target:boundary",
+        tempo_bpm=120,
+        project_identity="project-boundary",
+        capture_id="capture-boundary",
+    )
+
+    pack = analyze_audio_input(audio_input, use_cache=False)
+
+    assert pack.tokens.reference_state_token == "reference:boundary"
+    assert pack.tokens.target_state_token == "target:boundary"
+    assert pack.provenance["ingest_boundary"] == "AudioAnalysisInput"
+    assert pack.provenance["project_identity"] == "project-boundary"
+    assert pack.provenance["capture_id"] == "capture-boundary"
+    assert pack.no_write is True

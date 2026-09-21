@@ -7,7 +7,7 @@ boundaries come from an independent novelty/change-point pass.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import hashlib
 from pathlib import Path
 from time import perf_counter
@@ -19,7 +19,13 @@ from scipy.signal import find_peaks
 from copilot.audio.fullmix import compute_fullmix_observation
 from copilot.audio.music_analyzer_v1 import build_music_analysis_pack
 from copilot.audio.reference_analysis_v1 import pack_from_fullmix_observation
-from copilot.schemas.music_analysis import MusicAnalysisPack, SectionEvidence
+from copilot.schemas.music_analysis import (
+    AudioAnalysisInput,
+    MusicAnalysisPack,
+    SectionEvidence,
+    SectionHypothesis,
+    StructuralRegion,
+)
 
 
 def analyze_reference_file(
@@ -42,6 +48,34 @@ def analyze_reference_file(
         tempo_bpm=tempo_bpm,
         use_cache=use_cache,
     )
+
+
+def analyze_audio_input(
+    audio_input: AudioAnalysisInput,
+    *,
+    use_cache: bool = True,
+) -> MusicAnalysisPack:
+    """Run the same Analyzer for a file or a captured project asset.
+
+    Ingestors own how a path was obtained.  The Analyzer only consumes this
+    typed boundary, so reference WAVs and Ableton captures cannot drift into
+    separate musical semantics.
+    """
+    pack = analyze_reference_music(
+        audio_input.main_path,
+        reference_state_token=audio_input.reference_state_token,
+        target_state_token=audio_input.target_state_token,
+        tempo_bpm=audio_input.tempo_bpm,
+        kick_path=audio_input.source_paths.get("kick"),
+        bass_path=audio_input.source_paths.get("bass"),
+        use_cache=use_cache,
+    )
+    pack.provenance.update({
+        "project_identity": audio_input.project_identity,
+        "capture_id": audio_input.capture_id,
+        "ingest_boundary": "AudioAnalysisInput",
+    })
+    return pack
 
 
 def analyze_reference_music(
@@ -153,6 +187,8 @@ def analyze_reference_music(
         texture_windows=texture_rows,
         prominence_windows=prominence_rows,
         sections=[section.model_dump(mode="json") for section in sections],
+        structural_regions=[region.model_dump(mode="json") for region in _structural_regions(sections)],
+        section_hypotheses=[hypothesis.model_dump(mode="json") for hypothesis in _section_hypotheses(sections)],
         transitions=_transitions(sections, frame_rows, tempo_bpm),
         analyzer_ids={
             "fullmix": "fullmix-obs-1",
@@ -252,6 +288,44 @@ def infer_reference_sections(
             evidence=evidence,
         ))
     return sections
+
+
+def _structural_regions(sections: Sequence[SectionEvidence]) -> list[StructuralRegion]:
+    """Project factual change-point regions without semantic labels."""
+    return [
+        StructuralRegion(
+            region_id=f"region-{index}",
+            start_beat=section.start_beat,
+            end_beat=section.end_beat,
+            energy_mean_db=section.energy_mean_db,
+            energy_slope_db_per_s=section.energy_slope_db_per_s,
+            contrast_db=section.contrast_db,
+            feature_summary={"change_point": True},
+            evidence_refs=list(section.evidence),
+        )
+        for index, section in enumerate(sections)
+    ]
+
+
+def _section_hypotheses(sections: Sequence[SectionEvidence]) -> list[SectionHypothesis]:
+    """Keep label evidence separate from the observed structural region."""
+    hypotheses: list[SectionHypothesis] = []
+    for index, section in enumerate(sections):
+        contradicting = []
+        if section.function in {"DROP", "BUILD"} and section.energy_slope_db_per_s is not None:
+            if section.function == "DROP" and section.energy_slope_db_per_s > 0.8:
+                contradicting.append("energy_rising_more_than_stable")
+            if section.function == "BUILD" and section.energy_slope_db_per_s <= 0.8:
+                contradicting.append("energy_slope_below_build_threshold")
+        hypotheses.append(SectionHypothesis(
+            region_id=f"region-{index}",
+            label=section.function or "UNKNOWN",
+            confidence=section.confidence,
+            supporting_evidence=list(section.evidence),
+            contradicting_evidence=contradicting,
+            limitations=["Semantic label is a hypothesis over structural measurements."],
+        ))
+    return hypotheses
 
 
 def _load_mono(path: Path) -> tuple[np.ndarray, int]:

@@ -51,6 +51,8 @@ def test_v4_patcher_keeps_c74_dialect_and_live_params() -> None:
 
 def test_v4_file_mapping_preserves_legacy_and_unique_slots() -> None:
     text = MAXPAT.read_text(encoding="utf-8")
+    assert "D:/MusicCopilot/captures" not in text
+    assert "__COPILOT_CAPTURE_DIR__" in text
     expected = {
         0: "_next.wav",
         1: "_next_kick.wav",

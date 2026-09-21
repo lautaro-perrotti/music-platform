@@ -3,6 +3,7 @@ from pathlib import Path
 
 from copilot.importing.m4l_runtime_v1 import (
     DEVICE_NAME,
+    _configured_tap_asset,
     canonical_tap_asset,
     ensure_m4l_runtime,
     item_is_canonical_tap,
@@ -39,6 +40,20 @@ def test_ensure_m4l_runtime_installs_and_is_idempotent(tmp_path: Path) -> None:
     alias = dest.with_name("Copilot Audio Tap 4.amxd")
     assert alias.is_file()
     assert hashlib.sha256(alias.read_bytes()).hexdigest() == hashlib.sha256(dest.read_bytes()).hexdigest()
+
+
+def test_tap_asset_binds_capture_directory_at_provision_time(tmp_path: Path) -> None:
+    template = canonical_tap_asset()
+    asset, payload = _configured_tap_asset(
+        template=template,
+        capture_root=tmp_path / "captures",
+    )
+
+    assert asset["configured_for_host"] is True
+    assert asset["capture_dir"] == str((tmp_path / "captures").resolve())
+    assert b"__COPILOT_CAPTURE_DIR__" not in payload
+    assert b"D:/MusicCopilot/captures" not in payload
+    assert (tmp_path / "captures").resolve().as_posix().encode() in payload
 
 
 def test_ensure_m4l_runtime_blocks_unmanaged_conflict(tmp_path: Path) -> None:
