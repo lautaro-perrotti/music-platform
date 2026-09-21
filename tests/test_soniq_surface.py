@@ -310,3 +310,29 @@ def test_auto_mode_falls_back_when_soniq_fails(monkeypatch) -> None:
     assert rep["routing_mode"] == "fallback_surface"
     assert rep["soniq_attempted"] is True
     assert rep["soniq"]["error"] == "down"
+
+
+def test_auto_mode_uses_soniq_on_detector_error(monkeypatch) -> None:
+    daw, session = _seed_session_with_serum_like_device()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("device not found on track")
+
+    monkeypatch.setattr(ss, "detect_surface_completeness", _boom)
+    monkeypatch.setattr(ss, "_soniq_ws_url", lambda: "ws://127.0.0.1:9123")
+    monkeypatch.setattr(ss, "_apply_patch_via_soniq_ws", lambda contract: {"ok": True, "applied": 1})
+
+    rep = apply_patch_contract_auto_mode(
+        daw,
+        session=session,
+        contract={
+            "track": "Synth",
+            "device": "Serum 2",
+            "writes": [{"index": 1, "value": 0.6}],
+            "constraints": {},
+        },
+        throttle_ms=0,
+    )
+    assert rep["ok"] is True
+    assert rep["routing_mode"] == "soniq_full_surface"
+    assert rep["detector"]["mode"] == "detector_error"

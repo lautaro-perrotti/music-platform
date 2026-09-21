@@ -776,13 +776,28 @@ def apply_patch_contract_auto_mode(
     """
     track = str(contract.get("track") or "")
     device = str(contract.get("device") or "")
-    det = detect_surface_completeness(
-        daw,
-        session=session,
-        track_name=track,
-        device_name=device,
-        filter_midi_passthrough=False,
-    )
+    det: dict[str, Any]
+    det_error: str | None = None
+    try:
+        det = detect_surface_completeness(
+            daw,
+            session=session,
+            track_name=track,
+            device_name=device,
+            filter_midi_passthrough=False,
+        )
+    except Exception as exc:
+        det_error = str(exc)
+        det = {
+            "ok": False,
+            "mode": "detector_error",
+            "plugin": device,
+            "visible": 0,
+            "expected": _expected_count_for_device(device),
+            "ratio": None,
+            "is_full_surface": False,
+            "reason": f"detector_error:{exc}",
+        }
 
     c = dict(contract)
     c_constraints = dict(c.get("constraints") or {})
@@ -823,6 +838,7 @@ def apply_patch_contract_auto_mode(
         "ok": bool(patch.get("ok", False)),
         "routing_mode": "fallback_surface",
         "detector": det,
+        "detector_error": det_error,
         "soniq_attempted": soniq_attempted,
         "soniq": soniq_report,
         "patch": patch,
