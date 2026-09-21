@@ -8,6 +8,7 @@ Reuses bootstrap + existing preflight. Does not run Astra. No musical writes.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,8 @@ from copilot.human_eval.store import now_iso
 
 MILESTONE = "PROJECT_READY_V1"
 ARTIFACT = "project_ready_v1.json"
+BOOTSTRAP_CONVERGENCE_TIMEOUT_S = 20.0
+BOOTSTRAP_CONVERGENCE_POLL_S = 0.25
 
 
 def generic_preflight(
@@ -92,6 +95,7 @@ def project_ready(
 
     bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
     bootstrap_retry: dict[str, Any] | None = None
+    bootstrap_retry_count = 0
     session = daw.snapshot(include_notes=False)
     retain_tokens(session)
     inventory = inventory_taps(daw)
@@ -110,20 +114,27 @@ def project_ready(
     # Live can acknowledge the browser load of a Max device before the next
     # topology read exposes that device.  A clean working copy then produces a
     # transient TAP_MISSING/PARTIAL result even though the mutation succeeded.
-    # Retry once, narrowly, after re-reading topology; never retry policy or
-    # safety blocks and never create an open-ended mutation loop.
-    retry_reason = str(bootstrap.get("reason") or "")
-    retryable = (
-        bootstrap_apply
-        and bootstrap.get("status") in {"BLOCKED", "PARTIAL"}
-        and (
-            retry_reason.startswith("TAP_MISSING:")
-            or bool(bootstrap.get("missing_after"))
+    # Reconcile only while that transient state remains observable and the
+    # monotonic deadline is alive; never retry policy or safety blocks and never
+    # create an open-ended mutation loop.
+    convergence_deadline = time.monotonic() + BOOTSTRAP_CONVERGENCE_TIMEOUT_S
+    while True:
+        retry_reason = str(bootstrap.get("reason") or "")
+        retryable = (
+            bootstrap_apply
+            and bootstrap.get("status") in {"BLOCKED", "PARTIAL"}
+            and (
+                retry_reason.startswith("TAP_MISSING:")
+                or bool(bootstrap.get("missing_after"))
+            )
+            and plan_bootstrap(discovery).get("status") == "CHANGES_REQUIRED"
+            and time.monotonic() < convergence_deadline
         )
-        and plan_bootstrap(discovery).get("status") == "CHANGES_REQUIRED"
-    )
-    if retryable:
-        bootstrap_retry = bootstrap
+        if not retryable:
+            break
+        if bootstrap_retry is None:
+            bootstrap_retry = bootstrap
+        bootstrap_retry_count += 1
         bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
         session = daw.snapshot(include_notes=False)
         retain_tokens(session)
@@ -139,6 +150,9 @@ def project_ready(
             track = session.track_by_name(name)
             if track is not None:
                 host_infos[name] = daw.get_track_info(track.index)
+        remaining = convergence_deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(BOOTSTRAP_CONVERGENCE_POLL_S, remaining))
     terminal = verify_terminal_state(
         transport_playing=session.transport.playing,
         taps=inventory,
@@ -202,6 +216,7 @@ def project_ready(
             if bootstrap_retry
             else None
         ),
+        "bootstrap_retry_count": bootstrap_retry_count,
         "bootstrap_reused": BOOTSTRAP_MILESTONE,
         "preflight_kind": preflight_kind,
         "preflight_status": preflight.get("status"),

@@ -109,6 +109,15 @@ form a `ReferenceIntentBundle` without merging facts. The current real run is
 `PROVIDER_LIMITED`: CLAP and semantic-ear providers are unavailable on this
 host; the non-semantic embedding stub is not counted as semantic perception.
 
+`PLATFORM_HARDCODE_AUDIT_V1` is CODE VERIFIED, with post-change Live
+revalidation blocked by Ableton crash-recovery/bridge startup (`PORT_CLOSED`).
+Active runtime waits now converge on
+observable Live/browser state with bounded deadlines; project bootstrap retries
+by transient state until deadline; managed host identities and protocol values
+are classified as internal contracts; and unobserved Main capture capability
+fails closed. See `docs/PLATFORM_HARDCODE_AUDIT_V1.md` for the full inventory,
+the blocker evidence, and the remaining legacy-fixture boundary.
+
 ## Physical DSP (factual, not judgment)
 
 `PHYSICAL_DSP_V2` measures. It does not say muddy / professional / needs

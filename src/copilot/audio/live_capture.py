@@ -52,6 +52,8 @@ USER_LIBRARY_TAP = (
 )
 TAP_UDP_PORT = 19877
 EXPECTED_TAP_PROTOCOL = 3
+TAP_READBACK_TIMEOUT_S = 10.0
+TAP_READBACK_POLL_S = 0.10
 SONG_TIME_RESTORE_TOLERANCE_BEATS = 0.08  # ~40 ms at 120 BPM; not sample-accurate.
 SILENCE_RMS = 1.0e-4
 SILENCE_PEAK = 1.0e-3
@@ -591,6 +593,36 @@ def find_tap(
     return taps[0] if taps else None
 
 
+def wait_for_tap_readback(
+    daw: AbletonTcpAdapter,
+    track_index: int,
+    *,
+    timeout_s: float = TAP_READBACK_TIMEOUT_S,
+    poll_s: float = TAP_READBACK_POLL_S,
+) -> list[dict[str, object]]:
+    """Poll Live until a loaded tap is observable or a deadline expires.
+
+    Browser/device loading is asynchronous. A fixed post-load sleep makes
+    readiness depend on the host machine's timing. The authoritative signal
+    is the next Live readback, so convergence is bounded by a monotonic
+    deadline and returns a typed failure when it does not occur.
+    """
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    while True:
+        found = find_taps_on_track(daw, track_index, refresh=True)
+        if found:
+            return found
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(max(0.01, float(poll_s)), remaining))
+    where = "Master" if track_index == MASTER_INDEX else f"track {track_index}"
+    raise AudioCaptureError(
+        "TAP_READBACK_TIMEOUT",
+        f"Copilot Audio Tap did not become observable on {where} before deadline",
+    )
+
+
 def find_master_tap(daw: AbletonTcpAdapter) -> dict[str, object] | None:
     return find_tap(daw, MASTER_INDEX)
 
@@ -651,7 +683,6 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     if existing is not None:
         return {"already_loaded": True, "device": existing}
     install_audio_tap_device()
-    time.sleep(1.0)
     uri = _find_tap_uri(daw)
     if not uri:
         if find_master_tap(daw) is None:
@@ -664,13 +695,8 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     loaded = daw.load_instrument_or_effect(MASTER_INDEX, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(MASTER_INDEX, uri)
-    time.sleep(0.8)
-    device = find_master_tap(daw)
-    if device is None:
-        raise AudioCaptureError(
-            "TAP_MISSING",
-            f"load reported {loaded} but Master still has no {TAP_NAME}",
-        )
+    devices = wait_for_tap_readback(daw, MASTER_INDEX)
+    device = devices[0]
     return {"already_loaded": False, "device": device, "load": loaded}
 
 

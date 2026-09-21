@@ -30,7 +30,8 @@ CANONICAL_MAXPAT = CANONICAL_SOURCE.with_name("Copilot Audio Tap.maxpat")
 CAPTURE_DIR_TOKEN = b"__COPILOT_CAPTURE_DIR__"
 RUNTIME_REL = Path("Presets") / "Audio Effects" / "Max Audio Effect" / "Copilot"
 LEGACY_REL = Path("Presets") / "Audio Effects" / "Max Audio Effect" / "Copilot Audio Tap.amxd"
-BROWSER_BACKOFF = (1.0, 2.0, 4.0, 8.0)
+BROWSER_RESOLUTION_TIMEOUT_S = 15.0
+BROWSER_RESOLUTION_POLL_S = 0.25
 
 
 def canonical_tap_asset(source: Path | None = None) -> dict[str, Any]:
@@ -308,14 +309,18 @@ def verify_live_browser(
     *,
     wait: bool = False,
 ) -> dict[str, Any]:
-    delays = BROWSER_BACKOFF if wait else (0.0,)
+    deadline = time.monotonic() + (
+        BROWSER_RESOLUTION_TIMEOUT_S if wait else 0.0
+    )
     uri = None
-    for delay in delays:
-        if delay:
-            time.sleep(delay)
+    while True:
         uri = find_canonical_tap_uri(daw)
         if uri:
             break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(BROWSER_RESOLUTION_POLL_S, remaining))
     return {
         "milestone": MILESTONE,
         "LIVE_BROWSER_RESOLUTION": "VERIFIED" if uri else "BLOCKED",

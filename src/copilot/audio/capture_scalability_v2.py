@@ -129,7 +129,9 @@ def discover_capacity(
         max_concurrent_sources=max(1, concurrent) if available or protocol else LEGACY_SOURCE_CAPACITY,
         available_hosts=available,
         occupied_hosts=0,
-        main_sidecar_supported=main or True,
+        # Main sidecar support is an observed capability, not a protocol
+        # default.  Do not claim it when the inventory/session has no Main tap.
+        main_sidecar_supported=main,
         protocol_version=protocol,
         max_slot=max_slot,
         source="inventory" if inventory else ("session" if session is not None else "legacy"),

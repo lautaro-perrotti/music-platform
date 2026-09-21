@@ -33,6 +33,7 @@ from copilot.audio.live_capture import (
     staging_path,
     take_staging,
     unique_capture_path,
+    wait_for_tap_readback,
     validate_wav,
     wait_until_wav_shared_readable,
     write_analysis_wav,
@@ -127,10 +128,9 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
     loaded = daw.load_instrument_or_effect(track_index, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(track_index, uri)
-    time.sleep(0.6)
     from copilot.audio.live_capture import find_taps_on_track
 
-    found = find_taps_on_track(daw, track_index, refresh=True)
+    found = wait_for_tap_readback(daw, track_index)
     slotted = None
     for device in found:
         params = daw.get_device_parameters(track_index, int(device["index"]))
@@ -148,12 +148,10 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
                     daw.delete_device(track_index, int(device["index"]))
                 except DawError:
                     pass
-            time.sleep(0.3)
             loaded = daw.load_instrument_or_effect(track_index, alt)
             if loaded.get("error"):
                 loaded = daw.load_browser_item(track_index, alt)
-            time.sleep(0.6)
-            found = find_taps_on_track(daw, track_index, refresh=True)
+            found = wait_for_tap_readback(daw, track_index)
             for device in found:
                 params = daw.get_device_parameters(track_index, int(device["index"]))
                 names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]

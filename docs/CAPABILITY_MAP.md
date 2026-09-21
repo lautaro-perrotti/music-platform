@@ -15,6 +15,7 @@ reproducible bug.
 | Working copy policy | VERIFIED | Require a manifest-backed working copy; refuse unprotected originals. Fixture ≠ musical holdout. |
 | `CROSS_PROJECT_BOOTSTRAP_V1` | VERIFIED | Infra only. Second run `NO_CHANGES_REQUIRED`. |
 | `PROJECT_READY_V1` | VERIFIED | Identity → bootstrap → preflight. |
+| `PLATFORM_HARDCODE_AUDIT_V1` | CODE VERIFIED / LIVE BLOCKED | Active runtime audited for paths, names, timing, capabilities, retries, and fixture leakage; observable-condition waits and fail-closed capacity fixes applied. Post-change Live smoke is blocked by crash-recovery/bridge startup (`PORT_CLOSED`). |
 
 ## Observation
 
