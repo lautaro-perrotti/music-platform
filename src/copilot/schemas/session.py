@@ -36,6 +36,8 @@ class ClipState(BaseModel):
     length_beats: float
     is_midi: bool = True
     notes: list[MidiNote] = Field(default_factory=list)
+    # Audio clip sample reference (None for MIDI clips). CLIP_AUDIO_MODEL_V1.
+    sample_uri: str | None = None
 
 
 class DeviceParameter(BaseModel):

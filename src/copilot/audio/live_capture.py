@@ -18,6 +18,7 @@ from copilot.audio.measure import measure_audio
 from copilot.audio.semantics import DEFAULT_PREROLL_BEATS, region_windows
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.adapter import DawError
+from copilot.daw.detect import default_user_library_candidates
 from copilot.midi.time import bars_to_beats
 from copilot.schemas.observation import (
     CaptureView,
@@ -33,21 +34,47 @@ MASTER_INDEX = -1
 STAGING_NAME = "_next.wav"
 STAGING_KICK = "_next_kick.wav"
 STAGING_BASS = "_next_bass.wav"
-DEFAULT_CAPTURE_DIR = Path(r"D:\MusicCopilot\captures")
+DEFAULT_CAPTURE_DIR = (
+    Path(r"D:\MusicCopilot\captures")
+    if os.name == "nt"
+    else Path.home() / "Music" / "MusicCopilot" / "captures"
+)
 DEVICE_SOURCE = (
     Path(__file__).resolve().parents[3] / "devices" / "Copilot Audio Tap.amxd"
 )
-USER_LIBRARY_TAP = (
-    Path.home()
-    / "Documents"
-    / "Ableton"
-    / "User Library"
-    / "Presets"
-    / "Audio Effects"
-    / "Max Audio Effect"
-    / "Copilot"
-    / "Copilot Audio Tap.amxd"
-)
+def _resolve_user_library_tap() -> Path:
+    """Locate the installed Copilot Audio Tap .amxd inside the real User Library.
+
+    The device is installed under the User Library Ableton actually uses
+    (resolved via Library.cfg or documented defaults): ~/Music/Ableton/User
+    Library on macOS, ~/Documents/Ableton/User Library on Windows.  The old
+    Windows-only hardcode made the doctor check report a false negative on
+    macOS even though the device was correctly installed.
+    """
+    for library in default_user_library_candidates():
+        if library.exists():
+            return (
+                library
+                / "Presets"
+                / "Audio Effects"
+                / "Max Audio Effect"
+                / "Copilot"
+                / "Copilot Audio Tap.amxd"
+            )
+    return (
+        Path.home()
+        / "Documents"
+        / "Ableton"
+        / "User Library"
+        / "Presets"
+        / "Audio Effects"
+        / "Max Audio Effect"
+        / "Copilot"
+        / "Copilot Audio Tap.amxd"
+    )
+
+
+USER_LIBRARY_TAP = _resolve_user_library_tap()
 TAP_UDP_PORT = 19877
 EXPECTED_TAP_PROTOCOL = 3
 SONG_TIME_RESTORE_TOLERANCE_BEATS = 0.08  # ~40 ms at 120 BPM; not sample-accurate.
@@ -287,6 +314,15 @@ def _exclusive_open_ok(path: Path) -> dict[str, object]:
     if not path.exists():
         return {"exists": False, "exclusive": True, "error": None, "size": None}
     size = int(path.stat().st_size)
+    if os.name != "nt":
+        # No Win32 share-none semantics on POSIX. A file we can open for read
+        # is not exclusively held by another process.
+        try:
+            with path.open("rb") as handle:
+                handle.read(1)
+            return {"exists": True, "exclusive": True, "error": None, "size": size}
+        except OSError as exc:
+            return {"exists": True, "exclusive": False, "error": str(exc), "size": size}
     import ctypes
 
     generic_rw = ctypes.c_uint32(0x80000000 | 0x40000000).value
@@ -756,6 +792,25 @@ def count_copilot_taps(daw: AbletonTcpAdapter) -> dict[str, object]:
     }
 
 
+def _poll_for_master_tap(
+    daw: AbletonTcpAdapter, *, deadline_s: float = 15.0, interval_s: float = 0.5
+) -> dict[str, object] | None:
+    """Wait for the browser-loaded tap to appear on Master (bounded poll).
+
+    Ableton's browser load of a Max device is asynchronous; a single fixed
+    sleep is not enough on some machines and the device shows up late in the
+    readback. Poll instead of sleeping once and giving up.
+    """
+    deadline = time.monotonic() + deadline_s
+    while True:
+        taps = find_taps_on_track(daw, MASTER_INDEX, refresh=True)
+        if taps:
+            return taps[0]
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(interval_s)
+
+
 def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     existing = find_master_tap(daw)
     if existing is not None:
@@ -774,8 +829,7 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     loaded = daw.load_instrument_or_effect(MASTER_INDEX, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(MASTER_INDEX, uri)
-    time.sleep(0.8)
-    device = find_master_tap(daw)
+    device = _poll_for_master_tap(daw)
     if device is None:
         raise AudioCaptureError(
             "TAP_MISSING",

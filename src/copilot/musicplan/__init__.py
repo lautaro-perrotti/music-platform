@@ -24,21 +24,30 @@ from copilot.schemas.musicplan import (
     ActionTarget,
     ActionType,
     CompiledExecutionEnvelope,
+    CreateTrackActionParams,
+    DeviceLoadActionParams,
+    DeviceTweakActionParams,
     DiagnosisBinding,
     DryRunResult,
     ExecutionVerificationSpec,
     ExpectedEffect,
     MusicPlan,
     MusicalVerificationSpec,
+    PatternActionParams,
     PlanAction,
     PlanIntentClass,
     PlanStatus,
     RollbackSpec,
+    SampleLoadActionParams,
+    SetTrackMuteActionParams,
+    SampleSwapActionParams,
+    SetTrackRoutingActionParams,
+    SetDeviceRoutingActionParams,
     VerificationSpec,
     VolumeActionParams,
     VolumeOperation,
 )
-from copilot.schemas.session import SessionState, TrackState
+from copilot.schemas.session import MidiNote, SessionState, TrackState
 
 VOLUME_TOLERANCE = 0.02
 PLANS_DIR = Path("logs") / "musicplans"
@@ -168,6 +177,86 @@ def build_set_track_volume_action(
                 detail="intended_after within [0,1]",
                 expected={"min": 0.0, "max": 1.0},
             ),
+        ],
+    )
+
+
+def build_device_tweak_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_index: int,
+    parameter_name: str,
+    expected_before: float,
+    intended_after: float,
+    unit: str = "",
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+    allowed_min: float | None = None,
+    allowed_max: float | None = None,
+) -> PlanAction:
+    """Build a DEVICE_TWEAK action (adjust a native device parameter)."""
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = DeviceTweakActionParams(
+        device_index=int(device_index),
+        parameter_name=parameter_name,
+        unit=unit,
+        expected_before=float(expected_before),
+        intended_after=float(intended_after),
+        allowed_min=allowed_min,
+        allowed_max=allowed_max,
+    )
+    rollback = RollbackSpec(
+        parameter=f"device[{device_index}].{parameter_name}",
+        unit=unit or "normalized",
+        restore_value=float(expected_before),
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"device[{device_index}].{parameter_name}",
+            expected_after=float(intended_after),
+            unit=unit or "normalized",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.{parameter_name}",
+        direction="increase" if intended_after > expected_before else (
+            "decrease" if intended_after < expected_before else "none"
+        ),
+        description=f"adjust {parameter_name} on device[{device_index}] of {track.name}",
+        measurement_to_compare_after=f"device[{device_index}].{parameter_name} readback",
+        limitations=["Normalized parameter value unless a real unit is supplied."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.DEVICE_TWEAK,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="DEVICE_EXISTS", detail="device_index must exist on the track"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="rollback value prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
         ],
     )
 
@@ -480,6 +569,866 @@ def validate_musicplan(
     plan.rejection_reason = None
     return plan
 
+
+def validate_device_tweak_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a DEVICE_TWEAK plan (tokens, target, device/param readback). No writes."""
+    attach_tokens(session)
+    if not plan.actions:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "no_actions"
+        return plan
+    action = plan.actions[0]
+    if action.action_type is not ActionType.DEVICE_TWEAK:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_tweak"
+        return plan
+
+    live_project = session.project_token or session.project_identity or ""
+    live_audible = session.audible_token or ""
+
+    target_ref = _as_ref(action.target.ref)
+    resolved = resolve_track(session, target_ref)
+    track: TrackState | None = None
+    live_target = ""
+    if resolved.status is ResolveStatus.RESOLVED and resolved.track_index is not None:
+        try:
+            track = require_resolved(session, target_ref)
+            live_target = target_token(track)
+        except Exception:
+            track = None
+
+    gate = evaluate_musicplan_gate(
+        diagnosis_accepted=True,
+        diagnosis_status="SUPPORTED",
+        actionable=True,
+        cause_status="CAUSE_SUPPORTED",
+        require_cause_supported=False,
+        evidence_project_token=plan.project_state_token,
+        evidence_audible_token=plan.audible_state_token,
+        evidence_target_token=next(iter(plan.target_state_tokens.values()), None),
+        live_project_token=live_project,
+        live_audible_token=live_audible,
+        live_target_token=live_target or None,
+        require_target=True,
+        target_resolve_status=resolved.status.value,
+    )
+
+    plan = plan.model_copy(deep=True)
+    plan.gate = gate.as_dict()
+    action = plan.actions[0]
+    action.target.resolve_status = resolved.status.value
+    action.target.track_index_locator = resolved.track_index
+
+    if gate.gate != "OPEN":
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = gate.reason
+        return plan
+    if track is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = resolved.status.value
+        return plan
+
+    params = action.params
+    if not isinstance(params, DeviceTweakActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_tweak_params"
+        return plan
+
+    device = next((d for d in track.devices if int(d.index) == int(params.device_index)), None)
+    if device is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "DEVICE_NOT_FOUND"
+        return plan
+
+    param = next((pp for pp in device.parameters if pp.name.lower() == params.parameter_name.lower()), None)
+    if param is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "PARAMETER_NOT_FOUND"
+        return plan
+
+    current = float(param.value)
+    if abs(current - float(params.expected_before)) > params.readback_tolerance:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"EXPECTED_PARAM_MISMATCH current={current} expected={params.expected_before}"
+        return plan
+
+    if params.allowed_min is not None and params.intended_after < params.allowed_min:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "out_of_range_param"
+        return plan
+    if params.allowed_max is not None and params.intended_after > params.allowed_max:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "out_of_range_param"
+        return plan
+
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    # authoritative rollback from live readback
+    action.rollback = RollbackSpec(
+        parameter=action.rollback.parameter,
+        unit=action.rollback.unit,
+        restore_value=current,
+        prepared=True,
+        source="authoritative_prewrite_readback",
+    )
+    action.params.expected_before = current
+    action.verification.execution.expected_after = float(params.intended_after)
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
+def _resolve_plan_header(
+    plan: MusicPlan,
+    session: SessionState,
+    expected_type: ActionType,
+) -> tuple[MusicPlan, PlanAction | None, TrackState | None]:
+    """Shared abstention/action-type/target/gate validation for new action types."""
+    attach_tokens(session)
+    if not plan.actions:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "no_actions"
+        return plan, None, None
+    action = plan.actions[0]
+    if action.action_type is not expected_type:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"not_{expected_type.value.lower()}"
+        return plan, None, None
+
+    live_project = session.project_token or session.project_identity or ""
+    live_audible = session.audible_token or ""
+
+    target_ref = _as_ref(action.target.ref)
+    resolved = resolve_track(session, target_ref)
+    track: TrackState | None = None
+    live_target = ""
+    if resolved.status is ResolveStatus.RESOLVED and resolved.track_index is not None:
+        try:
+            track = require_resolved(session, target_ref)
+            live_target = target_token(track)
+        except Exception:
+            track = None
+
+    gate = evaluate_musicplan_gate(
+        diagnosis_accepted=True,
+        diagnosis_status="SUPPORTED",
+        actionable=True,
+        cause_status="CAUSE_SUPPORTED",
+        require_cause_supported=False,
+        evidence_project_token=plan.project_state_token,
+        evidence_audible_token=plan.audible_state_token,
+        evidence_target_token=next(iter(plan.target_state_tokens.values()), None),
+        live_project_token=live_project,
+        live_audible_token=live_audible,
+        live_target_token=live_target or None,
+        require_target=True,
+        target_resolve_status=resolved.status.value,
+    )
+
+    plan = plan.model_copy(deep=True)
+    plan.gate = gate.as_dict()
+    action = plan.actions[0]
+    action.target.resolve_status = resolved.status.value
+    action.target.track_index_locator = resolved.track_index
+
+    if gate.gate != "OPEN":
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = gate.reason
+        return plan, None, None
+    if track is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = resolved.status.value
+        return plan, None, None
+    return plan, action, track
+
+
+def build_device_load_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_name: str,
+    device_uri: str,
+    reason: str,
+    evidence_refs: list[str],
+    device_index_hint: int = -1,
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = DeviceLoadActionParams(
+        device_name=device_name,
+        device_uri=device_uri,
+        device_index_hint=device_index_hint,
+    )
+    rollback = RollbackSpec(
+        parameter="device",
+        unit="",
+        restore_value=-1.0,
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"device[{device_name}]",
+            expected_after=1.0,
+            unit="present",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.devices",
+        direction="add",
+        description=f"load native device {device_name}",
+        measurement_to_compare_after=f"device presence of {device_name}",
+        limitations=["Device loaded but not yet tuned."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.DEVICE_LOAD,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_device inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_device_load_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a DEVICE_LOAD plan (tokens, target, device uri, not duplicate). No writes."""
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.DEVICE_LOAD)
+    if action is None:
+        return plan
+
+    params = action.params
+    if not isinstance(params, DeviceLoadActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_device_load_params"
+        return plan
+    if not params.device_uri:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "device_uri_required"
+        return plan
+    existing = [d.name for d in track.devices if d.name.lower() == params.device_name.lower()]
+    if existing:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"DEVICE_ALREADY_PRESENT {params.device_name}"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
+def build_sample_swap_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    sample_uri: str,
+    reason: str,
+    evidence_refs: list[str],
+    previous_sample_uri: str | None = None,
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SampleSwapActionParams(
+        clip_index=clip_index,
+        sample_uri=sample_uri,
+        previous_sample_uri=previous_sample_uri,
+    )
+    rollback = RollbackSpec(
+        parameter="clip_sample",
+        unit="uri",
+        restore_value=-1.0,
+        prepared=True,
+    )
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"clip[{clip_index}].sample",
+            expected_after=1.0,
+            unit="swapped",
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later",
+            deferred=True,
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.clip[{clip_index}].sample",
+        direction="swap",
+        description=f"swap sample on clip slot {clip_index} to {sample_uri}",
+        measurement_to_compare_after=f"sample reference of clip {clip_index}",
+        limitations=["Sample reference readback requires audio clip model."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SAMPLE_SWAP,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="CLIP_EXISTS", detail="clip_index must resolve on track"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="previous sample captured for restore"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_sample_swap_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a SAMPLE_SWAP plan (tokens, target, clip slot, sample uri). No writes."""
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.SAMPLE_SWAP)
+    if action is None:
+        return plan
+
+    params = action.params
+    if not isinstance(params, SampleSwapActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_sample_swap_params"
+        return plan
+    if not params.sample_uri:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "sample_uri_required"
+        return plan
+    clip = next((c for c in track.clips if c.slot_index == params.clip_index), None)
+    if clip is None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"CLIP_NOT_FOUND slot={params.clip_index} slots={[c.slot_index for c in track.clips]}"
+        return plan
+    if clip.is_midi:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"CLIP_NOT_AUDIO slot={params.clip_index}"
+        return plan
+    if params.previous_sample_uri is None:
+        params.previous_sample_uri = clip.sample_uri
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
+def build_create_track_action(
+    *,
+    project_identity: str,
+    track_name: str,
+    track_kind: str = "audio",
+    reason: str,
+    evidence_refs: list[str],
+    index_hint: int = -1,
+) -> PlanAction:
+    ref = PersistentObjectRef(
+        object_type="track",
+        project_identity=project_identity,
+        role=track_kind,
+        name=track_name,
+        device_names=[],
+        device_classes=[],
+        clip_slots=[],
+        clip_names=[],
+        note_counts=[],
+    )
+    params = CreateTrackActionParams(
+        track_name=track_name,
+        track_kind=track_kind,
+        index_hint=index_hint,
+    )
+    rollback = RollbackSpec(parameter="track", unit="", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"track[{track_name}]", expected_after=1.0, unit="present"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target="session.tracks",
+        direction="add",
+        description=f"create {track_kind} track {track_name}",
+        measurement_to_compare_after=f"track presence of {track_name}",
+        limitations=["Track created empty."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.CREATE_TRACK,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None,
+            track_index_locator=None,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="TRACK_NAME_UNIQUE", detail="no existing track with this name"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_track inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_create_track_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a CREATE_TRACK plan (tokens, name uniqueness). No existing target."""
+    attach_tokens(session)
+    if not plan.actions:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "no_actions"
+        return plan
+    action = plan.actions[0]
+    if action.action_type is not ActionType.CREATE_TRACK:
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_create_track"
+        return plan
+    params = action.params
+    if not isinstance(params, CreateTrackActionParams):
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_create_track_params"
+        return plan
+
+    live_project = session.project_token or session.project_identity or ""
+    live_audible = session.audible_token or ""
+    gate = evaluate_musicplan_gate(
+        diagnosis_accepted=True,
+        diagnosis_status="SUPPORTED",
+        actionable=True,
+        cause_status="CAUSE_SUPPORTED",
+        require_cause_supported=False,
+        evidence_project_token=plan.project_state_token,
+        evidence_audible_token=plan.audible_state_token,
+        evidence_target_token=None,
+        live_project_token=live_project,
+        live_audible_token=live_audible,
+        live_target_token=None,
+        require_audible=True,
+        require_target=False,
+        target_resolve_status=None,
+    )
+    plan = plan.model_copy(deep=True)
+    plan.gate = gate.as_dict()
+    action = plan.actions[0]
+    if gate.gate != "OPEN":
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = gate.reason
+        return plan
+    if any(t.name == params.track_name for t in session.tracks):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"TRACK_ALREADY_EXISTS {params.track_name}"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
+def build_sample_load_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    sample_uri: str,
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SampleLoadActionParams(clip_index=clip_index, sample_uri=sample_uri)
+    rollback = RollbackSpec(parameter="clip", unit="slot", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"clip[{clip_index}].sample", expected_after=1.0, unit="loaded"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.clip[{clip_index}].sample",
+        direction="load",
+        description=f"load sample {sample_uri} into clip slot {clip_index}",
+        measurement_to_compare_after=f"sample reference of clip {clip_index}",
+        limitations=["Sample loaded; not yet arranged/tuned."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SAMPLE_LOAD,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="SLOT_EMPTY", detail="clip_index slot must be empty"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_clip inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def validate_sample_load_plan(
+    plan: MusicPlan,
+    *,
+    session: SessionState,
+) -> MusicPlan:
+    """Validate a SAMPLE_LOAD plan (tokens, target, empty slot). No writes."""
+    plan, action, track = _resolve_plan_header(plan, session, ActionType.SAMPLE_LOAD)
+    if action is None:
+        return plan
+    params = action.params
+    if not isinstance(params, SampleLoadActionParams):
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "not_sample_load_params"
+        return plan
+    if not params.sample_uri:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "sample_uri_required"
+        return plan
+    if params.clip_index < 0:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"CLIP_INDEX_INVALID {params.clip_index}"
+        return plan
+    existing = next((c for c in track.clips if c.slot_index == params.clip_index), None)
+    if existing is not None:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = f"SLOT_OCCUPIED {params.clip_index} (use SAMPLE_SWAP)"
+        return plan
+    if not action.rollback or not action.rollback.prepared:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_rollback"
+        return plan
+    if not action.verification or not action.verification.execution:
+        plan.status = PlanStatus.REJECTED
+        plan.rejection_reason = "missing_verification_spec"
+        return plan
+    plan.status = PlanStatus.READY_FOR_EXECUTION
+    plan.rejection_reason = None
+    return plan
+
+
+def build_pattern_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    length_beats: float,
+    notes: list[MidiNote],
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = PatternActionParams(
+        clip_index=clip_index, length_beats=length_beats, notes=list(notes)
+    )
+    rollback = RollbackSpec(parameter="pattern", unit="clip", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"clip[{clip_index}].notes", expected_after=1.0, unit="patterned"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.clip[{clip_index}].notes",
+        direction="add",
+        description=f"create {len(notes)}-note drum pattern on clip {clip_index}",
+        measurement_to_compare_after=f"note count of clip {clip_index}",
+        limitations=["Pattern is MIDI trigger data; sample mapping via Drum Rack later."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.CREATE_PATTERN,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_clip inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def build_set_track_mute_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    mute: bool,
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SetTrackMuteActionParams(mute=bool(mute))
+    rollback = RollbackSpec(parameter="mute", unit="bool", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"track.mute", expected_after=1.0, unit="state"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.mute",
+        direction="mute" if mute else "unmute",
+        description=f"{'mute' if mute else 'unmute'} track {track.name}",
+        measurement_to_compare_after=f"mute state of {track.name}",
+        limitations=["Arrangement muting only; playback/looping is a later layer."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SET_TRACK_MUTE,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="mute inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+def build_set_track_routing_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    routing_type: str,
+    routing_channel: str = "",
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SetTrackRoutingActionParams(routing_type=routing_type, routing_channel=routing_channel)
+    rollback = RollbackSpec(parameter="routing", unit="bus", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter=f"track.routing", expected_after=1.0, unit="state"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.routing",
+        direction="route",
+        description=f"route {track.name} to bus {routing_channel or routing_type}",
+        measurement_to_compare_after=f"output routing of {track.name}",
+        limitations=["Bus processing applied on the group track."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SET_TRACK_ROUTING,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="routing inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
+
+
+
+def build_set_device_routing_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    device_index: int,
+    routing_type: str = "Track",
+    routing_channel: str = "",
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    ref = ref_from_track(track, project_identity=project_identity)
+    runtime = None
+    if session_incarnation_id:
+        runtime = runtime_from_track(track, session_incarnation_id=session_incarnation_id)
+    params = SetDeviceRoutingActionParams(
+        device_index=device_index, routing_type=routing_type, routing_channel=routing_channel
+    )
+    rollback = RollbackSpec(parameter="device.routing", unit="source", restore_value=-1.0, prepared=True)
+    verification = VerificationSpec(
+        execution=ExecutionVerificationSpec(
+            parameter="device.input_routing", expected_after=1.0, unit="state"
+        ),
+        musical=MusicalVerificationSpec(
+            comparison="recapture_vs_baseline_later", deferred=True
+        ),
+    )
+    effect = ExpectedEffect(
+        affected_target=f"{track.name}.device[{device_index}].input_routing",
+        direction="route",
+        description=f"route {track.name} device[{device_index}] sidechain input to {routing_channel or routing_type}",
+        measurement_to_compare_after=f"sidechain source of {track.name} device[{device_index}]",
+        limitations=["Sidechain source is a device input routing."],
+    )
+    return PlanAction(
+        action_id=new_action_id(),
+        action_type=ActionType.SET_DEVICE_ROUTING,
+        target=ActionTarget(
+            ref=ref.model_dump(mode="json"),
+            runtime_id=None if runtime is None else runtime.model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=params,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        expected_effect=effect,
+        verification=verification,
+        rollback=rollback,
+        reversible=True,
+        preconditions=[
+            ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
+            ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
+            ActionPrecondition(code="ROLLBACK_PREPARED", detail="routing inverse prepared"),
+            ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
+        ],
+    )
 
 def compile_execution_envelope(
     plan: MusicPlan,

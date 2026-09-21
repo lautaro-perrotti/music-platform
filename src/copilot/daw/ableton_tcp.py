@@ -62,6 +62,7 @@ class AbletonTcpAdapter(DawAdapter):
         require_local_host(host)
         self.host = host
         self.port = port
+        self._device_uri_cache: dict[str, str] = {}
         self.timeouts = timeouts or DEFAULT_TIMEOUTS
         self._sock: socket.socket | None = None
         self.ids = IdentityRegistry()
@@ -270,7 +271,7 @@ class AbletonTcpAdapter(DawAdapter):
             name = info.get("name") or f"Track {index}"
             tracks.append(
                 TrackState(
-                    stable_id="",
+                    stable_id=name,
                     index=index,
                     name=name,
                     role=role,
@@ -323,6 +324,7 @@ class AbletonTcpAdapter(DawAdapter):
                         length_beats=float(clip.get("length", 0.0)),
                         is_midi=bool(info.get("is_midi_track")),
                         notes=notes,
+                        sample_uri=clip.get("sample_uri") or clip.get("sample_path") or None,
                     )
                 )
             devices[index] = [
@@ -640,6 +642,27 @@ class AbletonTcpAdapter(DawAdapter):
     def get_track_output_routing(self, track_index: int) -> dict[str, Any]:
         return self._command("get_track_output_routing", {"track_index": track_index})
 
+    def get_track_available_input_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_input_types", {"track_index": track_index})
+
+    def get_track_available_output_types(self, track_index: int) -> dict[str, Any]:
+        return self._command("get_track_available_output_types", {"track_index": track_index})
+
+    def get_session_automation_record(self) -> dict[str, Any]:
+        return self._command("get_session_automation_record", {})
+
+    def get_clip_automation(
+        self, track_index: int, clip_index: int, parameter_name: str
+    ) -> dict[str, Any]:
+        return self._command(
+            "get_clip_automation",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+            },
+        )
+
     def set_track_input_routing(
         self,
         track_index: int,
@@ -666,6 +689,23 @@ class AbletonTcpAdapter(DawAdapter):
             "set_track_output_routing",
             {
                 "track_index": track_index,
+                "routing_type": routing_type,
+                "routing_channel": routing_channel,
+            },
+            side_effect=True,
+        )
+
+    def save_session(self) -> dict[str, Any]:
+        return self._command("save", {}, side_effect=True)
+
+    def set_device_input_routing(
+        self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
+    ) -> dict[str, Any]:
+        return self._command(
+            "set_device_input_routing",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
                 "routing_type": routing_type,
                 "routing_channel": routing_channel,
             },
@@ -827,6 +867,24 @@ class AbletonTcpAdapter(DawAdapter):
             side_effect=True,
         )
 
+    def duplicate_clip_to_arrangement(
+        self,
+        track_index: int,
+        clip_index: int,
+        destination_time: float,
+        length: float | None = None,
+    ) -> dict[str, Any]:
+        return self._command(
+            "duplicate_clip_to_arrangement",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "destination_time": destination_time,
+                "length": length,
+            },
+            side_effect=True,
+        )
+
     def fire_clip(self, track_index: int, clip_index: int) -> dict[str, Any]:
         return self._command(
             "fire_clip",
@@ -847,6 +905,20 @@ class AbletonTcpAdapter(DawAdapter):
     def stop_clips(self, clips: list[dict[str, Any]]) -> dict[str, Any]:
         return self._command("stop_clips", {"clips": clips}, side_effect=True)
 
+    def bridge_command(
+        self,
+        command_type: str,
+        params: dict[str, Any] | None = None,
+        *,
+        side_effect: bool | None = None,
+    ) -> dict[str, Any]:
+        if side_effect is None:
+            side_effect = not (
+                command_type.startswith("get_")
+                or command_type in {"health_check", "protocol_hello"}
+            )
+        return self._command(command_type, params or {}, side_effect=bool(side_effect))
+
     def search_browser(self, query: str, category: str = "all") -> dict[str, Any]:
         return self._command(
             "search_browser", {"query": query, "category": category}
@@ -858,16 +930,66 @@ class AbletonTcpAdapter(DawAdapter):
     def load_instrument_or_effect(
         self, track_index: int, uri: str
     ) -> dict[str, Any]:
+        # The live bridge needs a browser query URI (e.g. "query:AudioFx#EQ%20Eight").
+        # Accept a bare name ("EQ Eight") OR a mock-style path ("devices/audio-effects/EQ Eight"):
+        # extract the device name and resolve via search_browser, CACHED so a 52-device
+        # build does not re-search the browser for every load.
+        if not uri.startswith("query:"):
+            name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+            if name not in self._device_uri_cache:
+                sr = self.search_browser(name, "audio_effects")
+                results = sr.get("results", []) if isinstance(sr, dict) else []
+                if not results:
+                    sr = self.search_browser(name, "all")
+                    results = sr.get("results", []) if isinstance(sr, dict) else []
+                device = next((r for r in results if r.get("is_device")), None)
+                self._device_uri_cache[name] = device.get("uri", uri) if device else uri
+            uri = self._device_uri_cache[name]
         return self._command(
             "load_instrument_or_effect",
             {"track_index": track_index, "uri": uri},
             side_effect=True,
         )
 
-    def load_browser_item(self, track_index: int, item_uri: str) -> dict[str, Any]:
+    def load_browser_item(
+        self, track_index: int, item_uri: str, clip_index: int | None = None
+    ) -> dict[str, Any]:
+        # The live bridge loads a BROWSER item, not a file path. Resolve local
+        # sample paths (e.g. /Volumes/Lucas/Samples/.../kick.wav) to a browser URI
+        # by searching the filename stem across all categories (incl. Places).
+        # Non-query URIs are library-relative sample paths: navigate the user Places
+        # by path (O(depth), fast) instead of a full recursive browser search.
+        if item_uri and not item_uri.startswith("query:"):
+            return self._command(
+                "load_browser_item_by_path",
+                {
+                    "track_index": track_index,
+                    "rel_path": item_uri,
+                    "clip_index": clip_index if clip_index is not None else 0,
+                },
+                side_effect=True,
+            )
+        params: dict[str, Any] = {"track_index": track_index, "item_uri": item_uri}
+        if clip_index is not None:
+            params["clip_index"] = clip_index
+        return self._command("load_browser_item", params, side_effect=True)
+
+    def get_device_by_name(self, track_index: int, device_name: str) -> dict[str, Any]:
         return self._command(
-            "load_browser_item",
-            {"track_index": track_index, "item_uri": item_uri},
+            "get_device_by_name",
+            {"track_index": track_index, "device_name": device_name},
+        )
+
+    def load_device_preset(
+        self, track_index: int, device_index: int, preset_uri: str
+    ) -> dict[str, Any]:
+        return self._command(
+            "load_device_preset",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "preset_uri": preset_uri,
+            },
             side_effect=True,
         )
 

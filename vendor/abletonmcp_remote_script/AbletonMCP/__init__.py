@@ -262,11 +262,16 @@ class AbletonMCP(ControlSurface):
                         "session.read",
                         "session.transport",
                         "track.create_midi",
+                        "track.create_audio",
+                        "track.create_return",
                         "track.delete",
                         "track.rename",
                         "track.volume",
                         "track.mute",
+                        "track.group",
+                        "track.routing",
                         "clip.create",
+                        "clip.create_audio",
                         "clip.delete",
                         "clip.rename",
                         "clip.read_notes",
@@ -274,6 +279,8 @@ class AbletonMCP(ControlSurface):
                         "clip.fire",
                         "device.set_parameter",
                         "device.load",
+                        "browser.load",
+                        "browser.search",
                         "audio.capture_master",
                     ],
                     "bind": "127.0.0.1",
@@ -614,12 +621,12 @@ class AbletonMCP(ControlSurface):
                                  "set_track_volume", "set_track_pan",
                                  "delete_track", "duplicate_track", "set_track_color",
                                  "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
-                                 "duplicate_clip", "set_clip_color", "set_clip_loop",
+                                 "duplicate_clip", "duplicate_clip_to_arrangement", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "start_playback", "stop_playback", "load_browser_item", "load_browser_item_by_path",
                                  "load_instrument_or_effect",
-                                 "set_device_parameter", "toggle_device", "delete_device",
+                                 "set_device_parameter", "set_device_parameters", "toggle_device", "delete_device",
                                  "create_scene", "delete_scene", "fire_scene", "stop_scene",
                                  "set_scene_name", "set_scene_color", "duplicate_scene",
                                  "undo", "redo",
@@ -628,7 +635,7 @@ class AbletonMCP(ControlSurface):
                                  "start_recording", "stop_recording", "toggle_session_record",
                                  "toggle_arrangement_record", "set_overdub", "capture_midi",
                                  "set_arrangement_loop", "jump_to_time", "create_locator", "delete_locator",
-                                 "set_track_input_routing", "set_track_output_routing",
+                                 "set_track_input_routing", "set_track_output_routing", "set_device_input_routing", "save",
                                  "set_metronome",
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
                                  "generate_drum_pattern", "generate_bassline",
@@ -837,7 +844,13 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
-                            result = self._load_browser_item(track_index, item_uri)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._load_browser_item(track_index, item_uri, clip_index)
+                        elif command_type == "load_browser_item_by_path":
+                            track_index = params.get("track_index", 0)
+                            rel_path = params.get("rel_path", "")
+                            clip_index = params.get("clip_index", 0)
+                            result = self._load_browser_item_by_path(track_index, rel_path, clip_index)
                         elif command_type == "set_device_parameter":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -895,6 +908,14 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             result = self._duplicate_clip(track_index, clip_index)
+                        elif command_type == "duplicate_clip_to_arrangement":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            destination_time = params.get("destination_time", 0.0)
+                            length = params.get("length", None)
+                            result = self._duplicate_clip_to_arrangement(
+                                track_index, clip_index, destination_time, length
+                            )
                         elif command_type == "set_clip_color":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -999,6 +1020,14 @@ class AbletonMCP(ControlSurface):
                             routing_type = params.get("routing_type", "")
                             routing_channel = params.get("routing_channel", "")
                             result = self._set_track_output_routing(track_index, routing_type, routing_channel)
+                        elif command_type == "set_device_input_routing":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            routing_type = params.get("routing_type", "")
+                            routing_channel = params.get("routing_channel", "")
+                            result = self._set_device_input_routing(track_index, device_index, routing_type, routing_channel)
+                        elif command_type == "save":
+                            result = self._save_session()
                         # Metronome control
                         elif command_type == "set_metronome":
                             enabled = params.get("enabled", True)
@@ -1936,6 +1965,10 @@ class AbletonMCP(ControlSurface):
                         "is_playing": clip.is_playing,
                         "is_recording": clip.is_recording
                     }
+                    if not track.has_midi_input:
+                        # Audio clip: the clip name is the sample file name.
+                        clip_info["sample_uri"] = clip.name
+                        clip_info["sample_path"] = clip.name
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -3074,6 +3107,54 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error duplicating clip: " + str(e))
             raise
 
+    def _duplicate_clip_to_arrangement(self, track_index, clip_index, destination_time, length=None):
+        """Duplicate a session clip into the Arrangement at destination_time (beats).
+
+        Optionally extend the resulting arrangement clip to `length` beats and
+        enable looping so it spans the full section.
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+            bar_beats = 4.0
+            if length is not None and float(length) > bar_beats:
+                # per-bar duplication: place one copy every bar (source clip is a
+                # 1-bar loop, so copies tile the section exactly). Avoids relying
+                # on Clip.end_time (read-only) / duplicate_loop (MIDI-only).
+                n = int(round(float(length) / bar_beats))
+                names = []
+                dst = float(destination_time)
+                for i in range(n):
+                    arr_clip = track.duplicate_clip_to_arrangement(clip, dst + i * bar_beats)
+                    names.append(arr_clip.name)
+                return {
+                    "duplicated": True,
+                    "copies": n,
+                    "start_time": dst,
+                    "length": n * bar_beats,
+                    "looping": True,
+                    "names": names,
+                }
+            arr_clip = track.duplicate_clip_to_arrangement(clip, float(destination_time))
+            return {
+                "duplicated": True,
+                "name": arr_clip.name,
+                "start_time": arr_clip.start_time,
+                "end_time": arr_clip.end_time,
+                "length": arr_clip.length,
+                "looping": bool(getattr(arr_clip, "looping", False)),
+            }
+        except Exception as e:
+            self.log_message("Error duplicating clip to arrangement: " + str(e))
+            raise
+
     def _set_clip_color(self, track_index, clip_index, color):
         """Set the color of a clip"""
         try:
@@ -3819,6 +3900,37 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting available inputs: " + str(e))
             raise
 
+    def _set_device_input_routing(self, track_index, device_index, routing_type, routing_channel):
+        """Set a device's input routing (e.g. Compressor sidechain Audio-From)."""
+        try:
+            track = self._song.tracks[track_index]
+            device = track.devices[device_index]
+            matched_type = self._match_routing(
+                getattr(device, "available_input_routing_types", []), routing_type
+            )
+            if matched_type is not None:
+                device.input_routing_type = matched_type
+            matched_channel = None
+            if routing_channel:
+                matched_channel = self._match_routing(
+                    getattr(device, "available_input_routing_channels", []), routing_channel
+                )
+                if matched_channel is not None:
+                    device.input_routing_channel = matched_channel
+            def _dn(v):
+                return str(v.display_name) if hasattr(v, "display_name") else str(v)
+            return {
+                "track_index": track_index,
+                "device_index": device_index,
+                "input_routing_type": _dn(device.input_routing_type),
+                "input_routing_channel": _dn(device.input_routing_channel),
+                "type_matched": matched_type is not None,
+                "channel_matched": matched_channel is not None if routing_channel else None,
+            }
+        except Exception as e:
+            self.log_message("Error setting device input routing: " + str(e))
+            raise
+
     def _get_available_outputs(self, track_index):
         """Get available output routing options for a track"""
         try:
@@ -3947,6 +4059,23 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting session path: " + str(e))
+            raise
+
+    def _save_session(self):
+        """Save the current Live Set to disk (persists the built track)."""
+        try:
+            app = self.application()
+            doc = app.get_document() if hasattr(app, "get_document") else None
+            song = doc or self._song
+            saved = False
+            path = None
+            if song is not None and hasattr(song, "save"):
+                song.save()
+                saved = True
+                path = song.file_path if hasattr(song, "file_path") else None
+            return {"saved": saved, "path": path}
+        except Exception as e:
+            self.log_message("Error saving session: " + str(e))
             raise
 
     def _is_session_modified(self):
@@ -4692,14 +4821,10 @@ class AbletonMCP(ControlSurface):
             # Sort indices in descending order for proper grouping
             sorted_indices = sorted(track_indices, reverse=True)
 
-            # Select the tracks
-            for idx in sorted_indices:
-                self._song.tracks[idx].is_grouped = True
-
-            # Create group - this may require using Live's grouping functionality
-            # In Ableton's API, tracks can be grouped by setting is_part_of_selection
-            # and using the song's create_group_track method if available
-
+            # NOTE: Ableton's LOM has no programmatic "group tracks" API
+            # (Track.is_grouped is read-only; Song has no create_group_track).
+            # Buses are implemented as audio tracks + output routing instead.
+            # Return a clear, non-raising result so callers can fall back.
             if hasattr(self._song, 'create_group_track'):
                 # Select the tracks first
                 self._song.view.selected_track = self._song.tracks[sorted_indices[0]]
@@ -5109,26 +5234,82 @@ class AbletonMCP(ControlSurface):
     
     
     
-    def _load_browser_item(self, track_index, item_uri):
-        """Load a browser item onto a track by its URI"""
+    def _load_browser_item_by_path(self, track_index, rel_path, clip_index=0):
+        """Navigate the user Places by relative path and load the item onto a clip slot.
+
+        O(depth) navigation (not a full recursive search) so large sample folders load fast.
+        """
+        parts = [p for p in rel_path.replace("\\", "/").split("/") if p]
+        if not parts:
+            raise ValueError("empty rel_path")
+        app = self.application()
+        browser = app.browser
+        item = None
+        remaining = parts
+        if hasattr(browser, "user_folders"):
+            # parts[0] may be a Place name itself...
+            for folder in browser.user_folders:
+                if folder.name.lower() == parts[0].lower():
+                    item = folder
+                    remaining = parts[1:]
+                    break
+            # ...or a top-level folder inside one of the Places (common case).
+            if item is None:
+                for folder in browser.user_folders:
+                    if hasattr(folder, "children"):
+                        for child in folder.children:
+                            if child.name.lower() == parts[0].lower():
+                                item = child
+                                remaining = parts[1:]
+                                break
+                    if item is not None:
+                        break
+        if item is None:
+            raise ValueError("Place '{0}' not found in user folders".format(parts[0]))
+        for part in remaining:
+            nxt = None
+            if hasattr(item, "children"):
+                for child in item.children:
+                    if child.name.lower() == part.lower():
+                        nxt = child
+                        break
+            if nxt is None:
+                raise ValueError("Path part '{0}' not found under '{1}'".format(part, item.name))
+            item = nxt
+        track = self._resolve_track(track_index)
+        self._song.view.selected_track = track
+        if 0 <= clip_index < len(track.clip_slots):
+            self._song.view.highlighted_clip_slot = track.clip_slots[clip_index]
+        app.browser.load_item(item)
+        return {
+            "loaded": True,
+            "item_name": item.name,
+            "track_name": track.name,
+            "uri": item.uri if hasattr(item, "uri") else rel_path,
+        }
+
+    def _load_browser_item(self, track_index, item_uri, clip_index=0):
+        """Load a browser item onto a track's clip slot by its URI"""
         try:
             track = self._resolve_track(track_index)
-            
+
             # Access the application's browser instance instead of creating a new one
             app = self.application()
-            
+
             # Find the browser item by URI
             item = self._find_browser_item_by_uri(app.browser, item_uri)
-            
+
             if not item:
                 raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
-            
-            # Select the track
+
+            # Select the track AND its clip slot so load_item lands in Session View
             self._song.view.selected_track = track
-            
+            if 0 <= clip_index < len(track.clip_slots):
+                self._song.view.highlighted_clip_slot = track.clip_slots[clip_index]
+
             # Load the item
             app.browser.load_item(item)
-            
+
             result = {
                 "loaded": True,
                 "item_name": item.name,
@@ -5166,7 +5347,9 @@ class AbletonMCP(ControlSurface):
                 for extra in ("user_library", "current_project", "plugins", "maxforlive", "packs"):
                     if hasattr(browser_or_item, extra):
                         categories.append(getattr(browser_or_item, extra))
-                
+                if hasattr(browser_or_item, "user_folders"):
+                    categories.extend(list(browser_or_item.user_folders))
+
                 for category in categories:
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)
                     if item:

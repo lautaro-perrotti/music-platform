@@ -443,6 +443,26 @@ class TransactionManager:
         if op == "set_mixer_volume":
             self.daw.set_mixer_volume(locator.track_index, float(params["volume"]))
             return
+        if op == "set_track_mute":
+            self.daw.set_track_mute(locator.track_index, bool(params["mute"]))
+            return
+        if op == "set_track_output_routing":
+            self.daw.set_track_output_routing(
+                locator.track_index,
+                str(params["output_type"]),
+                str(params.get("output_channel", "")),
+            )
+            return
+        if op == "set_device_input_routing":
+            if locator.device_index is None:
+                raise RollbackConflict("Device input routing inverse missing current device locator")
+            self.daw.set_device_input_routing(
+                locator.track_index,
+                locator.device_index,
+                str(params["input_type"]),
+                str(params.get("input_channel", "")),
+            )
+            return
         if op == "set_device_parameter":
             if locator.device_index is None or locator.parameter_index is None:
                 raise RollbackConflict("Device inverse missing current locator")
@@ -451,6 +471,16 @@ class TransactionManager:
                 locator.device_index,
                 locator.parameter_index,
                 float(params["value"]),
+            )
+            return
+        if op == "delete_device":
+            if locator.device_index is None:
+                raise RollbackConflict("Device inverse missing current device locator")
+            self.daw.delete_device(locator.track_index, locator.device_index)
+            return
+        if op == "load_browser_item":
+            self.daw.load_browser_item(
+                locator.track_index, str(params["item_uri"]), clip_index=locator.clip_index
             )
             return
         raise DawError(f"Unsupported inverse: {op}")

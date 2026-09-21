@@ -71,6 +71,7 @@ CANONICAL_COMMANDS = (
     "producer-run",
     "cross-project-validate",
     "import-project",
+    "sample-library",
     "regression-v1",
     "capabilities",
 )
@@ -143,7 +144,12 @@ def main(argv: list[str] | None = None) -> int:
             "producer-analyze",
             "producer-run",
             "cross-project-validate",
+            "downstream-causal-state",
+            "sidechain-automation-state",
             "import-project",
+            "sample-library",
+            "track-build",
+            "vibe",
             "install",
             "uninstall-copilot",
             "doctor",
@@ -168,6 +174,16 @@ def main(argv: list[str] | None = None) -> int:
         "--lab",
         action="store_true",
         help="Required for legacy/lab capture runners (live3r*, mock-slice1, live2*).",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="track-build/vibe: run against the real Ableton TCP bridge instead of the mock.",
+    )
+    parser.add_argument(
+        "--leave",
+        action="store_true",
+        help="track-build/vibe: skip the rollback and LEAVE the built track in the set.",
     )
     parser.add_argument(
         "--dry-run",
@@ -367,8 +383,31 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "cross-project-validate":
         return _cross_project_validate(evidence, logger)
+    if args.command == "downstream-causal-state":
+        return _downstream_causal_state(
+            evidence, logger,
+            region_id=args.region or "DOWNSTREAM",
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+            source_names=args.eval_argv or None,
+        )
+
+    if args.command == "sidechain-automation-state":
+        return _sidechain_automation_state(
+            evidence, logger,
+            region_id=args.region or "SIDECHAIN",
+            start_qn=args.start_qn,
+            end_qn=args.end_qn,
+            source_names=args.eval_argv or None,
+        )
     if args.command == "import-project":
         return _import_project(evidence, logger, args.eval_argv)
+    if args.command == "sample-library":
+        return _sample_library(evidence, logger, args.eval_argv)
+    if args.command == "track-build":
+        return _track_build(evidence, logger, args.eval_argv, live=bool(args.live), leave=bool(args.leave))
+    if args.command == "vibe":
+        return _vibe(evidence, logger, args.eval_argv, live=bool(args.live), leave=bool(args.leave))
     if args.command == "install":
         from copilot.installing.second_machine_installer_v1 import run_installer
 
@@ -2449,6 +2488,229 @@ def _cross_project_validate(evidence: Path, logger) -> int:
     return 0 if status in {NEXT_READ_ONLY_VERIFIED, NEXT_VOLUME_LOOP} else 2
 
 
+def _downstream_causal_state(
+    evidence: Path,
+    logger,
+    *,
+    region_id: str,
+    start_qn: float | None,
+    end_qn: float | None,
+    source_names: list[str] | None,
+) -> int:
+    from copilot.audio.downstream_causal_state_v1 import run_downstream_causal_state_v1
+
+    connected = _connect_live_or_block(evidence, "downstream_causal_state_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = run_downstream_causal_state_v1(
+            connected,
+            evidence=evidence,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+            source_names=source_names,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("downstream-causal-state status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("status") in {"VERIFIED", "READ_ONLY_EVIDENCE"} else 2
+
+
+def _sidechain_automation_state(
+    evidence: Path,
+    logger,
+    *,
+    region_id: str,
+    start_qn: float | None,
+    end_qn: float | None,
+    source_names: list[str] | None,
+) -> int:
+    from copilot.audio.sidechain_automation_state_v1 import run_sidechain_automation_state
+
+    connected = _connect_live_or_block(evidence, "sidechain_automation_state_v1.json")
+    if isinstance(connected, dict):
+        print(json.dumps(connected, indent=2, default=str))
+        return 2
+    try:
+        report = run_sidechain_automation_state(
+            connected,
+            evidence=evidence,
+            region_id=region_id,
+            start_qn=start_qn,
+            end_qn=end_qn,
+            source_names=source_names,
+        )
+    finally:
+        connected.disconnect()
+    logger.info("sidechain-automation-state status=%s", report.get("status"))
+    print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    return 0 if report.get("status") in {"VERIFIED", "READ_ONLY_EVIDENCE"} else 2
+
+
+def _sample_library(evidence: Path, logger, argv: list[str]) -> int:
+    from copilot.sample_library.library_v1 import index_library, load_index, search
+    from copilot.sample_library.schemas import SampleRole
+
+    roots_file = evidence / "sample_library_roots.json"
+    index_path = evidence / "sample_library_index.json"
+
+    if not argv:
+        print("uso: sample-library add|index|status|search|embed|retrieve|scan-key")
+        return 2
+
+    sub = argv[0]
+    if sub == "add":
+        if len(argv) < 2:
+            print("uso: sample-library add <folder>")
+            return 2
+        root = Path(argv[1]).expanduser().resolve()
+        if not root.is_dir():
+            print(json.dumps({"status": "BLOCKED", "error": f"not a directory: {root}"}, ensure_ascii=False))
+            return 2
+        roots = json.loads(roots_file.read_text(encoding="utf-8")) if roots_file.is_file() else []
+        if str(root) not in roots:
+            roots.append(str(root))
+        roots_file.parent.mkdir(parents=True, exist_ok=True)
+        roots_file.write_text(json.dumps(roots, indent=2), encoding="utf-8")
+        print(json.dumps({"status": "OK", "roots": roots}, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "index":
+        roots = json.loads(roots_file.read_text(encoding="utf-8")) if roots_file.is_file() else []
+        if not roots:
+            print(json.dumps({"status": "BLOCKED", "error": "no roots; use 'sample-library add <folder>'"}, ensure_ascii=False))
+            return 2
+        counts = index_library([Path(r) for r in roots], index_path)
+        print(json.dumps({"status": "OK", **counts}, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "status":
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        roles: dict[str, int] = {}
+        for a in idx.assets.values():
+            roles[a.semantic_role.value] = roles.get(a.semantic_role.value, 0) + 1
+        print(json.dumps({
+            "status": "OK",
+            "total": len(idx.assets),
+            "roots": idx.roots,
+            "duplicates": len(idx.duplicates),
+            "roles": roles,
+            "updated_at": idx.updated_at,
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "search":
+        if len(argv) < 2:
+            print("uso: sample-library search <query> [ROLE]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        query = argv[1]
+        role = None
+        if len(argv) >= 3:
+            try:
+                role = SampleRole(argv[2].upper())
+            except ValueError:
+                role = None
+        hits = search(idx, query, role=role, top_k=10)
+        print(json.dumps({
+            "status": "OK", "query": query, "role": role.value if role else None,
+            "results": [
+                {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
+                 "path": h.asset.relative_path, "score": h.score, "reasons": h.reasons}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "scan-key":
+        if len(argv) < 2:
+            print("uso: sample-library scan-key <KEY> [ROLE]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.retrieval import SampleRetriever
+        key = argv[1].lower()
+        role = None
+        if len(argv) >= 3:
+            try:
+                role = SampleRole(argv[2].upper())
+            except ValueError:
+                role = None
+        hits = SampleRetriever(idx).search_samples(role=role, key=key, top_k=10)
+        print(json.dumps({
+            "status": "OK", "key": key, "role": role.value if role else None,
+            "results": [
+                {"filename": h.asset.filename, "key": h.asset.pitch.value,
+                 "role": h.asset.semantic_role.value, "path": h.asset.relative_path,
+                 "confidence": h.asset.pitch.confidence}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "retrieve":
+        if len(argv) < 2:
+            print("uso: sample-library retrieve <ROLE> [BPM]")
+            return 2
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.retrieval import SampleRetriever
+        try:
+            role = SampleRole(argv[1].upper())
+        except ValueError:
+            print(json.dumps({"status": "BLOCKED", "error": f"unknown role {argv[1]}"}, ensure_ascii=False))
+            return 2
+        bpm = float(argv[2]) if len(argv) >= 3 else None
+        hits = SampleRetriever(idx).search_samples(role=role, bpm=bpm, top_k=5)
+        print(json.dumps({
+            "status": "OK", "role": role.value, "bpm": bpm,
+            "results": [
+                {"filename": h.asset.filename, "role": h.asset.semantic_role.value,
+                 "path": h.asset.relative_path, "bpm": h.asset.bpm.value,
+                 "dur_s": round(h.asset.descriptors.duration_s, 2) if h.asset.descriptors.duration_s else None,
+                 "centroid_hz": h.asset.descriptors.spectral_centroid_hz,
+                 "score": round(h.score, 2), "reasons": h.reasons}
+                for h in hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if sub == "embed":
+        provider_name = argv[1] if len(argv) >= 2 else None
+        idx = load_index(index_path)
+        if idx is None:
+            print(json.dumps({"status": "EMPTY"}, ensure_ascii=False))
+            return 0
+        from copilot.sample_library.embeddings import EmbeddingProviderUnavailable, get_embedding_provider
+        from copilot.sample_library.library_v1 import compute_embeddings, save_index
+
+        try:
+            provider = get_embedding_provider(provider_name)
+        except (EmbeddingProviderUnavailable, ValueError) as exc:
+            print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False))
+            return 2
+        counts = compute_embeddings(idx, provider)
+        save_index(idx, index_path)
+        print(json.dumps({"status": "OK", **counts}, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"subcommand desconocido: {sub}")
+    return 2
+
+
 def _import_project(evidence: Path, logger, argv: list[str]) -> int:
     from copilot.importing.project_folder_import_v1 import import_project_folder
 
@@ -2596,5 +2858,210 @@ def _manual_control_surface_action() -> str:
     )
 
 
+def _track_build(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
+    """Build a groovy/latin tech house track from 0 (library + recipe + groove + mixing + arrangement)."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.tech_house import build_tech_house_plan, TECH_HOUSE_BPM
+    from copilot.musicplan.arrangement import (
+        TECH_HOUSE_ARRANGEMENT,
+        build_arrangement_mute_actions,
+    )
+    from copilot.musicplan.mixing import MIXING_CHAINS, MASTER_CHAIN, MIXING_PHILOSOPHY
+
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    # build the plan against a blank template (mock) or the real live bridge.
+    from copilot.daw.state_tokens import attach_tokens
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\trackbuild_lab.als"
+        daw.session_name = "trackbuild_lab"
+    session = daw.snapshot()
+    attach_tokens(session)
+
+    plan = build_tech_house_plan(index=idx, session=session)
+    arrangement = build_arrangement_mute_actions(project_identity=session.project_identity)
+    plan.actions.extend(arrangement)
+    if leave:
+        # leave the set in the full-groove (DROP) state: everything active
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(
+            build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop])
+        )
+
+    # ---- print structure ----
+    print(f"\n=== GROOVY / LATIN TECH HOUSE — {TECH_HOUSE_BPM} BPM ===\n")
+    print("SONIDO (sample por pista, percusión-first):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {a.params.sample_uri}")
+
+    print("\nMIXING (cadenas nativas):")
+    for track, devices in MIXING_CHAINS.items():
+        print(f"  {track:12s} {' → '.join(devices)}")
+    print(f"  {'MASTER':12s} {' → '.join(MASTER_CHAIN)}")
+
+    print("\nARRANGEMENT (substracción/variación):")
+    for sec in TECH_HOUSE_ARRANGEMENT:
+        muted = 10 - len(sec.active)
+        print(f"  {sec.name:8s} {sec.bars:>3d}b  activas: {', '.join(sec.active)}  (mute: {muted})")
+
+    print(f"\nPLAN: {len(plan.actions)} acciones de build + {len(arrangement)} de arreglo")
+
+    # silence write/transaction INFO logs so the structure reads clean
+    import logging
+    for _name in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
+
+    # ---- execute against mock (write + rollback) ----
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    build_report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
+    print(f"\nEJECUCIÓN: {build_report['status']}  ·  tracks {build_report['after_track_count']} → rollback {build_report['restored_track_count']}  ·  RESTORE_VERIFIED={build_report['RESTORE_VERIFIED']}")
+
+    result = {
+        "status": build_report["status"],
+        "style": "groovy latin tech house",
+        "bpm": TECH_HOUSE_BPM,
+        "plan_actions": len(plan.actions),
+        "arrangement_actions": len(arrangement),
+        "tracks": [a.params.track_name for a in plan.actions if a.action_type.value == "CREATE_TRACK"],
+        "restore_verified": build_report["RESTORE_VERIFIED"],
+    }
+    return 0 if build_report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE" else 2
+
+
+def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bool = False) -> int:
+    """prompt -> Astra -> MusicPlan (vibe coding). Falls back to deterministic if no Astra."""
+    from copilot.sample_library.library_v1 import load_index
+    from copilot.musicplan.astra_plan import build_plan_from_prompt
+
+    intent = " ".join(argv) if argv else "dark percussive groovy tech house"
+    index_path = evidence / "sample_library_index.json"
+    idx = load_index(index_path)
+    if idx is None:
+        print(json.dumps({"status": "BLOCKED", "error": "no sample index; run 'sample-library index' first"}, ensure_ascii=False))
+        return 2
+
+    from copilot.daw.state_tokens import attach_tokens
+    if live:
+        from copilot.daw.ableton_tcp import AbletonTcpAdapter
+        daw = AbletonTcpAdapter(); daw.connect()
+    else:
+        from copilot.daw.mock import MockAbletonAdapter
+        daw = MockAbletonAdapter(); daw.connect()
+        daw.session_path = r"D:\sets\vibe_lab.als"; daw.session_name = "vibe_lab"
+    session = daw.snapshot(); attach_tokens(session)
+
+    plan, meta = build_plan_from_prompt(index=idx, session=session, intent=intent)
+
+    astra_arrangement = meta.get("arrangement")
+    plan._astra_arrangement = astra_arrangement
+    plan._astra_patch_contracts = meta.get("patch_contracts") or []
+    from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
+    plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
+    if leave:
+        drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
+        plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop]))
+
+    print(f'\n=== VIBE: "{intent}" ===\n')
+    print(f"astra_used: {meta['astra_used']}")
+    print(f"reasoning: {meta.get('reasoning', '')}")
+    print("\nSELECCIÓN (sample por pista):")
+    for a in plan.actions:
+        if a.action_type.value == "SAMPLE_LOAD":
+            print(f"  {a.target.ref.get('name','?'):12s} {Path(a.params.sample_uri).name}")
+
+    import logging
+    for _n in ("copilot.write", "copilot.transactions", "copilot.agent", "copilot"):
+        logging.getLogger(_n).setLevel(logging.WARNING)
+
+    import tempfile
+    from copilot.musicplan.execute import build_agent_tools, execute_track_build_plan
+    tmp = Path(tempfile.mkdtemp())
+    tools = build_agent_tools(daw, journal_path=tmp / "journal.jsonl")
+    report = execute_track_build_plan(tools, plan=plan, session=session, persist_dir=tmp, leave=leave)
+    if leave:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} · LEAVE (track armado)")
+    else:
+        print(f"\nEJECUCIÓN: {report['status']} · tracks {report['after_track_count']} → rollback {report['restored_track_count']} · RESTORE_VERIFIED={report['RESTORE_VERIFIED']}")
+    ok = report["status"] == "CONTROLLED_WRITE_LOOP_COMPLETE"
+    # End-to-end finalization: arrangement timeline + mix/master, before save.
+    if ok and leave:
+        from copilot.musicplan.arrangement_builder import build_arrangement
+        from copilot.musicplan.mix_tweaks import apply_mix
+        from copilot.producer.soniq_surface import apply_patch_contract_auto_mode
+
+        final_session = daw.snapshot()
+
+        # ASTRAL planner integration: execute patch contracts before arrangement/mix.
+        patch_contracts = getattr(plan, "_astra_patch_contracts", []) or []
+        if patch_contracts:
+            applied = 0
+            failed = 0
+            print(f"\nASTRAL PATCH CONTRACTS: {len(patch_contracts)}")
+            for c in patch_contracts:
+                try:
+                    rep = apply_patch_contract_auto_mode(daw, session=daw.snapshot(), contract=c, throttle_ms=40)
+                    patch = rep.get("patch", {})
+                    if rep.get("ok"):
+                        applied += 1
+                    else:
+                        failed += 1
+                    print(
+                        f"  - {c.get('track')} / {c.get('device')} -> ok={rep.get('ok')}"
+                        f" mode={rep.get('routing_mode')}"
+                        f" applied={patch.get('applied')}"
+                        f" viol={len(patch.get('violations', []))}"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    print(f"  - {c.get('track')} / {c.get('device')} -> error ({exc})")
+            print(f"ASTRAL PATCH RESULT: applied={applied} failed={failed}")
+
+        arrangement = getattr(plan, "_astra_arrangement", None) or None
+        arr = build_arrangement(daw, session=final_session, arrangement=arrangement)
+        print(f"\nARREGLO: {arr['placed']} clips · {arr['looped']} loops · {len(arr['errors'])} errores")
+        for e in arr["errors"][:6]:
+            print(f"  ! {e}")
+        mix = apply_mix(daw, session=final_session)
+        print(f"MIX/MASTER: {mix['volumes']} volúmenes · {mix['master_devices']} dispositivos master · {mix['master_tweaks']} tweaks · {len(mix['errors'])} errores")
+        for e in mix["errors"][:6]:
+            print(f"  ! {e}")
+    # Post-build: persist the set, then run the structured critique.
+    if ok and leave:
+        try:
+            saved = daw.save_session()
+            if saved.get("saved"):
+                print(f"\nGUARDADO: {saved.get('path') or 'Sin título'}")
+            else:
+                print("\nGUARDADO: el LOM de Ableton no expone save — guardá con Cmd+S en Live")
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nGUARDADO: error ({exc})")
+
+        from copilot.musicplan.critique import critique_track
+
+        after = daw.snapshot()
+        critique = critique_track(plan=plan, session=after)
+        if critique is not None:
+            print(f"\nCRÍTICA: {critique.verdict.upper()}")
+            for i in critique.top_3_issues:
+                print(f"  {i.priority}. [{i.area}] {i.issue} → {i.minimal_fix}")
+            if critique.reasoning:
+                print(f"  ({critique.reasoning})")
+    return 0 if ok else 2
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+

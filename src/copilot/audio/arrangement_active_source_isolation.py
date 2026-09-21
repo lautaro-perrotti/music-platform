@@ -449,6 +449,7 @@ def capture_source_post_mixer(
             str(getattr(main_asset, "analysis_file_path", None) or main_asset.file_path)
         )
         tag = track.name.replace(" ", "_")
+        dest_root.mkdir(parents=True, exist_ok=True)
         src_dest = dest_root / f"aasi_v1_{region_id}_{tag}_{pass_id}.wav"
         main_dest = dest_root / f"aasi_v1_{region_id}_Main_with_{tag}_{pass_id}.wav"
         shutil.copy2(source_wav, src_dest)

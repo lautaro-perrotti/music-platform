@@ -184,21 +184,19 @@ def resolve_by_fingerprint(
     session_incarnation_id: str = "",
 ) -> "TrackState | None":
     """Exactly one safe match, or None. Never pick the closest target."""
+    if stable_id:
+        id_matches = [
+            track for track in session.tracks if track.stable_id == stable_id
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if len(id_matches) > 1:
+            return None  # ambiguous identity -> refuse
     fp_matches = [
         track
         for track in session.tracks
         if fingerprints_equal(fingerprint_track(track), expected)
     ]
-    same_incarnation = (
-        bool(session_incarnation_id)
-        and session.session_incarnation_id == session_incarnation_id
-    )
-    if same_incarnation and stable_id:
-        id_matches = [
-            track for track in session.tracks if track.stable_id == stable_id
-        ]
-        if len(id_matches) == 1 and id_matches[0] in fp_matches:
-            return id_matches[0]
     if len(fp_matches) == 1:
         return fp_matches[0]
     return None

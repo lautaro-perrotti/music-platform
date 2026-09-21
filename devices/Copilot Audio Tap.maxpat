@@ -185,7 +185,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 144.0, 250.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next.wav"
+					"text" : "open /Users/lucas/Music/MusicCopilot/captures/_next.wav"
 				}
 
 			}
@@ -363,7 +363,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 168.0, 270.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_kick.wav"
+					"text" : "open /Users/lucas/Music/MusicCopilot/captures/_next_kick.wav"
 				}
 
 			}
@@ -375,7 +375,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 56.0, 192.0, 270.0, 22.0 ],
-					"text" : "open D:/MusicCopilot/captures/_next_bass.wav"
+					"text" : "open /Users/lucas/Music/MusicCopilot/captures/_next_bass.wav"
 				}
 
 			}

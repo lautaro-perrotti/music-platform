@@ -125,17 +125,22 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
     loaded = daw.load_instrument_or_effect(track_index, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(track_index, uri)
-    time.sleep(0.6)
     from copilot.audio.live_capture import find_taps_on_track
 
-    found = find_taps_on_track(daw, track_index)
+    # Browser load of the tap is asynchronous; poll (bounded) until a
+    # Slot-enabled tap appears instead of sleeping once and giving up.
     slotted = None
-    for device in found:
-        params = daw.get_device_parameters(track_index, int(device["index"]))
-        names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
-        if "slot" in names:
-            slotted = device
-            break
+    deadline = time.monotonic() + 15.0
+    while slotted is None and time.monotonic() < deadline:
+        for device in find_taps_on_track(daw, track_index, refresh=True):
+            params = daw.get_device_parameters(track_index, int(device["index"]))
+            names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
+            if "slot" in names:
+                slotted = device
+                break
+        if slotted is None:
+            time.sleep(0.5)
+    found = find_taps_on_track(daw, track_index, refresh=True)
     if slotted is None:
         if existing is not None:
             for device in found:
