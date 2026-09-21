@@ -167,10 +167,18 @@ $btnCond = New-Object System.Windows.Automation.PropertyCondition(
   [System.Windows.Automation.ControlType]::Button)
 $names = @('No','S\u00ed','Si','Yes','Aceptar','OK','Ok')
 $found = @()
+$textCond = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+  [System.Windows.Automation.ControlType]::Text)
+$texts = @()
 $clicked = ''
 foreach ($h in $hwnds) {{
   try {{ $el = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h) }} catch {{ continue }}
   if (-not $el) {{ continue }}
+  $textEls = $el.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCond)
+  foreach ($textEl in $textEls) {{
+    if ($textEl.Current.Name) {{ $texts += [string]$textEl.Current.Name }}
+  }}
   foreach ($n in $names) {{
     $nameCond = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::NameProperty, $n)
@@ -182,7 +190,8 @@ CLICK_PLACEHOLDER
   }}
 }}
 $uniq = @($found | Select-Object -Unique)
-$result = @{{ buttons = $uniq; clicked = $clicked; text = ($uniq -join ' ') }}
+$uniqTexts = @($texts | Select-Object -Unique)
+$result = @{{ buttons = $uniq; clicked = $clicked; text = ($uniqTexts -join "`n") }}
 $result | ConvertTo-Json -Compress
 """
     return script.replace("CLICK_PLACEHOLDER", click_block)

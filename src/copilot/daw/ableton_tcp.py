@@ -966,6 +966,15 @@ class AbletonTcpAdapter(DawAdapter):
         # Non-query URIs are library-relative sample paths: navigate the user Places
         # by path (O(depth), fast) instead of a full recursive browser search.
         if item_uri and not item_uri.startswith("query:"):
+            value = str(item_uri).replace("\\", "/")
+            parts = [part for part in value.strip("/").split("/") if part]
+            if (
+                not parts
+                or value.startswith("/")
+                or ":" in parts[0]
+                or any(part in {".", ".."} for part in parts)
+            ):
+                raise DawError("browser sample path must be a safe relative library path")
             return self._command(
                 "load_browser_item_by_path",
                 {

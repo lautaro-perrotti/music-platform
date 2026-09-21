@@ -25,6 +25,7 @@ CAPABILITIES = frozenset(
         "clip.fire",
         "device.set_parameter",
         "device.load",
+        "browser.load",
         "audio.capture_master",
     }
 )

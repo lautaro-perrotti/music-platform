@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from copilot.platform.modals import modal_driver_for_system
+from copilot.platform.modals import classify_modal_text, modal_driver_for_system
 
 MILESTONE = "CRASH_RECOVERY_V1"
 KEEP_ROOT = Path.home() / "CopilotProjects" / "_crash_recovery_keep"
@@ -56,6 +56,9 @@ def recovery_action(dialog_text: str, expected_als: str | Path) -> str:
 
 
 def classify_live_dialog(text: str) -> str:
+    modal = classify_modal_text(text)
+    if modal.get("kind") == "TRIAL_STATUS_ACKNOWLEDGEMENT":
+        return "TRIAL_STATUS_ACKNOWLEDGEMENT"
     blob = _fold(text)
     if any(_fold(marker) in blob for marker in FATAL_MARKERS):
         return "FATAL_ERROR"
@@ -72,7 +75,7 @@ def recover_click_target(
 ) -> str:
     """Return only a registered action: accept, discard, recover, or empty."""
     kind = classify_live_dialog(dialog_text)
-    if kind == "FATAL_ERROR":
+    if kind in {"FATAL_ERROR", "TRIAL_STATUS_ACKNOWLEDGEMENT"}:
         return "accept"
     if kind != "RECOVER_WORK":
         return ""
@@ -205,11 +208,13 @@ def dismiss_live_blocking_dialogs(
     if kind == "NONE":
         return {"status": "NO_DIALOG", "milestone": MILESTONE, "kind": "NONE", "hwnds": hwnds}
     text = str(found.get("text") or kind)
-    if kind == "RECOVER_WORK" and recover_policy == "match_expected":
+    if kind == "TRIAL_STATUS_ACKNOWLEDGEMENT":
+        target = "accept"
+    elif kind == "RECOVER_WORK" and recover_policy == "match_expected":
         target = recover_click_target(text, expected_als, recover_policy=recover_policy)
     elif kind == "RECOVER_WORK":
         target = "discard"
-    elif kind == "FATAL_ERROR":
+    elif kind in {"FATAL_ERROR", "TRIAL_STATUS_ACKNOWLEDGEMENT"}:
         target = "accept"
     else:
         target = ""
@@ -252,11 +257,15 @@ def _find_dialog_buttons(hwnds: list[int]) -> dict[str, Any]:
     buttons = [str(item) for item in (payload.get("buttons") or [])]
     names = {_fold(item) for item in buttons}
     kind = "NONE"
-    if "no" in names:
+    text = str(payload.get("text") or "")
+    modal = classify_modal_text(text)
+    if modal.get("kind") == "TRIAL_STATUS_ACKNOWLEDGEMENT":
+        kind = "TRIAL_STATUS_ACKNOWLEDGEMENT"
+    elif "no" in names:
         kind = "RECOVER_WORK"
     elif names.intersection({"aceptar", "ok"}):
         kind = "FATAL_ERROR"
-    return {"kind": kind, "buttons": buttons, "text": str(payload.get("text") or "")}
+    return {"kind": kind, "buttons": buttons, "text": text, "modal": modal}
 
 
 def _invoke_named_button_on_hwnds(hwnds: list[int], expected: set[str]) -> str | None:

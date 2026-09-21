@@ -92,6 +92,21 @@ def _sample_device_matches(device, sample_uri: str) -> bool:
     return bool(expected and observed and expected == observed)
 
 
+def _sample_reference_matches(observed_uri: str | None, expected_uri: str) -> bool:
+    observed = str(observed_uri or "").replace("\\", "/").casefold().strip()
+    expected = str(expected_uri or "").replace("\\", "/").casefold().strip()
+    if not observed or not expected:
+        return False
+    if observed == expected or observed.endswith("/" + expected):
+        return True
+    return Path(observed).name == Path(expected).name
+
+
+def _track_fingerprint_key(track: TrackState) -> str:
+    """Canonical structural identity used when a session incarnation changes."""
+    return json.dumps(fingerprint_track(track), sort_keys=True, separators=(",", ":"))
+
+
 def _is_live_sample_routing_normalization(
     before: dict[str, Any], after: dict[str, Any], target_name: str, row: dict[str, Any]
 ) -> bool:
@@ -857,7 +872,10 @@ class SafeWriteExecutor:
         self, session: SessionState, target_name: str, step: MutationExecution
     ) -> dict[str, Any]:
         if step.action_type == "CREATE_TRACK":
-            return {"track_ids": [item.stable_id for item in session.tracks]}
+            return {
+                "track_ids": [item.stable_id for item in session.tracks],
+                "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
+            }
         track = session.track_by_name(target_name)
         if track is None:
             return snapshot_guard_state(session, target_name)
@@ -1183,7 +1201,7 @@ class SafeWriteExecutor:
             live_track = live.track_by_id(track.stable_id)
             if track.role == "audio":
                 clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
-                if clip is None or clip.sample_uri != sample_uri:
+                if clip is None or not _sample_reference_matches(clip.sample_uri, sample_uri):
                     raise WriteInDoubt(step.operation, command_id) from exc
                 return self._record_loaded_clip(step, session, command_id, live_track, clip, reconciled=True)
             devices = [
@@ -1197,7 +1215,7 @@ class SafeWriteExecutor:
         live_track = live.track_by_id(track.stable_id)
         if track.role == "audio":
             clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
-            if clip is None or clip.sample_uri != sample_uri:
+            if clip is None or not _sample_reference_matches(clip.sample_uri, sample_uri):
                 raise RuntimeError("LOAD_SAMPLE clip missing or sample URI mismatched on readback")
             return self._record_loaded_clip(step, session, command_id, live_track, clip)
         device_index = result.get("device_index") if isinstance(result, dict) else None
@@ -1386,7 +1404,7 @@ class SafeWriteExecutor:
                 if track.role == "audio":
                     clip = next((item for item in track.clips if item.slot_index == int(step.arguments["clip_index"])), None)
                     observed = None if clip is None else clip.sample_uri
-                    matched = observed == sample_uri
+                    matched = _sample_reference_matches(observed, sample_uri)
                     rows.append(MutationReadback(action_id=step.action_id, parameter="clip.sample", expected=sample_uri, observed=observed, matched=matched, authoritative=True))
                 else:
                     device = next((item for item in track.devices if item.stable_id == str(step.expected_after.get("device_stable_id", ""))), None)
@@ -1486,7 +1504,7 @@ class SafeWriteExecutor:
                     after_ids = {item.stable_id for item in track_after.clips}
                     expected_id = str(step.expected_after.get("clip_stable_id", ""))
                     clip = next((item for item in track_after.clips if item.stable_id == expected_id), None)
-                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or clip is None or clip.sample_uri != step.arguments["sample_uri"]:
+                    if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or clip is None or not _sample_reference_matches(clip.sample_uri, str(step.arguments["sample_uri"])):
                         unexpected.append({"action_id": target.action_id, "kind": "unexpected_sample_state"})
                 else:
                     before_ids = set(guards[target.name_at_plan].get("device_ids", []))
@@ -1645,6 +1663,10 @@ class SafeWriteExecutor:
                 before_ids = set(guards[target.name_at_plan].get("track_ids", []))
                 after_ids = {item.stable_id for item in restored.tracks}
                 if after_ids != before_ids:
+                    before_fingerprints = sorted(guards[target.name_at_plan].get("track_fingerprints", []))
+                    after_fingerprints = sorted(_track_fingerprint_key(item) for item in restored.tracks)
+                    if before_fingerprints == after_fingerprints:
+                        continue
                     unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
                 continue
             post = snapshot_guard_state(restored, target.name_at_plan)

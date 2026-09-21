@@ -334,6 +334,14 @@ def _actualize_action(action: Any, current: Any) -> tuple[Any | None, str | None
             # leaves the clip absent on authoritative readback.
             if sample_uri.startswith("Samples/"):
                 sample_uri = sample_uri[len("Samples/"):]
+            parts = [part for part in sample_uri.strip("/").split("/") if part]
+            if (
+                not parts
+                or sample_uri.startswith("/")
+                or ":" in parts[0]
+                or any(part in {".", ".."} for part in parts)
+            ):
+                return None, "SAMPLE_PATH_OUTSIDE_AUTHORIZED_LIBRARY"
             actual = actual.model_copy(update={
                 "params": actual.params.model_copy(update={"sample_uri": sample_uri})
             })

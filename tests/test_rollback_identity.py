@@ -5,6 +5,7 @@ from copilot.agent.tools import AgentTools
 from copilot.agent.transactions import TransactionManager
 from copilot.daw.mock import MockAbletonAdapter
 from copilot.schemas.transaction import TransactionStatus
+from copilot.daw.identities import IdentityRegistry
 
 
 def _tools() -> AgentTools:
@@ -98,3 +99,42 @@ def test_recorded_action_has_stable_id_not_name_as_identity() -> None:
         assert action.target_fingerprint.role == "midi"
         assert action.target_name_at_apply == "AI Test"
         assert "track_name" not in action.inverse_params
+
+
+def test_creation_rollback_survives_session_identity_rebind_without_deleting_originals() -> None:
+    tools = _tools()
+    tools.daw.create_midi_track("Original")
+    run_create_c3_clip(tools, "Alpha Created")
+
+    # A supported reconnect can mint a new session incarnation and runtime IDs.
+    # The transaction must resolve the created object structurally, not infer
+    # ownership from index/name differences.
+    tools.daw.session_incarnation_id = "reconnected-session"
+    tools.daw.ids = IdentityRegistry()
+
+    undone = run_undo_last(tools, expected_track="__none__")
+    assert undone["status"] == TransactionStatus.ROLLED_BACK.value
+    after = tools.get_session_snapshot()
+    assert [track.name for track in after.tracks] == ["Original"]
+
+
+def test_creation_rollback_fails_closed_when_rebound_identity_is_ambiguous() -> None:
+    tools = _tools()
+    tools.daw.create_midi_track("Original")
+    run_create_c3_clip(tools, "Alpha Created")
+    # Make the created transaction's structural target indistinguishable from
+    # an original target only if the resolver cannot prove uniqueness.
+    txn = tools.transactions.last_own()
+    assert txn is not None
+    txn.actions[0].target_fingerprint.clip_slots = []
+    txn.actions[0].target_fingerprint.clip_names = []
+    txn.actions[0].target_fingerprint.note_counts = []
+    # Simulate a reconnect/readback in which the created track's content
+    # fingerprint is no longer unique.  The safe response is no deletion.
+    tools.daw.delete_clip(1, 0)
+    tools.daw.session_incarnation_id = "reconnected-session"
+    tools.daw.ids = IdentityRegistry()
+
+    undone = run_undo_last(tools, expected_track="__none__")
+    assert undone["status"] == TransactionStatus.ROLLBACK_CONFLICT.value
+    assert len(tools.get_session_snapshot().tracks) == 2

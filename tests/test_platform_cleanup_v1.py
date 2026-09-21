@@ -9,6 +9,7 @@ from copilot.platform.ableton import (
     driver_for_system,
 )
 from copilot.platform.modals import KnownModalHandler, classify_modal_text
+from copilot.importing.crash_recovery_v1 import classify_live_dialog
 
 
 SRC_ROOT = Path(__file__).parents[1] / "src" / "copilot"
@@ -45,6 +46,7 @@ def test_modal_classifier_reports_trial_and_unknown_fail_closed() -> None:
     assert trial["trial_days_remaining"] == 23
     unknown = classify_modal_text("Unexpected unknown window")
     assert unknown == {"kind": "UNKNOWN_MODAL", "safe_action": "fail_closed"}
+    assert classify_live_dialog("Guardar y exportar se activaron con éxito. Tiempo restante: 23 días.") == "TRIAL_STATUS_ACKNOWLEDGEMENT"
 
 
 def test_unknown_modal_never_invokes_a_default_button() -> None:

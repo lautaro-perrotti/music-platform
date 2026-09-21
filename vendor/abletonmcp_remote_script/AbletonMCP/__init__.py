@@ -274,6 +274,7 @@ class AbletonMCP(ControlSurface):
                         "clip.fire",
                         "device.set_parameter",
                         "device.load",
+                        "browser.load",
                         "audio.capture_master",
                         "compound.temporary_mutation",
                     ],
@@ -644,7 +645,7 @@ class AbletonMCP(ControlSurface):
                                  "duplicate_clip", "duplicate_clip_to_arrangement", "get_arrangement_clips", "delete_arrangement_clips", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "start_playback", "stop_playback", "load_browser_item", "load_browser_item_by_path",
                                  "load_instrument_or_effect",
                                  "set_device_parameter", "set_device_parameters", "toggle_device", "delete_device",
                                  "create_scene", "delete_scene", "fire_scene", "stop_scene",
@@ -867,6 +868,13 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "load_browser_item_by_path":
+                            track_index = params.get("track_index", 0)
+                            rel_path = params.get("rel_path", "")
+                            clip_index = params.get("clip_index", 0)
+                            result = self._load_browser_item_by_path(
+                                track_index, rel_path, clip_index
+                            )
                         elif command_type == "set_device_parameter":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -1984,6 +1992,17 @@ class AbletonMCP(ControlSurface):
                         "is_playing": clip.is_playing,
                         "is_recording": clip.is_recording
                     }
+                    if bool(getattr(track, "has_audio_input", False)):
+                        # Live exposes the loaded file on AudioClip in some
+                        # versions and only the clip name in others.  Return
+                        # both through the same typed readback field; Core
+                        # performs the conservative path/name reconciliation.
+                        try:
+                            clip_info["sample_uri"] = str(getattr(clip, "file_path", "") or "")
+                        except Exception:
+                            clip_info["sample_uri"] = ""
+                        if not clip_info["sample_uri"]:
+                            clip_info["sample_uri"] = str(clip.name or "")
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -5437,6 +5456,105 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error loading browser item: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
+
+    def _load_browser_item_by_path(self, track_index, rel_path, clip_index=0):
+        """Resolve an authorized project-relative browser path and load it.
+
+        The Core sends a relative path rooted at the current Live Set's
+        ``Samples`` folder.  Resolution stays inside Live's browser tree;
+        filesystem paths and parent traversal are intentionally rejected.
+        """
+        raw = str(rel_path or "").replace("\\", "/").strip("/")
+        parts = [part for part in raw.split("/") if part]
+        if not parts or any(part in {".", ".."} for part in parts):
+            raise ValueError("browser path must be a non-empty relative path")
+        if ":" in parts[0] or raw.startswith("/"):
+            raise ValueError("browser path must not be absolute")
+
+        app = self.application()
+        browser = app.browser
+        roots = []
+        for root_name in ("current_project", "user_library"):
+            root = getattr(browser, root_name, None)
+            if root is not None:
+                roots.append((root_name, root))
+
+        def child_named(parent, name):
+            for child in getattr(parent, "children", []) or []:
+                if str(getattr(child, "name", "")).casefold() == name.casefold():
+                    return child
+            return None
+
+        candidates = []
+        for root_name, root in roots:
+            paths = [parts]
+            if parts[0].casefold() == "samples":
+                paths.insert(0, parts[1:])
+            elif root_name == "current_project":
+                # Core sample references are relative to the authorized
+                # project Samples root, while Live exposes that folder as a
+                # child of current_project.
+                paths.append(["Samples"] + parts)
+            for path_parts in paths:
+                current = root
+                ok = True
+                for part in path_parts:
+                    current = child_named(current, part)
+                    if current is None:
+                        ok = False
+                        break
+                if ok and current is not None:
+                    candidates.append((root_name, current))
+
+        unique = {str(getattr(item, "uri", "")): (root_name, item) for root_name, item in candidates}
+        loadable = [item for item in unique.values() if not getattr(item[1], "is_folder", False) and getattr(item[1], "is_loadable", True)]
+        if len(loadable) != 1:
+            if not loadable:
+                raise ValueError("browser relative path not found")
+            raise ValueError("browser relative path is ambiguous")
+
+        root_name, item = loadable[0]
+        track = self._resolve_track(track_index)
+        self._song.view.selected_track = track
+        if bool(getattr(track, "has_audio_input", False)):
+            # Live's Browser.load_item selects an audio asset but does not
+            # create a Session clip on all Live 12 builds.  For an audio
+            # track, use the same resolved browser item and create the clip
+            # in the requested slot through Live's typed ClipSlot API.
+            project_file = str(getattr(self._song, "file_path", "") or "")
+            project_dir = os.path.dirname(project_file)
+            relative_parts = parts[1:] if parts[0].casefold() == "samples" else parts
+            sample_path = os.path.normpath(os.path.join(project_dir, "Samples", *relative_parts))
+            if not project_dir or not os.path.isfile(sample_path):
+                raise ValueError("resolved browser sample is not under the current project's Samples root")
+            slot = track.clip_slots[int(clip_index)]
+            if slot.has_clip:
+                raise ValueError("audio clip slot is occupied")
+            if not hasattr(slot, "create_audio_clip"):
+                raise ValueError("audio clip creation is unavailable in this Live version")
+            slot.create_audio_clip(sample_path)
+            loaded_clip = slot.clip
+            return {
+                "loaded": True,
+                "track_index": track_index,
+                "track_name": track.name,
+                "clip_index": int(clip_index),
+                "rel_path": raw,
+                "sample_path": sample_path,
+                "uri": item.uri,
+                "browser_root": root_name,
+                "clip_name": str(getattr(loaded_clip, "name", "") or ""),
+            }
+        browser.load_item(item)
+        return {
+            "loaded": True,
+            "track_index": track_index,
+            "track_name": track.name,
+            "clip_index": int(clip_index),
+            "rel_path": raw,
+            "uri": item.uri,
+            "browser_root": root_name,
+        }
     
     def _find_browser_item_by_uri(self, browser_or_item, uri, max_depth=10, current_depth=0):
         """Find a browser item by its URI"""

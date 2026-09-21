@@ -38,6 +38,18 @@ def _sample_device_matches(device, sample_uri: str) -> bool:
     return bool(expected and observed and expected == observed)
 
 
+def _sample_reference_matches(observed_uri: str | None, expected_uri: str) -> bool:
+    observed = str(observed_uri or "").replace("\\", "/").casefold().strip()
+    expected = str(expected_uri or "").replace("\\", "/").casefold().strip()
+    if not observed or not expected:
+        return False
+    if observed == expected or observed.endswith("/" + expected):
+        return True
+    observed_name = Path(unquote(observed)).name
+    expected_name = Path(unquote(expected)).name
+    return bool(observed_name and expected_name and observed_name == expected_name)
+
+
 class RollbackConflict(DawError):
     """Target cannot be resolved unambiguously. Nothing was mutated."""
 
@@ -470,7 +482,7 @@ class TransactionManager:
                 )
             matches = [
                 clip for track in session.tracks for clip in track.clips
-                if clip.sample_uri == expected_uri
+                if _sample_reference_matches(clip.sample_uri, expected_uri)
             ] + [
                 device for track in session.tracks for device in track.devices
                 if _sample_device_matches(device, expected_uri)
