@@ -9,6 +9,9 @@ from copilot.producer.soniq_surface import (
     set_vst_params_batch,
     apply_patch,
     apply_patch_contract,
+    capture_param_snapshot,
+    restore_param_snapshot,
+    load_preset,
 )
 
 
@@ -83,7 +86,7 @@ def test_coalesce_writes_last_value_wins_per_index() -> None:
         {"index": 1, "value": 0.2},
         {"index": 0, "value": 0.7},
     ])
-    assert out == [{"index": 0, "value": 0.7}, {"index": 1, "value": 0.2}]
+    assert out == [{"index": 0, "value": 0.7, "normalized": True}, {"index": 1, "value": 0.2, "normalized": True}]
 
 
 def test_set_vst_params_batch_coalesces_before_write() -> None:
@@ -165,3 +168,42 @@ def test_apply_patch_contract_enforces_write_count_and_device_on_guard() -> None
     assert report["ok"] is True
     assert report["applied"] == 1
     assert any("blocked_device_on_toggle" in v for v in report["violations"])
+
+
+
+def test_capture_and_restore_param_snapshot_roundtrip() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    snap = capture_param_snapshot(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        filter_midi_passthrough=False,
+    )
+    assert snap["ok"] is True
+
+    # mutate
+    _ = apply_patch(
+        daw,
+        session=daw.snapshot(),
+        track_name="Synth",
+        device_name="Serum 2",
+        writes=[{"index": 0, "value": 0.9}],
+        throttle_ms=0,
+        filter_midi_passthrough=False,
+    )
+
+    restored = restore_param_snapshot(daw, session=daw.snapshot(), snapshot=snap, throttle_ms=0)
+    assert restored["ok"] is True
+
+
+def test_load_preset_on_mock() -> None:
+    daw, session = _seed_session_with_serum_like_device()
+    rep = load_preset(
+        daw,
+        session=session,
+        track_name="Synth",
+        device_name="Serum 2",
+        preset_uri="query:UserPresets#Serum2#WarmPad01",
+    )
+    assert rep["ok"] is True

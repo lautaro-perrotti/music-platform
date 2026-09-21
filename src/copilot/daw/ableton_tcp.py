@@ -974,6 +974,25 @@ class AbletonTcpAdapter(DawAdapter):
             params["clip_index"] = clip_index
         return self._command("load_browser_item", params, side_effect=True)
 
+    def get_device_by_name(self, track_index: int, device_name: str) -> dict[str, Any]:
+        return self._command(
+            "get_device_by_name",
+            {"track_index": track_index, "device_name": device_name},
+        )
+
+    def load_device_preset(
+        self, track_index: int, device_index: int, preset_uri: str
+    ) -> dict[str, Any]:
+        return self._command(
+            "load_device_preset",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "preset_uri": preset_uri,
+            },
+            side_effect=True,
+        )
+
     def delete_device(self, track_index: int, device_index: int) -> dict[str, Any]:
         return self._command(
             "delete_device",

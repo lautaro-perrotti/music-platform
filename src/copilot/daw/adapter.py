@@ -107,6 +107,14 @@ class DawAdapter(ABC):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    def get_device_by_name(self, track_index: int, device_name: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def load_device_preset(
+        self, track_index: int, device_index: int, preset_uri: str
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     def delete_device(
         self, track_index: int, device_index: int
     ) -> dict[str, Any]: ...
