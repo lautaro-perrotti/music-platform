@@ -91,6 +91,7 @@ def project_ready(
         return report
 
     bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
+    bootstrap_retry: dict[str, Any] | None = None
     session = daw.snapshot(include_notes=False)
     retain_tokens(session)
     inventory = inventory_taps(daw)
@@ -105,6 +106,39 @@ def project_ready(
         track = session.track_by_name(name)
         if track is not None:
             host_infos[name] = daw.get_track_info(track.index)
+
+    # Live can acknowledge the browser load of a Max device before the next
+    # topology read exposes that device.  A clean working copy then produces a
+    # transient TAP_MISSING/PARTIAL result even though the mutation succeeded.
+    # Retry once, narrowly, after re-reading topology; never retry policy or
+    # safety blocks and never create an open-ended mutation loop.
+    retry_reason = str(bootstrap.get("reason") or "")
+    retryable = (
+        bootstrap_apply
+        and bootstrap.get("status") in {"BLOCKED", "PARTIAL"}
+        and (
+            retry_reason.startswith("TAP_MISSING:")
+            or bool(bootstrap.get("missing_after"))
+        )
+        and plan_bootstrap(discovery).get("status") == "CHANGES_REQUIRED"
+    )
+    if retryable:
+        bootstrap_retry = bootstrap
+        bootstrap = bootstrap_project(daw, evidence=evidence, apply=bootstrap_apply)
+        session = daw.snapshot(include_notes=False)
+        retain_tokens(session)
+        inventory = inventory_taps(daw)
+        discovery = discover_topology(
+            session=session,
+            inventory=inventory,
+            master_pos=master_tap_position(daw),
+            host_infos=_live_host_infos(daw, session),
+        )
+        host_infos = {}
+        for name in INFRA_HOSTS:
+            track = session.track_by_name(name)
+            if track is not None:
+                host_infos[name] = daw.get_track_info(track.index)
     terminal = verify_terminal_state(
         transport_playing=session.transport.playing,
         taps=inventory,
@@ -157,6 +191,17 @@ def project_ready(
         "audible_token": session.audible_token,
         "bootstrap_status": bootstrap.get("status"),
         "bootstrap_milestone": bootstrap.get("CROSS_PROJECT_BOOTSTRAP_V1"),
+        "bootstrap_retry": (
+            {
+                "status": bootstrap_retry.get("status"),
+                "reason": bootstrap_retry.get("reason"),
+                "CROSS_PROJECT_BOOTSTRAP_V1": bootstrap_retry.get(
+                    "CROSS_PROJECT_BOOTSTRAP_V1"
+                ),
+            }
+            if bootstrap_retry
+            else None
+        ),
         "bootstrap_reused": BOOTSTRAP_MILESTONE,
         "preflight_kind": preflight_kind,
         "preflight_status": preflight.get("status"),

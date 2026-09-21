@@ -29,7 +29,7 @@ reproducible bug.
 | `RPC_OPTIMIZATION_V2` | VERIFIED / FROZEN | Freshness domains + bulk reads. |
 | `ABLETON_MUTATION_PROTOCOL_V1` | VERIFIED / FROZEN | Live Groove Rider compound prepare/restore. Sequential fallback kept. Not for musical writes. |
 | `PHYSICAL_DSP_V2` | VERIFIED / FROZEN | Factual measurement layer. No mix-quality judgments. FullMix/LowEnd wrapped, not rewritten. |
-| `MUSIC_ANALYZER_V1` | PARTIAL | Real WAV analysis and persisted evidence. File and captured-project paths share `AudioAnalysisInput`; fresh Live capture still needs a successful staging-WAV run. |
+| `MUSIC_ANALYZER_V1` | VERIFIED / FROZEN | Real WAV and real Ableton captured-project analysis produce persisted read-only evidence through `AudioAnalysisInput`; staging-WAV finalization, provenance, and terminal restoration passed. Scope limitations remain explicit in the pack. |
 | `ADVANCED_PERCEPTION_V1` | PROVIDER_LIMITED | Local Analyzer provider and EvidenceGraph fusion are real/read-only. CLAP and semantic-ear providers are unavailable. |
 
 ## Runtime / agent

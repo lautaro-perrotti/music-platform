@@ -81,19 +81,25 @@ timbre features, optional kick+bass relationship measurements, and separate
 `ASTRA_DIAGNOSIS` / `ASTRA_PRODUCER_PLANNER` handoff contracts. `AudioAnalysisInput`
 is now the shared ingestion boundary for file and captured-project analysis;
 project capture no longer routes through the development-lab preflight contract.
-It remains PARTIAL / NOT VERIFIED for a fresh Ableton reference capture: the
-latest live attempt reached capture orchestration but produced no staging WAV
-(`CAPTURE_FINALIZATION_TIMEOUT`), so no project pack was certified from that
-run.
+It is VERIFIED / FROZEN for the current factual Analyzer scope. A fresh
+controlled Ableton run now reaches `PROJECT_READY`, finalizes shared staging
+WAVs, and persists the project pack through the same `AudioAnalysisInput`
+boundary.
 
 Latest checkpoint (2026-09-21): the analyzer was run against the persisted
 15.238 s Main/Kick/Bass capture from the controlled Groove Rider working copy.
 It produced INTRO/GROOVE/OUTRO change-point sections, a MIXED 32-bar
 measurement window, bounded kick/bass overlap timing, low-confidence harmony,
 evidence references, SHA-256 provenance, and no-write output. Ableton itself
-is SESSION_READY / PROJECT_READY after capture-host normalization, but the
-current set is `TARGET_SOURCE_UNSUPPORTED` for a fresh reference capture, so
-this is real-capture validation evidence—not a full MUSIC_ANALYZER_V1 freeze.
+is SESSION_READY / PROJECT_READY after capture-host normalization. The earlier
+attempt was `TARGET_SOURCE_UNSUPPORTED`; it
+did not close the gate.
+
+The current run supersedes that failed attempt: capture readback, provenance,
+terminal restoration, and the no-write invariant passed. The pack still
+reports explicit limits: 32-bar windows are measurement windows rather than
+section boundaries, LUFS is unavailable in FullMix V1, and source
+activity/prominence require isolated sources or separation.
 
 `ADVANCED_PERCEPTION_V1` now has a bounded read-only provider boundary. The
 existing Analyzer is exposed as a real local provider, structural regions are
