@@ -283,7 +283,59 @@ def run_lucas_planner(
             "Core remains measurement and write authority; Lucas plan is intent only.",
         ],
     })
-    return PlannerRun(plan=validated, planner_metadata=dict(metadata), input_context=input_context)
+    constrained, constrained_metadata = constrain_plan_to_lucas_intent(validated, dict(metadata))
+    return PlannerRun(plan=constrained, planner_metadata=constrained_metadata, input_context=input_context)
+
+
+def constrain_plan_to_lucas_intent(
+    plan: MusicPlan,
+    metadata: dict[str, Any],
+) -> tuple[MusicPlan, dict[str, Any]]:
+    """Prevent the deterministic recipe from resurrecting omitted Lucas roles.
+
+    ``build_plan_from_prompt`` historically starts from a broad recipe and
+    overlays model selections.  That is safe for sample defaults, but not for
+    executable track/device actions: an omitted Guitar/Sax must not reappear
+    merely because the recipe contains those roles.  This Core-side gate uses
+    only explicit Lucas metadata and never chooses a musical role itself.
+    """
+    selections = metadata.get("selections")
+    arrangement = metadata.get("arrangement")
+    if not isinstance(selections, dict) and not isinstance(arrangement, list):
+        return plan, metadata
+    allowed: set[str] = {str(name) for name in (selections or {})}
+    for section in arrangement or []:
+        if isinstance(section, dict):
+            allowed.update(str(name) for name in (section.get("active") or []))
+    if not allowed:
+        return plan, metadata
+
+    kept: list[PlanAction] = []
+    omitted: list[str] = []
+    for action in plan.actions:
+        target_name = str((action.target.ref or {}).get("name") or "").strip()
+        if target_name and target_name not in allowed:
+            omitted.append(target_name)
+            continue
+        kept.append(action)
+    omitted_names = sorted(set(omitted))
+    if not omitted_names:
+        return plan, metadata
+    constrained = plan.model_copy(update={
+        "actions": kept,
+        "notes": [
+            *plan.notes,
+            "Core intent gate removed recipe actions for roles omitted by Lucas.",
+        ],
+    })
+    return constrained, {
+        **metadata,
+        "core_intent_gate": {
+            "allowed_tracks": sorted(allowed),
+            "omitted_tracks": omitted_names,
+            "removed_action_count": len(omitted),
+        },
+    }
 
 
 def run_lucas_critique(

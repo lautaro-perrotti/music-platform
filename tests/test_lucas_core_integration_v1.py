@@ -12,6 +12,7 @@ from copilot.integration.lucas_core_v1 import (
     build_lucas_input,
     build_project_context,
     build_reference_context,
+    constrain_plan_to_lucas_intent,
     execute_lucas_patch_contracts_through_core,
     execute_lucas_plan_through_core,
     normalize_sample_uri_for_working_copy,
@@ -432,3 +433,30 @@ def test_vibe_production_path_has_no_direct_soniq_writer():
     assert "copilot.producer.soniq_surface" not in source
     assert "execute_lucas_plan_through_core" in source
     assert "execute_lucas_patch_contracts_through_core" in source
+
+
+def test_core_does_not_resurrect_lucas_omitted_tracks() -> None:
+    daw = MockAbletonAdapter()
+    daw.connect()
+    session = daw.snapshot()
+    attach_tokens(session)
+    actions = [
+        build_create_track_action(
+            project_identity=session.project_identity,
+            track_name=name,
+            reason="fixture",
+            evidence_refs=[],
+        )
+        for name in ("Clap", "Stab", "Guitar", "Sax")
+    ]
+    plan = _plan(session, actions)
+    constrained, metadata = constrain_plan_to_lucas_intent(
+        plan,
+        {
+            "selections": {"Clap": 1, "Stab": 1},
+            "arrangement": [{"name": "DROP", "bars": 8, "active": ["Clap", "Stab"]}],
+        },
+    )
+    names = [str(action.target.ref.get("name")) for action in constrained.actions]
+    assert names == ["Clap", "Stab"]
+    assert metadata["core_intent_gate"]["omitted_tracks"] == ["Guitar", "Sax"]

@@ -149,6 +149,30 @@ def diagnose_bad_alpha(artifact: dict[str, Any]) -> dict[str, Any]:
             "evidence": ["post_change_context.music_analysis.limitations"],
             "statement": "The capture is Main/master evidence; source activity and matched kick/bass behavior were not measured.",
         })
+    prioritized = [
+        {
+            "rank": 1,
+            "problem": "MUSICAL_FEEDBACK_MISSING",
+            "status": "SUPPORTED",
+            "evidence_refs": ["lucas_feedback.status"],
+            "reason": "No post-change typed critique or correction cycle was completed.",
+        },
+        {
+            "rank": 2,
+            "problem": "SOURCE_AND_LOWEND_EVIDENCE_LIMITED",
+            "status": "SUPPORTED",
+            "evidence_refs": ["post_change_context.music_analysis.limitations"],
+            "reason": "The persisted analysis has Main-only low-end evidence and no source activity readback.",
+        },
+    ]
+    if len(arrangement) < 6:
+        prioritized.append({
+            "rank": 3,
+            "problem": "DEVELOPMENT_UNVERIFIED",
+            "status": "POSSIBLE",
+            "evidence_refs": ["lucas.plan.metadata.arrangement", "post_change_context.music_analysis"],
+            "reason": "The plan has only five regions and no evidence that later regions materially develop earlier material.",
+        })
     return {
         "schema_version": "bad-alpha-diagnosis-v1",
         "user_judgment": "REJECTED",
@@ -169,6 +193,7 @@ def diagnose_bad_alpha(artifact: dict[str, Any]) -> dict[str, Any]:
         "planning": {"strategy_provenance": lucas.get("strategy_provenance"), "plan_id": plan.get("plan_id"), "action_count": len(plan.get("actions") or [])},
         "execution": {"sample_loads": len(sample_actions), "sample_loads_verified": len(sample_actions) - deferred, "failed": execution.get("failed", 0), "original_untouched": final.get("original_untouched")},
         "critique": {"status": critique.get("status"), "typed_result_present": bool(critique.get("result"))},
+        "prioritized_musical_problems": prioritized,
         "no_write": True,
     }
 
@@ -184,6 +209,84 @@ def build_long_range_context(pack: MusicAnalysisPack) -> LongRangeMusicContext:
     if not any(row["repetition_strength"] is not None for row in repetition):
         limitations.append("No measured repetition strength or motif identity is available in this pack.")
     return LongRangeMusicContext(status="PARTIAL" if limitations else "VERIFIED", reference_state_token=pack.tokens.reference_state_token, regions=regions, energy_arc=energy_arc, repetition=repetition, transitions=transitions, limitations=list(dict.fromkeys(limitations)), provenance=list(pack.evidence_refs))
+
+
+def build_alpha_long_range_context(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Join measured windows with Lucas's intended arrangement, read-only."""
+    metadata = ((artifact.get("lucas") or {}).get("metadata") or {})
+    sections = list(metadata.get("arrangement") or [])
+    rows: list[dict[str, Any]] = []
+    previous: set[str] | None = None
+    seen_configs: dict[str, int] = {}
+    cursor = 0.0
+    novelty: list[dict[str, Any]] = []
+    for index, section in enumerate(sections):
+        active = {str(name) for name in (section.get("active") or [])}
+        bars = int(section.get("bars") or 0)
+        key = "|".join(sorted(active))
+        seen_configs[key] = seen_configs.get(key, 0) + 1
+        added = sorted(active - previous) if previous is not None else sorted(active)
+        removed = sorted(previous - active) if previous is not None else []
+        similarity = None if previous is None else (len(active & previous) / max(1, len(active | previous)))
+        if added or removed:
+            novelty.append({"section_index": index, "added": added, "removed": removed, "evidence_refs": [f"lucas.arrangement:{index}"]})
+        rows.append({
+            "index": index,
+            "name": str(section.get("name") or "SECTION"),
+            "start_beat": cursor,
+            "end_beat": cursor + bars * 4,
+            "bars": bars,
+            "active_roles": sorted(active),
+            "added_roles": added,
+            "removed_roles": removed,
+            "similarity_to_previous": similarity,
+            "evidence_refs": [f"lucas.arrangement:{index}"],
+        })
+        cursor += bars * 4
+        previous = active
+    pack = ((artifact.get("post_change_context") or {}).get("music_analysis") or {})
+    windows = pack.get("windows") or []
+    energy = [{"index": row.get("index"), "energy_db": row.get("energy_db"), "onset_density_per_s": ((row.get("groove") or {}).get("onset_density_per_s")), "evidence_refs": row.get("evidence_refs") or []} for row in windows]
+    repeated = [{"configuration": key, "count": count} for key, count in sorted(seen_configs.items(), key=lambda item: (-item[1], item[0]))]
+    limitations = [
+        "Arrangement facts are plan intent, not proof of audible differentiation.",
+        "No candidate audio or source-isolated capture is available for section similarity.",
+    ]
+    if len(windows) < 2:
+        limitations.append("Only one measured post-change window is available.")
+    return {
+        "schema_version": "alpha-long-range-context-v1",
+        "status": "PARTIAL",
+        "section_sequence": rows,
+        "repeated_role_configurations": repeated,
+        "novelty_events": novelty,
+        "energy_and_onset_trajectory": energy,
+        "repetition_counts": {"section_configurations": len(repeated), "repeated_configurations": sum(1 for row in repeated if row["count"] > 1)},
+        "limitations": limitations,
+        "provenance": ["lucas.metadata.arrangement", "post_change_context.music_analysis"],
+        "no_write": True,
+    }
+
+
+def build_sample_fit_audit(artifact: dict[str, Any]) -> dict[str, Any]:
+    samples = artifact.get("sample_set_context") or {}
+    assets = samples.get("candidates") or samples.get("assets") or []
+    selected = ((artifact.get("lucas") or {}).get("metadata") or {}).get("sample_map") or {}
+    by_id = {str(row.get("id") or row.get("sha256")): row for row in assets if isinstance(row, dict)}
+    rows = []
+    for role, asset_id in sorted(selected.items()):
+        asset = by_id.get(str(asset_id), {})
+        rows.append({
+            "role": role,
+            "sample_id": asset_id,
+            "filename": asset.get("filename"),
+            "library_facts": {key: asset.get(key) for key in ("sample_type", "bpm", "descriptors") if key in asset},
+            "clap_relation": "not_comparable_without_reference_embedding_or_candidate_embedding",
+            "semantic_relation": "SEMANTIC_PROVIDER_UNAVAILABLE",
+            "context_audition": "NOT_RUN",
+            "status": "INSUFFICIENT_EVIDENCE",
+        })
+    return {"schema_version": "sample-fit-audit-v1", "selected": rows, "limitations": ["No semantic audio provider", "No alternate in-context audition", "CLAP relation requires comparable embeddings"], "no_write": True}
 
 
 class CandidateProvider(Protocol):
@@ -245,6 +348,25 @@ def build_provider_capability_matrix(artifact: dict[str, Any]) -> list[ProviderC
     return records
 
 
+def probe_configured_reasoning_provider(*, timeout_s: float = 8.0) -> dict[str, Any]:
+    """One cheap, secret-free runtime probe for the configured reasoning slot."""
+    try:
+        from copilot.reasoning.provider import configured_http_provider
+
+        provider = configured_http_provider()
+    except Exception as exc:
+        return {"configured": False, "reachable": False, "failure_code": type(exc).__name__}
+    if provider is None:
+        return {"configured": False, "reachable": False, "failure_code": "NOT_CONFIGURED"}
+    try:
+        raw = provider.reason('Return JSON with exactly one key: "health", value "ok".', timeout_s=timeout_s)
+        return {"configured": True, "reachable": True, "provider": provider.identity, "model": provider.version, "response_valid": isinstance(raw, str) and bool(raw.strip())}
+    except Exception as exc:
+        kind = getattr(exc, "kind", None)
+        code = getattr(kind, "value", None) or str(kind or type(exc).__name__)
+        return {"configured": True, "reachable": False, "provider": provider.identity, "model": provider.version, "failure_code": code}
+
+
 def build_preference_observation() -> PreferenceObservation:
     return PreferenceObservation(observation_id="user.alpha.2026-09-21", source="explicit_user_judgment", judgment="REJECTED", scope="this Alpha artifact only", must_not_infer=["rejection reason", "genre preference", "global timbral preference", "future plan preference"], provenance=["user_judgment=REJECTED"])
 
@@ -256,6 +378,17 @@ def run_recovery(repo_root: str | Path, artifact_path: str | Path = ALPHA_ARTIFA
     audit = build_musical_intelligence_audit(repo_root, artifact)
     diagnosis = diagnose_bad_alpha(artifact)
     providers = build_provider_capability_matrix(artifact)
+    reasoning_probe = probe_configured_reasoning_provider()
+    if not reasoning_probe.get("reachable"):
+        providers = [
+            item.model_copy(update={
+                "availability": False,
+                "health": ProviderHealth.UNAVAILABLE,
+                "failure_code": reasoning_probe.get("failure_code") or "MODEL_UNAVAILABLE",
+                "provenance": item.provenance + ["runtime.reasoning_health_probe"],
+            }) if item.provider_id == "openai-compatible" else item
+            for item in providers
+        ]
     pack_raw = ((artifact.get("post_change_context") or {}).get("music_analysis") or {})
     long_range: dict[str, Any]
     if pack_raw:
@@ -266,17 +399,24 @@ def run_recovery(repo_root: str | Path, artifact_path: str | Path = ALPHA_ARTIFA
     else:
         long_range = {"status": "BLOCKED", "reason": "MUSIC_ANALYSIS_PACK_MISSING"}
     candidate_report = run_candidate_search({"alpha_artifact": str(artifact_path), "user_judgment": "REJECTED"})
+    candidate_payload = _dump(candidate_report)
+    candidate_payload["provider_attempts"] = [reasoning_probe]
+    candidate_payload["translation_guard"] = {
+        "status": "VERIFIED",
+        "omitted_roles_cannot_become_actions": True,
+        "evidence": ["core.constrain_plan_to_lucas_intent", "tests.test_lucas_core_integration_v1"],
+    }
     preference = _dump(build_preference_observation())
     artifacts = {
         "musical_intelligence_audit.json": audit,
-        "provider_capability_matrix.json": {"schema_version": "provider-capability-matrix-v1", "providers": [_dump(item) for item in providers], "no_secrets_exposed": True},
-        "bad_alpha_diagnosis.json": diagnosis,
+        "provider_capability_matrix.json": {"schema_version": "provider-capability-matrix-v1", "providers": [_dump(item) for item in providers], "reasoning_health_probe": reasoning_probe, "no_secrets_exposed": True},
+        "bad_alpha_diagnosis.json": {**diagnosis, "long_range": build_alpha_long_range_context(artifact), "sample_fit": build_sample_fit_audit(artifact)},
         "semantic_ear_benchmark.json": {"status": "PROVIDER_UNAVAILABLE", "provider": "music-flamingo", "real_audio_validation": False, "tasks": [], "reason": "No semantic audio provider is installed/configured; CLAP is an embedding provider, not a semantic language model."},
-        "candidate_search_run.json": _dump(candidate_report),
+        "candidate_search_run.json": candidate_payload,
         "preference_observations.json": {"observations": [preference], "global_preference_learning": False},
         "quality_recovery_run.json": {"status": "NOT_RUN_PROVIDER_AND_HUMAN_EVALUATION_REQUIRED", "baseline": str(artifact_path), "new_artifact": None, "reason": "No musical alternative was generated; no Ableton run was repeated.", "MUSICAL_WRITES": 0},
         "blind_ab_manifest.json": {"status": "PENDING_CANDIDATE_AUDIO", "mapping": None, "human_evaluation": "PENDING", "baseline": str(artifact_path)},
-        "long_range_music_context.json": long_range,
+        "long_range_music_context.json": {"measured_context": long_range, "alpha_arrangement_context": build_alpha_long_range_context(artifact)},
     }
     for name, payload in artifacts.items():
         (output / name).write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
