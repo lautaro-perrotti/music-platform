@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from copilot.music_generation.ace_step import AceStepProvider, choose_acestep_profile
-from copilot.music_generation.schemas import GenerationBrief, GeneratorHealth, GeneratorRequest
+from copilot.music_generation.benchmark import validate_generated_audio
+from copilot.music_generation.schemas import GeneratedAsset, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
 from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.music_generation.resources import StorageVolume, WorkerResources, choose_execution_route
 
@@ -101,3 +102,31 @@ def test_worker_route_fails_to_cloud_when_mac_or_windows_volume_is_too_small() -
     route = choose_execution_route(resources, required_bytes=10 * 1024**3)
     assert route.route == "CLOUD_REQUIRED"
     assert route.selected_mount is None
+
+
+def test_generated_asset_validation_is_factual_and_hash_bound(tmp_path: Path) -> None:
+    import hashlib
+    import soundfile as sf
+    import numpy as np
+
+    path = tmp_path / "candidate.wav"
+    sf.write(path, np.ones((4800, 1), dtype=np.float32) * 0.1, 48_000)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    asset = GeneratedAsset(
+        asset_id="ace-step:candidate",
+        path=path,
+        sha256=digest,
+        bytes=path.stat().st_size,
+        duration_s=0.1,
+        sample_rate=48_000,
+        non_silent=True,
+        model=ModelManifest(provider="ace-step", model_id="test", quality_tier="LOCAL_COST_TIER"),
+        seed=7,
+        prompt="instrumental test",
+        performance=PerformanceManifest(device="test"),
+        rights_manifest=RightsManifest(),
+    )
+    result = validate_generated_audio(asset, expected_duration_s=0.1)
+    assert result.status == "VALID"
+    assert result.hash_matches is True
+    assert result.provenance_complete is True
