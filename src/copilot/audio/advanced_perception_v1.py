@@ -31,6 +31,7 @@ from copilot.schemas.advanced_perception import (
 )
 from copilot.schemas.evidence import EvidenceKind, FusionStatus
 from copilot.schemas.music_analysis import MusicAnalysisPack
+from copilot.schemas.musical_intelligence import SemanticObservation, SemanticProviderResult
 
 
 class AnalyzerMIRProvider:
@@ -228,8 +229,14 @@ class EmbeddingPerceptionProvider:
         )
 
 
-class SemanticEarProvider:
-    """Explicit boundary for a future semantic-ear model."""
+class SemanticAudioProvider:
+    """Generic semantic-audio boundary; unavailable providers fail closed.
+
+    CLAP is intentionally not used here: embeddings support similarity and
+    retrieval, but are not a semantic-language judgment.  A future provider
+    can implement ``observe`` and return typed, provenance-bearing
+    observations without changing the factual DSP layer.
+    """
 
     name = "music-flamingo"
     version = "unavailable"
@@ -243,6 +250,29 @@ class SemanticEarProvider:
             reason="no semantic-ear provider is installed or configured",
             semantic=True,
         )
+
+    def observe(
+        self,
+        *,
+        audio_path: Path | None = None,
+        source_token: str,
+        evidence_refs: Sequence[str] = (),
+    ) -> SemanticProviderResult:
+        return SemanticProviderResult(
+            status="SEMANTIC_PROVIDER_UNAVAILABLE",
+            provider=self.name,
+            model=self.version,
+            reason="no semantic-ear provider is installed or configured",
+            provenance={
+                "audio_path_supplied": audio_path is not None,
+                "source_token": source_token,
+                "evidence_refs": list(evidence_refs),
+            },
+        )
+
+
+class SemanticEarProvider(SemanticAudioProvider):
+    """Backward-compatible name for the generic semantic provider boundary."""
 
 
 def compare_embeddings(left: Embedding, right: Embedding) -> dict[str, Any]:
