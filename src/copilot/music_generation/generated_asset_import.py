@@ -89,7 +89,10 @@ def build_generated_asset_load_plan(
     action_id = f"generated_asset_{asset.sha256[:12]}"
     action = PlanAction(
         action_id=action_id,
-        action_type=ProductionActionKind.LOAD_SAMPLE,
+        # The frozen compiler vocabulary uses SAMPLE_LOAD for producer plans;
+        # ProductionCompiler maps it to the canonical SafeWrite LOAD_SAMPLE
+        # mutation.  Do not create a second generated-asset action kind.
+        action_type=ProductionActionKind.SAMPLE_LOAD,
         target=ActionTarget(
             ref=ref.model_dump(mode="json"),
             runtime_id=runtime.model_dump(mode="json"),
@@ -134,4 +137,3 @@ def build_generated_asset_load_plan(
         notes=["Generated audio import is offline-prepared; execution belongs exclusively to ProductionCompiler and SafeWrite."],
         gate={"MUSICAL_WRITES": 1, "ORIGINAL_PROJECT_WRITES": 0},
     )
-
