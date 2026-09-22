@@ -4,6 +4,8 @@ from pathlib import Path
 
 from copilot.music_generation.ace_step import AceStepProvider, choose_acestep_profile
 from copilot.music_generation.benchmark import validate_generated_audio
+from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext
+from copilot.music_generation.generated_asset_import import stage_generated_asset
 from copilot.music_generation.schemas import GeneratedAsset, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
 from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.music_generation.resources import StorageVolume, WorkerResources, choose_execution_route
@@ -130,3 +132,15 @@ def test_generated_asset_validation_is_factual_and_hash_bound(tmp_path: Path) ->
     assert result.status == "VALID"
     assert result.hash_matches is True
     assert result.provenance_complete is True
+
+
+def test_executive_producer_boundary_does_not_invent_writes() -> None:
+    brief = GenerationBrief(brief_id="boundary", user_intent="instrumental groove", target_duration_s=10)
+    decision = ExecutiveProducerAdapter().build_decision(
+        ExecutiveProducerContext(user_intent="instrumental groove"),
+        generation_brief=brief,
+        provider_status="REASONING_PROVIDER_LIMITED",
+    )
+    assert decision.no_musical_invention is True
+    assert decision.no_ableton_access is True
+    assert decision.production_refinement_intents == []

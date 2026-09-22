@@ -24,6 +24,7 @@ from copilot.music_generation.benchmark import (
 )
 from copilot.music_generation.resources import ExecutionRoute, StorageVolume, WorkerResources, choose_execution_route, discover_worker_resources
 from copilot.music_generation.generated_asset_import import StagedGeneratedAsset, build_generated_asset_load_plan, stage_generated_asset
+from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext, ExecutiveProducerDecision, GeneratorEditIntent, ProductionRefinementIntent
 
 __all__ = [
     "GeneratedAsset",
@@ -52,4 +53,9 @@ __all__ = [
     "StagedGeneratedAsset",
     "build_generated_asset_load_plan",
     "stage_generated_asset",
+    "ExecutiveProducerAdapter",
+    "ExecutiveProducerContext",
+    "ExecutiveProducerDecision",
+    "GeneratorEditIntent",
+    "ProductionRefinementIntent",
 ]
