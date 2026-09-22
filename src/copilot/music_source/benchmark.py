@@ -228,6 +228,7 @@ def build_stem_candidate_set(
 
 def build_blind_bundle(
     *,
+    benchmark_id: str | None = None,
     candidate_paths_by_private_id: Mapping[str, Mapping[str, Path]],
     output_dir: Path,
     mapping_path: Path,
@@ -288,7 +289,7 @@ def build_blind_bundle(
                 end = min(audio.shape[0], int(end_s * rate))
                 sf.write(role_dir / f"{public_id}_excerpt_{index:02d}.wav", (audio[start:end] * gain).astype(np.float32), rate, subtype="PCM_16")
     mapping = BlindCandidateMapping(
-        benchmark_id=output_dir.parent.name,
+        benchmark_id=benchmark_id or output_dir.parent.name,
         public_to_private=public_to_private,
         roles=roles,
         gain_db_by_public_role={
