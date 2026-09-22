@@ -69,6 +69,30 @@
     "ableton_touched": false,
     "automatic_winner": false
   },
+  "ace_cloud_high_quality_v1": {
+    "status": "CREDENTIAL_OR_PAYMENT_AUTHORIZATION_REQUIRED",
+    "self_hosted": true,
+    "provider": "UNSELECTED",
+    "selected_dit": "acestep-v15-xl-turbo",
+    "selected_lm": "acestep-5Hz-lm-4B",
+    "model_revision": "d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee",
+    "runtime_revision": "ca1e85fe9430179831e6bc6be790c332190a3866",
+    "minimum_vram_gib": 24,
+    "authorized_cloud_worker": false,
+    "four_candidate_batch": "NOT_STARTED",
+    "total_cloud_cost": null,
+    "reason": "No authorized cloud GPU credentials, worker endpoint, or payment authorization found."
+  },
+  "ace_watermark_audit_v1": {
+    "status": "NO_WATERMARK_MECHANISM_FOUND_IN_AUDITED_RUNTIME",
+    "scope": [
+      "official source README and model downloader",
+      "official inference.py and audio output path",
+      "official API/server response path",
+      "official runtime source revision ca1e85fe9430179831e6bc6be790c332190a3866"
+    ],
+    "caveat": "This is not a claim about training-data provenance or external hosting layers."
+  },
   "worker_recovery": {
     "initial_worker_failure": "PORT_DROPPED_AFTER_SEVEN_CANDIDATES",
     "runtime_reused": true,

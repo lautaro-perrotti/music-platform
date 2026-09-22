@@ -80,29 +80,47 @@ def choose_acestep_profile(vram_gb: float | None) -> dict[str, Any]:
 class AceStepProvider:
     provider_id = "ace-step"
 
-    def __init__(self, *, model_path: str | Path | None = None, api_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model_path: str | Path | None = None,
+        api_url: str | None = None,
+        api_key: str | None = None,
+        model_id: str | None = None,
+        provider_id: str | None = None,
+        quality_tier: str | None = None,
+        compute_tier: str | None = None,
+        benchmark_role: str | None = None,
+    ) -> None:
         # model_path remains in the manifest for provenance, but the supported
         # runtime boundary is the official API worker.  Direct model imports
         # would duplicate ACE-Step's lifecycle and make health unverifiable.
         configured_model_path = model_path or os.environ.get("ACESTEP_MODEL_PATH")
         self.model_path = Path(configured_model_path) if configured_model_path else None
-        self.api_url = (api_url or os.environ.get("ACESTEP_API_URL", "")).rstrip("/")
-        self.api_key = os.environ.get("ACESTEP_API_KEY")
+        self.api_url = (api_url if api_url is not None else os.environ.get("ACESTEP_API_URL", "")).rstrip("/")
+        self.api_key = api_key if api_key is not None else os.environ.get("ACESTEP_API_KEY")
         self.timeout_s = float(os.environ.get("ACESTEP_TIMEOUT_S", "1800"))
         self.profile = choose_acestep_profile(detect_gpu_vram_gb())
+        if model_id:
+            self.profile["dit"] = model_id
+        self.model_id = self.profile.get("dit", "acestep-v15-turbo")
+        self.provider_id = provider_id or type(self).provider_id
+        self.quality_tier = quality_tier
+        self.compute_tier = compute_tier
+        self.benchmark_role = benchmark_role
 
     def _model_manifest(self) -> ModelManifest:
         return ModelManifest(
             provider=self.provider_id,
-            model_id="ACE-Step/Ace-Step1.5",
+            model_id=self.model_id,
             revision=os.environ.get("ACESTEP_MODEL_REVISION"),
             checkpoint_path=str(self.model_path) if self.model_path is not None else None,
             license="MIT",
             license_source="https://huggingface.co/ACE-Step/Ace-Step1.5",
             quantization=self.profile.get("quantization"),
-            quality_tier=os.environ.get("ACESTEP_QUALITY_TIER", "LOCAL_COST_TIER"),
-            compute_tier=os.environ.get("ACESTEP_COMPUTE_TIER", "LOCAL_WINDOWS"),
-            benchmark_role=os.environ.get("ACESTEP_BENCHMARK_ROLE", "DEV_ONLY"),
+            quality_tier=self.quality_tier or os.environ.get("ACESTEP_QUALITY_TIER", "LOCAL_COST_TIER"),
+            compute_tier=self.compute_tier or os.environ.get("ACESTEP_COMPUTE_TIER", "LOCAL_WINDOWS"),
+            benchmark_role=self.benchmark_role or os.environ.get("ACESTEP_BENCHMARK_ROLE", "DEV_ONLY"),
         )
 
     def describe(self) -> GeneratorDescriptor:
@@ -221,7 +239,7 @@ class AceStepProvider:
             "prompt": brief.user_intent,
             "lyrics": brief.lyrics or "[Instrumental]",
             "thinking": False,
-            "model": self.profile.get("dit", "acestep-v15-turbo"),
+            "model": self.model_id,
             "bpm": int(brief.tempo_bpm) if brief.tempo_bpm else None,
             "key_scale": brief.key_context or "",
             "time_signature": brief.meter or "",

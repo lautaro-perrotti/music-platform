@@ -3,6 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from copilot.music_generation.ace_step import AceStepProvider, choose_acestep_profile
+from copilot.music_generation.ace_cloud import (
+    ACE_CLOUD_LM_MODEL,
+    ACE_CLOUD_MODEL_ID,
+    ACE_CLOUD_MODEL_REVISION,
+    ACE_CLOUD_MIN_VRAM_GIB,
+    AceStepCloudProvider,
+)
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider, build_elevenlabs_composition_plan
 from copilot.music_generation.benchmark import (
     CandidateRecord,
@@ -24,6 +31,32 @@ def test_four_gb_profile_is_dit_only_and_not_xl() -> None:
     assert profile["dit"] == "acestep-v15-turbo"
     assert profile["lm"] is None
     assert profile["offload"] is True
+
+
+def test_cloud_ace_provider_is_xl_quality_boundary_and_fail_closed_without_auth(monkeypatch) -> None:
+    monkeypatch.delenv("ACESTEP_CLOUD_API_URL", raising=False)
+    monkeypatch.delenv("ACESTEP_CLOUD_API_KEY", raising=False)
+    provider = AceStepCloudProvider()
+    descriptor = provider.describe()
+    assert descriptor.provider_id == "ace-cloud-high-quality"
+    assert descriptor.model.model_id == ACE_CLOUD_MODEL_ID
+    assert descriptor.model.revision == ACE_CLOUD_MODEL_REVISION
+    assert descriptor.health == GeneratorHealth.UNAVAILABLE
+    assert descriptor.hardware_requirements["selected_lm"] == ACE_CLOUD_LM_MODEL
+    assert descriptor.hardware_requirements["minimum_vram_gib"] == ACE_CLOUD_MIN_VRAM_GIB
+
+
+def test_cloud_ace_provider_does_not_fallback_to_local_worker(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("ACESTEP_CLOUD_API_URL", raising=False)
+    monkeypatch.delenv("ACESTEP_CLOUD_API_KEY", raising=False)
+    provider = AceStepCloudProvider()
+    brief = GenerationBrief(brief_id="cloud-no-fallback", user_intent="instrumental house", target_duration_s=60)
+    batch = provider.generate(
+        GeneratorRequest(request_id="cloud-no-fallback", brief=brief, seed=1, output_dir=tmp_path)
+    )
+    assert batch.status == "GENERATOR_UNAVAILABLE"
+    assert batch.failures[0]["code"] == "CREDENTIAL_REQUIRED"
+    assert not list(tmp_path.glob("*.wav"))
 
 
 def test_ace_provider_is_truthful_when_checkpoint_is_absent(tmp_path: Path) -> None:

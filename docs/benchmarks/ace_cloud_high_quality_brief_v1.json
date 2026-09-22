@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "ACE_CLOUD_HIGH_QUALITY_V1",
+  "target_duration_s": 60,
+  "tempo_bpm": 116,
+  "meter": "4/4",
+  "instrumental": true,
+  "musical_direction": "instrumental French-inspired house / space-disco; warm and sophisticated; late-90s / early-2000s character; prominent melodic funk bassline; syncopated bass movement; restrained four-on-the-floor drums; rounded kick; crisp disco hi-hats; subtle percussion; warm Rhodes-like electric piano harmony; jazzy extended chords; soft analog synths; shimmering pads; subtle filtered textures; nocturnal; futuristic; elegant; optimistic; slightly nostalgic; minimal hypnotic melodic vocabulary; gradual arrangement evolution; groove and bass movement prioritized over drops; subtle tension and release; polished but warm/slightly vintage production",
+  "avoid": [
+    "vocals",
+    "vocal chops",
+    "guitars as focal element",
+    "saxophone",
+    "huge EDM drops",
+    "festival builds",
+    "supersaws",
+    "trance leads",
+    "aggressive modern bass music aesthetics",
+    "cinematic orchestration",
+    "direct reproduction of any existing melody",
+    "direct reproduction of any existing chord progression"
+  ],
+  "bass_role": "The bassline should behave almost as a second melody and remain a major emotional center.",
+  "harmony": "Harmony may use seventh chords, ninth chords, and soulful/jazzy extensions rather than simple triads only.",
+  "benchmark_policy": {
+    "same_brief_for_all_candidates": true,
+    "successful_candidates_target": 4,
+    "bounded_attempts": 6,
+    "human_quality_authority": true,
+    "automatic_winner": false
+  }
+}
