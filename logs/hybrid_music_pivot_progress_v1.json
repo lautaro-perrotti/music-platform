@@ -57,6 +57,18 @@
     "provider_identity_hidden_from_listener": true,
     "automatic_winner": false
   },
+  "elevenlabs_music_provider_v1": {
+    "status": "IMPLEMENTED / CREDENTIAL_REQUIRED",
+    "provider": "elevenlabs-music",
+    "model": "music_v2_5",
+    "endpoint": "POST /v1/music/detailed",
+    "composition_plan": "IMPLEMENTED",
+    "real_generation": "NOT_ATTEMPTED",
+    "credential_source_checked": ["ELEVENLABS_API_KEY", ".env"],
+    "credential_present": false,
+    "ableton_touched": false,
+    "automatic_winner": false
+  },
   "worker_recovery": {
     "initial_worker_failure": "PORT_DROPPED_AFTER_SEVEN_CANDIDATES",
     "runtime_reused": true,

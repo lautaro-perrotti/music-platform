@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from copilot.music_generation.ace_step import AceStepProvider, choose_acestep_profile
+from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider, build_elevenlabs_composition_plan
 from copilot.music_generation.benchmark import (
     CandidateRecord,
     ProviderComparisonReport,
@@ -298,3 +299,53 @@ def test_executive_producer_boundary_does_not_invent_writes() -> None:
     assert decision.no_musical_invention is True
     assert decision.no_ableton_access is True
     assert decision.production_refinement_intents == []
+
+
+def test_elevenlabs_plan_preserves_brief_intent_and_exact_duration() -> None:
+    brief = GenerationBrief(
+        brief_id="eleven-plan",
+        user_intent="instrumental electronic groove with evolving texture",
+        target_duration_s=60,
+        tempo_bpm=127,
+        key_context="A minor",
+        structural_intent=["INTRO", "GROOVE", "DROP", "OUTRO"],
+        energy_intent="rising then peak",
+        groove_intent="four on the floor with syncopated hats",
+        density_intent="sparse intro, dense peak",
+    )
+    plan = build_elevenlabs_composition_plan(brief)
+    assert sum(chunk["duration_ms"] for chunk in plan["chunks"]) == 60_000
+    assert [chunk["text"] for chunk in plan["chunks"]] == ["[INTRO]", "[GROOVE]", "[DROP]", "[OUTRO]"]
+    assert "instrumental electronic groove with evolving texture" in plan["chunks"][0]["positive_styles"]
+    assert "127 BPM" in plan["chunks"][0]["positive_styles"]
+    assert "vocals" in plan["chunks"][0]["negative_styles"]
+
+
+def test_elevenlabs_provider_stops_at_real_credential_boundary(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    provider = ElevenLabsMusicProvider(api_key=None)
+    assert provider.health().value == "UNAVAILABLE"
+    brief = GenerationBrief(
+        brief_id="eleven-credential",
+        user_intent="instrumental electronic music",
+        target_duration_s=10,
+    )
+    batch = provider.generate(
+        GeneratorRequest(request_id="eleven-credential", brief=brief, seed=1, output_dir=tmp_path)
+    )
+    assert batch.status == "GENERATOR_UNAVAILABLE"
+    assert batch.failures[0]["code"] == "CREDENTIAL_REQUIRED"
+
+
+def test_elevenlabs_detailed_multipart_parser_keeps_metadata_and_audio() -> None:
+    body = (
+        b"--demo\r\nContent-Type: application/json\r\n\r\n"
+        b'{"song_metadata":{"title":"test"}}\r\n'
+        b"--demo\r\nContent-Type: audio/mpeg\r\n\r\nMP3BYTES\r\n"
+        b"--demo--\r\n"
+    )
+    metadata, audio = ElevenLabsMusicProvider._parse_detailed_response(
+        body, "multipart/mixed; boundary=demo"
+    )
+    assert metadata["song_metadata"]["title"] == "test"
+    assert audio == b"MP3BYTES"

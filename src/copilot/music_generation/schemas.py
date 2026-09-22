@@ -26,6 +26,7 @@ class GeneratorCapability(StrEnum):
     STEM_OUTPUT = "STEM_OUTPUT"
     MIDI_OUTPUT = "MIDI_OUTPUT"
     SECTION_CONTROL = "SECTION_CONTROL"
+    COMPOSITION_PLAN = "COMPOSITION_PLAN"
     LONG_FORM = "LONG_FORM"
     INSTRUMENTAL = "INSTRUMENTAL"
     VOCALS = "VOCALS"
@@ -49,6 +50,7 @@ class GeneratorFailureCode(StrEnum):
     OUTPUT_INVALID = "OUTPUT_INVALID"
     INFERENCE_FAILED = "INFERENCE_FAILED"
     RUNTIME_UNAVAILABLE = "RUNTIME_UNAVAILABLE"
+    CREDENTIAL_REQUIRED = "CREDENTIAL_REQUIRED"
 
 
 class RightsClassification(StrEnum):
@@ -146,6 +148,8 @@ class GeneratedAsset(BaseModel):
     performance: PerformanceManifest
     rights_manifest: RightsManifest
     lineage: list[str] = Field(default_factory=list)
+    provider_request: dict[str, Any] | None = None
+    provider_metadata: dict[str, Any] | None = None
     no_ableton_access: bool = True
 
 

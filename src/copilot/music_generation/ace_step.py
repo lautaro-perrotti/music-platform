@@ -198,6 +198,7 @@ class AceStepProvider:
             GeneratorFailureCode.MODEL_MISSING,
             GeneratorFailureCode.RUNTIME_UNAVAILABLE,
             GeneratorFailureCode.DEPENDENCY_MISSING,
+            GeneratorFailureCode.CREDENTIAL_REQUIRED,
         }
         return GenerationBatch(
             batch_id=request.request_id,

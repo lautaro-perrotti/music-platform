@@ -150,6 +150,10 @@ def _bundle_candidate(asset: GeneratedAsset, brief: GenerationBrief, root: Path,
     _write_json(bundle / "rights_manifest.json", asset.rights_manifest.model_dump(mode="json"))
     _write_json(bundle / "performance.json", asset.performance.model_dump(mode="json"))
     _write_json(bundle / "technical_validation.json", validation.model_dump(mode="json"))
+    if asset.provider_request is not None:
+        _write_json(bundle / "provider_request.json", asset.provider_request)
+    if asset.provider_metadata is not None:
+        _write_json(bundle / "provider_metadata.json", asset.provider_metadata)
     return bundle
 
 
