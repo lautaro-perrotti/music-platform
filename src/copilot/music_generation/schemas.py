@@ -48,6 +48,7 @@ class GeneratorFailureCode(StrEnum):
     RIGHTS_BLOCKED = "RIGHTS_BLOCKED"
     OUTPUT_INVALID = "OUTPUT_INVALID"
     INFERENCE_FAILED = "INFERENCE_FAILED"
+    RUNTIME_UNAVAILABLE = "RUNTIME_UNAVAILABLE"
 
 
 class RightsClassification(StrEnum):
@@ -74,6 +75,9 @@ class ModelManifest(BaseModel):
     license: str = "UNKNOWN"
     license_source: str | None = None
     quantization: str | None = None
+    quality_tier: str = "UNBENCHMARKED"
+    compute_tier: str = "UNSPECIFIED"
+    benchmark_role: str = "NOT_BENCHMARKED"
 
 
 class GenerationBrief(BaseModel):
@@ -161,4 +165,3 @@ class GeneratorDescriptor(BaseModel):
     hardware_requirements: dict[str, Any] = Field(default_factory=dict)
     rights_classification: RightsClassification = RightsClassification.UNKNOWN
     runtime: str = "isolated"
-
