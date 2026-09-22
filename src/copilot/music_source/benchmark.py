@@ -128,6 +128,7 @@ class BlindCandidateMapping(BaseModel):
     benchmark_id: str
     public_to_private: dict[str, str]
     roles: list[str]
+    gain_db_by_public_role: dict[str, float] = Field(default_factory=dict)
     created_at: str
 
 
@@ -248,7 +249,27 @@ def build_blind_bundle(
     public_to_private = dict(zip(shuffled, private_ids, strict=True))
     output_dir.mkdir(parents=True, exist_ok=True)
     roles = sorted({role for rows in candidate_paths_by_private_id.values() for role in rows})
+    gain_by_private_role: dict[tuple[str, str], float] = {}
     for role in roles:
+        rms_values: list[float] = []
+        for private_id in private_ids:
+            path = candidate_paths_by_private_id[private_id].get(role)
+            if path is None:
+                continue
+            audio, _ = sf.read(path, always_2d=True, dtype="float32")
+            rms = float(np.sqrt(np.mean(audio * audio))) if audio.size else 0.0
+            if rms > 1e-8 and math.isfinite(rms):
+                rms_values.append(rms)
+        target_rms = float(np.median(rms_values)) if rms_values else 0.0
+        for private_id in private_ids:
+            path = candidate_paths_by_private_id[private_id].get(role)
+            if path is None:
+                continue
+            audio, _ = sf.read(path, always_2d=True, dtype="float32")
+            rms = float(np.sqrt(np.mean(audio * audio))) if audio.size else 0.0
+            gain = target_rms / rms if target_rms > 0.0 and rms > 1e-8 else 1.0
+            gain = min(4.0, max(0.25, gain))
+            gain_by_private_role[(private_id, role)] = gain
         role_dir = output_dir / role
         role_dir.mkdir(parents=True, exist_ok=True)
         for public_id, private_id in public_to_private.items():
@@ -256,8 +277,11 @@ def build_blind_bundle(
             if path is None:
                 continue
             audio, rate = sf.read(path, always_2d=True, dtype="float32")
+            gain = gain_by_private_role[(private_id, role)]
             peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-            gain = min(1.0, 0.98 / peak) if peak > 0.0 else 1.0
+            if peak > 0.0:
+                gain = min(gain, 0.98 / peak)
+            gain_by_private_role[(private_id, role)] = gain
             sf.write(role_dir / f"{public_id}.wav", (audio * gain).astype(np.float32), rate, subtype="PCM_16")
             for index, (start_s, end_s) in enumerate(excerpt_windows_s, start=1):
                 start = max(0, int(start_s * rate))
@@ -267,9 +291,14 @@ def build_blind_bundle(
         benchmark_id=output_dir.parent.name,
         public_to_private=public_to_private,
         roles=roles,
+        gain_db_by_public_role={
+            f"{public_id}:{role}": 20.0 * math.log10(max(gain_by_private_role[(private_id, role)], 1e-12))
+            for public_id, private_id in public_to_private.items()
+            for role in roles
+            if (private_id, role) in gain_by_private_role
+        },
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(mapping.model_dump_json(indent=2), encoding="utf-8")
     return mapping
-

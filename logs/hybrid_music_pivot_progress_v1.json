@@ -1,7 +1,7 @@
 {
   "program": "PRODUCER_PLATFORM_V2",
-  "updated_at": "2026-09-22T08:20:00Z",
-  "checkpoint": "stem_separation_v1_human_review_hold",
+  "updated_at": "2026-09-22T11:00:00Z",
+  "checkpoint": "stem_separator_benchmark_v1_candidates_ready_human_pending",
   "ace_step_real_smoke_v1": "VERIFIED",
   "foundation_generation_benchmark_v1": {
     "status": "CANDIDATES_READY / HUMAN_EVALUATION_PENDING",
@@ -144,6 +144,75 @@
     "watermark_removal_attempts": 0,
     "watermark_evasion_attempts": 0,
     "provenance_laundering": false
+  },
+  "stem_separator_benchmark_v1": {
+    "status": "CANDIDATES_READY / HUMAN_EVALUATION_PENDING",
+    "source_immutable": "VERIFIED",
+    "source_sha256": "ec4c425d9cdaa186de9c596cebb8c8f84207328b78cded0d2e2b8d996a19c42b",
+    "control": {
+      "provider": "bs-roformer-infer",
+      "model": "roformer-model-bs-roformer-sw-by-jarredou",
+      "technical_reconstruction": "VERIFIED",
+      "perceptual_isolation": "HUMAN_REJECTED",
+      "preserved": true
+    },
+    "scnet_xl_ihf": {
+      "status": "TECHNICALLY_VALID / HUMAN_EVALUATION_PENDING",
+      "model": "scnet-xl-ihf-v1.0.15",
+      "runtime_revision": "v1.0.15:a8a862231de29e6832a26c590e5c29f82f736f66",
+      "checkpoint_sha256": "AC25975F0F5704F3D1A3C3C251505B7A0F417A22EAFE82773440EE4F7E14B74F",
+      "device": "cuda / NVIDIA GeForce GTX 1660 SUPER",
+      "precision": "float32 / use_amp=false",
+      "smoke": "VERIFIED",
+      "full_run": "VERIFIED",
+      "latency_s": 519.70,
+      "silent_amp_attempt": "DISCARDED / NOT ELIGIBLE",
+      "weights_license_status": "NOASSERTION"
+    },
+    "scnet_masked_xl_ihf": {
+      "status": "TECHNICALLY_VALID / HUMAN_EVALUATION_PENDING",
+      "model": "scnet-masked-xl-v1.0.17",
+      "runtime_revision": "v1.0.17:8f3adccb0219e466d889cf9c4a46840cfe4b3f05",
+      "checkpoint_sha256": "B4675B0269809DE27172A050E8767A857077635EDA1738DB0874D63A79F2B6DD",
+      "device": "cuda / NVIDIA GeForce GTX 1660 SUPER",
+      "precision": "float32 / use_amp=false",
+      "smoke": "VERIFIED",
+      "full_run": "VERIFIED",
+      "latency_s": 788.62,
+      "silent_amp_attempt": "DISCARDED / NOT ELIGIBLE",
+      "weights_license_status": "NOASSERTION"
+    },
+    "bs_roformer_4stem": {
+      "status": "TECHNICALLY_VALID / HUMAN_EVALUATION_PENDING",
+      "model": "roformer-model-bs-roformer-musdb18hq-by-zfturbo",
+      "upstream_release": "v1.0.12",
+      "runtime_revision": "v1.0.12:aef04b2e52fb3beaf25e333199f5f5f7236e628e7",
+      "checkpoint_sha256": "3E9DAECD70AAED5B5A0D1F861CC4D77EAA45AFB3FC6301B1CF32C1BE0F5868FB",
+      "config_sha256": "D8AFB980318D0C08B9C2E24A7ADC00D4F3150320C127A7E4DE861800D1321939",
+      "device": "cuda / NVIDIA GeForce GTX 1660 SUPER",
+      "smoke": "VERIFIED",
+      "full_run": "VERIFIED",
+      "latency_s": 245.33,
+      "installed_wrapper_attempt": "INCOMPATIBLE_CHECKPOINT_ARCHITECTURE",
+      "weights_license_status": "NOASSERTION"
+    },
+    "htdemucs_ft": {
+      "status": "TECHNICALLY_VALID / HUMAN_EVALUATION_PENDING",
+      "provider": "openmirlab/demucs-infer",
+      "runtime_revision": "demucs-infer==4.2.2",
+      "device": "cuda / NVIDIA GeForce GTX 1660 SUPER",
+      "precision": "float32",
+      "full_run": "VERIFIED",
+      "timed_run_latency_s": 36.4026695,
+      "weights_license_status": "UNKNOWN"
+    },
+    "blind_bundle": "D:\\music-platform-runtime\\stem-benchmark\\blind",
+    "private_mapping": "D:\\music-platform-runtime\\stem-benchmark\\manifests\\private_candidate_mapping.json",
+    "broad_targets": ["drums", "bass", "other", "vocals"],
+    "ground_truth_metrics": "NOT_AVAILABLE_FOR_THIS_SONG",
+    "ableton_import": "HOLD",
+    "lucas_files_modified": 0,
+    "original_project_writes": 0
   },
   "ace_cloud_high_quality_v1": {
     "status": "CREDENTIAL_OR_PAYMENT_AUTHORIZATION_REQUIRED",

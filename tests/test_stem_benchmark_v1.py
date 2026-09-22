@@ -63,6 +63,22 @@ def test_candidate_is_technically_valid_but_not_human_approved(tmp_path: Path):
     result = build_stem_candidate_set(benchmark_id="bench", source_asset_id="source", candidates=[candidate])
     assert result.status == "TECHNICALLY_VALID"
     assert result.human_evaluation_required is True
+    assert result.no_ableton_access is True
+
+
+def test_candidate_set_never_promotes_itself_to_ableton():
+    from copilot.music_source import StemBenchmarkManifest
+
+    manifest = StemBenchmarkManifest(
+        benchmark_id="bench",
+        source_asset_id="source",
+        source_sha256="a" * 64,
+        source_path=Path("source.wav"),
+    )
+    assert manifest.human_selection == "PENDING"
+    assert manifest.ableton_import == "HOLD"
+    assert manifest.original_project_writes == 0
+    assert manifest.lucas_files_modified == 0
 
 
 def test_blind_bundle_has_private_mapping_and_anonymous_names(tmp_path: Path):
