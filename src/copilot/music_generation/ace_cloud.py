@@ -19,6 +19,7 @@ ACE_CLOUD_MODEL_ID = "acestep-v15-xl-turbo"
 ACE_CLOUD_MODEL_REVISION = "d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee"
 ACE_CLOUD_RUNTIME_REVISION = "ca1e85fe9430179831e6bc6be790c332190a3866"
 ACE_CLOUD_LM_MODEL = "acestep-5Hz-lm-4B"
+ACE_CLOUD_LM_MODEL_REVISION = "0a3ec94b557aea7d508da38b31cfe7341f6ff737"
 ACE_CLOUD_MIN_VRAM_GIB = 24
 
 
@@ -57,6 +58,7 @@ class AceStepCloudProvider(AceStepProvider):
         descriptor.hardware_requirements.update({
             "selected_dit": ACE_CLOUD_MODEL_ID,
             "selected_lm": ACE_CLOUD_LM_MODEL,
+            "lm_checkpoint_revision": ACE_CLOUD_LM_MODEL_REVISION,
             "minimum_vram_gib": ACE_CLOUD_MIN_VRAM_GIB,
             "runtime_revision": ACE_CLOUD_RUNTIME_REVISION,
             "checkpoint_revision": ACE_CLOUD_MODEL_REVISION,
