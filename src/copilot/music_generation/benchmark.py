@@ -88,6 +88,17 @@ class BlindBenchmarkReport(BaseModel):
     human_evaluation_status: str = "PENDING"
 
 
+class ProviderComparisonReport(BaseModel):
+    benchmark_id: str
+    listener_dir: Path
+    mapping_path: Path
+    item_count: int
+    providers: list[str]
+    target_rms_dbfs: float
+    baseline_included: bool
+    human_evaluation_status: str = "PENDING"
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
@@ -455,3 +466,110 @@ def build_blind_benchmark(
     )
     _write_json(output_dir / "blind_benchmark_report.json", result.model_dump(mode="json"))
     return result
+
+
+def build_provider_comparison_benchmark(
+    reports: dict[str, BestOfNReport],
+    *,
+    baseline_manifest: dict[str, Any] | None,
+    output_dir: Path,
+    target_rms_dbfs: float = -18.0,
+    shuffle_seed: int = 20260922,
+) -> ProviderComparisonReport:
+    """Build one blind, loudness-fair bundle across provider reports.
+
+    Provider/model/seed identity is written only to the private mapping.  The
+    listener bundle contains no automatic winner and can therefore be used for
+    a fair local-vs-cloud or model-vs-model comparison with the same brief.
+    """
+    if not reports:
+        raise ValueError("at least one provider report is required")
+    listener_dir = output_dir / "listener_bundle"
+    listener_dir.mkdir(parents=True, exist_ok=True)
+    items: list[tuple[str, Path, dict[str, Any]]] = []
+    if baseline_manifest is not None:
+        items.append(("baseline", Path(baseline_manifest["raw_audio"]), {"kind": "baseline"}))
+    for provider_id, report in reports.items():
+        if not provider_id:
+            raise ValueError("provider ids must be non-empty")
+        for record in report.candidates:
+            if record.technical_validation.status != "VALID":
+                continue
+            source = record.bundle_path / "raw.wav"
+            if not source.is_file():
+                raise FileNotFoundError(source)
+            items.append((
+                f"{provider_id}:{record.candidate_id}",
+                source,
+                {"kind": "candidate", "provider": provider_id, "candidate_id": record.candidate_id},
+            ))
+    if not items:
+        raise ValueError("provider reports contain no valid candidates")
+
+    random.Random(shuffle_seed).shuffle(items)
+    mapping: dict[str, Any] = {
+        "benchmark_id": "HUMAN_PROVIDER_COMPARISON_V1",
+        "shuffle_seed": shuffle_seed,
+        "items": [],
+        "provider_metadata_hidden_from_listener": True,
+    }
+    target_rms = 10 ** (target_rms_dbfs / 20.0)
+    for index, (identity, source, private_meta) in enumerate(items, start=1):
+        audio, sample_rate = sf.read(source, always_2d=True, dtype="float32")
+        rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+        if rms > 1e-9:
+            audio = np.clip(audio * (target_rms / rms), -1.0, 1.0)
+        blind_name = f"blind_{index:03d}.wav"
+        sf.write(listener_dir / blind_name, audio, sample_rate, subtype="PCM_16")
+        mapping["items"].append({"blind_id": blind_name[:-4], "identity": identity, **private_meta})
+    mapping_path = output_dir / "provider_comparison_mapping_private.json"
+    _write_json(mapping_path, mapping)
+    _write_json(listener_dir / "listener_manifest.json", {
+        "benchmark_id": "HUMAN_PROVIDER_COMPARISON_V1",
+        "items": [item["blind_id"] for item in mapping["items"]],
+        "provider": "HIDDEN",
+        "model": "HIDDEN",
+        "seed": "HIDDEN",
+        "baseline_identity": "HIDDEN",
+    })
+    result = ProviderComparisonReport(
+        benchmark_id="HUMAN_PROVIDER_COMPARISON_V1",
+        listener_dir=listener_dir,
+        mapping_path=mapping_path,
+        item_count=len(mapping["items"]),
+        providers=sorted(reports),
+        target_rms_dbfs=target_rms_dbfs,
+        baseline_included=baseline_manifest is not None,
+    )
+    _write_json(output_dir / "provider_comparison_report.json", result.model_dump(mode="json"))
+    return result
+
+
+def persist_human_evaluation(
+    benchmark: ProviderComparisonReport | BlindBenchmarkReport,
+    ratings: list[dict[str, Any]],
+    *,
+    output_path: Path | None = None,
+) -> Path:
+    """Persist listener observations without converting preference into fact."""
+    manifest_path = benchmark.listener_dir / "listener_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    valid_ids = set(manifest.get("items", []))
+    seen: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for rating in ratings:
+        blind_id = rating.get("blind_id")
+        if blind_id not in valid_ids:
+            raise ValueError(f"unknown blind_id: {blind_id}")
+        if blind_id in seen:
+            raise ValueError(f"duplicate blind_id: {blind_id}")
+        seen.add(blind_id)
+        normalized.append(dict(rating))
+    path = output_path or benchmark.listener_dir.parent / "human_evaluation.json"
+    _write_json(path, {
+        "benchmark_id": benchmark.benchmark_id,
+        "status": "RECORDED",
+        "ratings": normalized,
+        "winner_claim": "NONE: listener preference is evidence for later review, not automatic certification",
+    })
+    return path

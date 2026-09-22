@@ -13,6 +13,7 @@ from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.music_generation.benchmark import (
     BestOfNReport,
     BlindBenchmarkReport,
+    ProviderComparisonReport,
     CandidateRecord,
     DuplicateRelation,
     TechnicalValidation,
@@ -21,6 +22,8 @@ from copilot.music_generation.benchmark import (
     run_best_of_n,
     resume_best_of_n_after_runtime_recovery,
     build_blind_benchmark,
+    build_provider_comparison_benchmark,
+    persist_human_evaluation,
     validate_generated_audio,
 )
 from copilot.music_generation.resources import ExecutionRoute, StorageVolume, WorkerResources, choose_execution_route, discover_worker_resources
@@ -37,6 +40,7 @@ __all__ = [
     "MusicGeneratorRegistry",
     "BestOfNReport",
     "BlindBenchmarkReport",
+    "ProviderComparisonReport",
     "CandidateRecord",
     "DuplicateRelation",
     "TechnicalValidation",
@@ -45,6 +49,8 @@ __all__ = [
     "run_best_of_n",
     "resume_best_of_n_after_runtime_recovery",
     "build_blind_benchmark",
+    "build_provider_comparison_benchmark",
+    "persist_human_evaluation",
     "validate_generated_audio",
     "RightsManifest",
     "ExecutionRoute",

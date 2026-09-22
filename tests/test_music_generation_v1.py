@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from copilot.music_generation.ace_step import AceStepProvider, choose_acestep_profile
-from copilot.music_generation.benchmark import validate_generated_audio
+from copilot.music_generation.benchmark import (
+    CandidateRecord,
+    ProviderComparisonReport,
+    TechnicalValidation,
+    build_provider_comparison_benchmark,
+    persist_human_evaluation,
+    validate_generated_audio,
+)
 from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext
 from copilot.music_generation.generated_asset_import import stage_generated_asset
 from copilot.music_generation.schemas import GeneratedAsset, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
@@ -227,6 +234,58 @@ def test_generated_asset_validation_is_factual_and_hash_bound(tmp_path: Path) ->
     assert result.status == "VALID"
     assert result.hash_matches is True
     assert result.provenance_complete is True
+
+
+def test_provider_comparison_benchmark_hides_identity_and_records_preference(tmp_path: Path) -> None:
+    import hashlib
+    import numpy as np
+    import soundfile as sf
+
+    records = {}
+    for provider_id, level in (("ace-local", 0.1), ("premium-cloud", 0.2)):
+        bundle = tmp_path / provider_id / "candidate_001"
+        bundle.mkdir(parents=True)
+        path = bundle / "raw.wav"
+        sf.write(path, np.ones((4800, 1), dtype=np.float32) * level, 48_000)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        asset = GeneratedAsset(
+            asset_id=f"{provider_id}:candidate-001",
+            path=path,
+            sha256=digest,
+            bytes=path.stat().st_size,
+            duration_s=0.1,
+            sample_rate=48_000,
+            non_silent=True,
+            model=ModelManifest(provider=provider_id, model_id="test", quality_tier="TEST"),
+            seed=1,
+            prompt="same brief",
+            performance=PerformanceManifest(device="test"),
+            rights_manifest=RightsManifest(),
+        )
+        records[provider_id] = type("Report", (), {
+            "candidates": [CandidateRecord(
+                candidate_id="candidate_001",
+                attempt=1,
+                asset=asset,
+                bundle_path=bundle,
+                technical_validation=TechnicalValidation(
+                    readable=True, non_empty=True, non_silent=True,
+                    expected_duration=True, valid_channels=True,
+                    valid_sample_rate=True, finite_samples=True,
+                    hash_matches=True, provenance_complete=True,
+                    status="VALID",
+                ),
+            )]
+        })()
+
+    report = build_provider_comparison_benchmark(records, baseline_manifest=None, output_dir=tmp_path / "benchmark")
+    assert isinstance(report, ProviderComparisonReport)
+    assert report.providers == ["ace-local", "premium-cloud"]
+    manifest = (report.listener_dir / "listener_manifest.json").read_text(encoding="utf-8")
+    assert "ace-local" not in manifest
+    assert "premium-cloud" not in manifest
+    evaluation_path = persist_human_evaluation(report, [{"blind_id": "blind_001", "score": 5}])
+    assert evaluation_path.is_file()
 
 
 def test_executive_producer_boundary_does_not_invent_writes() -> None:
