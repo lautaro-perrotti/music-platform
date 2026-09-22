@@ -153,6 +153,46 @@ class AceStepProvider:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def _request_multipart_audio(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        field_name: str,
+        file_path: Path,
+        timeout: float,
+    ) -> Any:
+        """Submit an audio-conditioned request through the official upload field."""
+        boundary = f"----copilot-{hashlib.sha256(file_path.read_bytes()[:4096]).hexdigest()[:20]}"
+        chunks: list[bytes] = []
+        for key, value in payload.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            chunks.extend([
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
+                str(value).encode(),
+                b"\r\n",
+            ])
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{file_path.name}"\r\n'.encode(),
+            b"Content-Type: audio/wav\r\n\r\n",
+            file_path.read_bytes(),
+            b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ])
+        request = urllib.request.Request(
+            f"{self.api_url}{path}",
+            data=b"".join(chunks),
+            headers={"Accept": "application/json", "Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
     def _failure(self, request: GeneratorRequest, code: GeneratorFailureCode, **details: Any) -> GenerationBatch:
         unavailable = {
             GeneratorFailureCode.MODEL_MISSING,
@@ -189,14 +229,32 @@ class AceStepProvider:
             "use_random_seed": False,
             "seed": request.seed,
             "audio_format": "wav",
-            "task_type": "text2music",
+            "task_type": brief.generation_mode,
             "use_cot_caption": False,
             "use_cot_language": False,
             "is_format_caption": False,
         }
+        if request.source_audio_path is not None:
+            payload.update({
+                "src_audio_path": str(request.source_audio_path),
+                "repainting_start": request.edit_region_start_s or 0.0,
+                "repainting_end": request.edit_region_end_s,
+                "repaint_mode": request.settings.get("repaint_mode", "balanced"),
+                "repaint_strength": float(request.settings.get("repaint_strength", 0.5)),
+                "repaint_latent_crossfade_frames": int(request.settings.get("repaint_latent_crossfade_frames", 10)),
+                "repaint_wav_crossfade_sec": float(request.settings.get("repaint_wav_crossfade_sec", 0.0)),
+            })
         if self.api_key:
             payload["ai_token"] = self.api_key
-        response = self._request_json("POST", "/release_task", payload, timeout=30.0)
+        if request.source_audio_path is not None:
+            upload_payload = dict(payload)
+            upload_payload.pop("src_audio_path", None)
+            response = self._request_multipart_audio(
+                "/release_task", upload_payload, field_name="src_audio",
+                file_path=Path(request.source_audio_path), timeout=30.0,
+            )
+        else:
+            response = self._request_json("POST", "/release_task", payload, timeout=30.0)
         value = self._unwrap_response(response)
         task_id = value.get("task_id") if isinstance(value, dict) else None
         if not isinstance(task_id, str) or not task_id:
@@ -307,6 +365,7 @@ class AceStepProvider:
                     sample_rate=int(sample_rate),
                 ),
                 rights_manifest=request.brief.rights_manifest,
+                lineage=list(request.lineage),
             )
             if not non_silent:
                 return GenerationBatch(
@@ -333,3 +392,37 @@ class AceStepProvider:
         # ACE-Step's public API has no cancellation endpoint.  Do not kill the
         # shared worker: that could corrupt unrelated jobs.
         del request_id
+
+    def repaint_asset(
+        self,
+        parent: GeneratedAsset,
+        *,
+        brief: Any,
+        output_dir: Path,
+        seed: int,
+        start_s: float,
+        end_s: float,
+        settings: dict[str, Any] | None = None,
+    ) -> GenerationBatch:
+        """Run ACE-Step's official repaint task against a local parent asset."""
+        source = Path(parent.path)
+        if not source.is_file():
+            return self._failure(
+                GeneratorRequest(request_id="missing-parent", brief=brief, seed=seed, output_dir=output_dir),
+                GeneratorFailureCode.OUTPUT_INVALID,
+                reason="PARENT_ASSET_MISSING",
+            )
+        if start_s < 0 or end_s <= start_s:
+            raise ValueError("invalid repaint region")
+        request = GeneratorRequest(
+            request_id=f"{parent.asset_id.replace(':', '-')}-repaint-{int(start_s)}-{int(end_s)}",
+            brief=brief.model_copy(update={"generation_mode": "repaint"}),
+            seed=seed,
+            output_dir=output_dir,
+            source_audio_path=source,
+            edit_region_start_s=start_s,
+            edit_region_end_s=end_s,
+            settings=settings or {},
+            lineage=[parent.asset_id, parent.sha256, f"repaint:{start_s}-{end_s}s"],
+        )
+        return self.generate(request)

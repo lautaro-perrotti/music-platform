@@ -116,6 +116,10 @@ class GeneratorRequest(BaseModel):
     output_dir: Path
     model_manifest: ModelManifest | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
+    source_audio_path: Path | None = None
+    edit_region_start_s: float | None = Field(default=None, ge=0)
+    edit_region_end_s: float | None = Field(default=None, gt=0)
+    lineage: list[str] = Field(default_factory=list)
     no_ableton_access: bool = True
 
 

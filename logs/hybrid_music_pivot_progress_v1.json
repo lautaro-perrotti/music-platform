@@ -32,7 +32,24 @@
     "safe_write_authorities": 1
   },
   "executive_producer_boundary_v1": "IMPLEMENTED / PROVIDER_NEUTRAL",
-  "generator_refinement_v1": "CAPABILITY_AUDIT_PENDING",
+  "generator_refinement_v1": {
+    "status": "PROVIDER_LIMITED",
+    "official_repaint_boundary": "IMPLEMENTED",
+    "multipart_source_upload": "ACCEPTED_BY_OFFICIAL_WORKER",
+    "real_smoke": "INFERENCE_FAILED",
+    "limitation": "PRE_AMPERE_REPAINT_NAN_LATENTS",
+    "evidence": "Official worker produced NaN/Inf latents for repaint on GTX 1660 Super; restart and explicit float32 environment did not change the measured failure. The official runtime selects float16 on pre-Ampere CUDA, so no local quality downgrade or fake success is allowed.",
+    "cloud_or_newer_hardware_required_for_refinement": true
+  },
+  "worker_resource_policy_v1": {
+    "status": "IMPLEMENTED",
+    "per_worker_discovery": true,
+    "storage": "measured_fixed_writable_volumes",
+    "memory": "measured_system_or_unified_memory",
+    "gpu_vram": "measured_when_available",
+    "insufficient_local_resources": "CLOUD_REQUIRED",
+    "quality_degradation": false
+  },
   "worker_recovery": {
     "initial_worker_failure": "PORT_DROPPED_AFTER_SEVEN_CANDIDATES",
     "runtime_reused": true,

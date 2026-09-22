@@ -59,6 +59,48 @@ def test_official_worker_request_is_dit_only_and_provenance_safe(tmp_path: Path,
     assert payload["seed"] == 7
 
 
+def test_official_worker_repaint_uses_multipart_and_preserves_lineage(tmp_path: Path, monkeypatch) -> None:
+    provider = AceStepProvider(api_url="http://127.0.0.1:8001")
+    source = tmp_path / "parent.wav"
+    source.write_bytes(b"RIFF-test-audio")
+    brief = GenerationBrief(
+        brief_id="repaint-test",
+        user_intent="preserve groove and repaint transition",
+        target_duration_s=10,
+    )
+    request = GeneratorRequest(
+        request_id="repaint-request",
+        brief=brief.model_copy(update={"generation_mode": "repaint"}),
+        seed=9,
+        output_dir=tmp_path,
+        source_audio_path=source,
+        edit_region_start_s=2.0,
+        edit_region_end_s=4.0,
+        lineage=["ace-step:parent", "parent-sha256", "repaint:2.0-4.0s"],
+    )
+    calls = []
+    monkeypatch.setattr(
+        provider,
+        "_request_multipart_audio",
+        lambda path, payload, *, field_name, file_path, timeout: calls.append(
+            (path, payload, field_name, file_path, timeout)
+        ) or {"data": {"task_id": "repaint-task"}},
+    )
+
+    assert provider._submit(request) == "repaint-task"
+    path, payload, field_name, file_path, timeout = calls[0]
+    assert path == "/release_task"
+    assert field_name == "src_audio"
+    assert file_path == source
+    assert payload["task_type"] == "repaint"
+    assert payload["repainting_start"] == 2.0
+    assert payload["repainting_end"] == 4.0
+    assert "src_audio_path" not in payload
+
+    # The request contract carries lineage; the worker boundary cannot erase it.
+    assert request.lineage == ["ace-step:parent", "parent-sha256", "repaint:2.0-4.0s"]
+
+
 def test_worker_result_path_can_be_extracted_from_official_wrapped_payload() -> None:
     payload = {"data": [{"result": '[{"file": "C:\\\\audio\\\\candidate.wav"}]', "status": 1}]}
     assert AceStepProvider._result_audio_source(payload) == "C:\\audio\\candidate.wav"
@@ -104,6 +146,59 @@ def test_worker_route_fails_to_cloud_when_mac_or_windows_volume_is_too_small() -
     route = choose_execution_route(resources, required_bytes=10 * 1024**3)
     assert route.route == "CLOUD_REQUIRED"
     assert route.selected_mount is None
+
+
+def test_worker_route_checks_mac_unified_memory_without_quality_degradation() -> None:
+    resources = WorkerResources(
+        operating_system="Darwin",
+        architecture="arm64",
+        processor="Apple M2",
+        memory_bytes=16 * 1024**3,
+        memory_kind="UNIFIED",
+        volumes=[
+            StorageVolume(
+                mount="/",
+                filesystem="apfs",
+                total_bytes=100 * 1024**3,
+                free_bytes=40 * 1024**3,
+                writable=True,
+            )
+        ],
+    )
+    route = choose_execution_route(
+        resources,
+        required_bytes=10 * 1024**3,
+        required_memory_bytes=24 * 1024**3,
+    )
+    assert route.route == "CLOUD_REQUIRED"
+    assert route.resource_checks == {"memory": "INSUFFICIENT", "storage": "PASS"}
+    assert route.required_memory_bytes == 24 * 1024**3
+
+
+def test_worker_route_checks_gpu_vram_independently_of_storage() -> None:
+    resources = WorkerResources(
+        operating_system="Windows",
+        architecture="AMD64",
+        processor="GPU worker",
+        memory_bytes=32 * 1024**3,
+        gpu_vram_bytes=6 * 1024**3,
+        volumes=[
+            StorageVolume(
+                mount="D:\\",
+                filesystem="ntfs",
+                total_bytes=100 * 1024**3,
+                free_bytes=50 * 1024**3,
+                writable=True,
+            )
+        ],
+    )
+    route = choose_execution_route(
+        resources,
+        required_bytes=10 * 1024**3,
+        required_gpu_vram_bytes=8 * 1024**3,
+    )
+    assert route.route == "CLOUD_REQUIRED"
+    assert route.resource_checks == {"gpu_vram": "INSUFFICIENT", "storage": "PASS"}
 
 
 def test_generated_asset_validation_is_factual_and_hash_bound(tmp_path: Path) -> None:
