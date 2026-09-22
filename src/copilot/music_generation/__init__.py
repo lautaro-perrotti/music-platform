@@ -19,6 +19,7 @@ from copilot.music_generation.benchmark import (
     analyze_candidate,
     freeze_quality_baseline,
     run_best_of_n,
+    resume_best_of_n_after_runtime_recovery,
     build_blind_benchmark,
     validate_generated_audio,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "analyze_candidate",
     "freeze_quality_baseline",
     "run_best_of_n",
+    "resume_best_of_n_after_runtime_recovery",
     "build_blind_benchmark",
     "validate_generated_audio",
     "RightsManifest",

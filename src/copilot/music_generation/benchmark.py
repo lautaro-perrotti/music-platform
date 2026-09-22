@@ -297,6 +297,80 @@ def run_best_of_n(
     return report
 
 
+def resume_best_of_n_after_runtime_recovery(
+    report_path: Path,
+    provider: MusicGeneratorProvider,
+    *,
+    additional_candidates: int = 1,
+    clap_provider: Any | None = None,
+) -> BestOfNReport:
+    """Resume a persisted batch after a provider-worker interruption.
+
+    Recovery attempts are explicit in the persisted report and never erase the
+    original bounded attempt history.  This is for worker recovery, not a
+    silent retry loop.
+    """
+    report = BestOfNReport.model_validate_json(Path(report_path).read_text(encoding="utf-8"))
+    next_attempt = max((int(item.get("attempt", 0)) for item in report.attempts), default=0) + 1
+    embeddings: dict[str, Embedding] = {}
+    for record in report.candidates:
+        if record.clap_path and Path(record.clap_path).is_file():
+            try:
+                payload = json.loads(Path(record.clap_path).read_text(encoding="utf-8"))
+                embeddings[record.candidate_id] = Embedding.model_validate(payload)
+            except Exception:
+                pass
+    for offset in range(additional_candidates):
+        if len(report.candidates) >= report.desired_candidates:
+            break
+        attempt = next_attempt + offset
+        request_id = f"{report.brief.brief_id}-candidate-{attempt:02d}"
+        request = GeneratorRequest(
+            request_id=request_id,
+            brief=report.brief,
+            seed=1721 + attempt - 1,
+            output_dir=report.output_root / "raw",
+        )
+        batch = provider.generate(request)
+        row = {
+            "attempt": attempt,
+            "request_id": request_id,
+            "seed": request.seed,
+            "status": batch.status,
+            "failures": batch.failures,
+            "asset_count": len(batch.assets),
+            "recovery_attempt": True,
+        }
+        report.attempts.append(row)
+        for asset in batch.assets:
+            candidate_id = f"candidate_{len(report.candidates) + 1:03d}"
+            validation = validate_generated_audio(asset, expected_duration_s=report.brief.target_duration_s)
+            bundle = _bundle_candidate(asset, report.brief, report.output_root / "candidates", validation)
+            record = CandidateRecord(
+                candidate_id=candidate_id,
+                attempt=attempt,
+                asset=asset,
+                bundle_path=bundle,
+                technical_validation=validation,
+            )
+            if validation.status == "VALID":
+                embedding = analyze_candidate(
+                    record,
+                    brief=report.brief,
+                    reference_state_token=f"reference:recovery:{candidate_id}",
+                    target_state_token=f"target:recovery:{candidate_id}",
+                    clap_provider=clap_provider,
+                )
+                if embedding is not None:
+                    embeddings[candidate_id] = embedding
+            report.candidates.append(record)
+        _write_json(report.output_root / "attempts.json", report.attempts)
+    report.duplicate_relations = _relations(report.candidates, embeddings)
+    report.quality_status = "CANDIDATES_READY / HUMAN_EVALUATION_PENDING" if report.candidates else "NO_VALID_CANDIDATES"
+    _write_json(report.output_root / "best_of_n_report.json", report.model_dump(mode="json"))
+    return report
+
+
 def freeze_quality_baseline(
     *,
     source_audio: Path,
