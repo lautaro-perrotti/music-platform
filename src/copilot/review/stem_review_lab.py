@@ -168,6 +168,7 @@ class ReviewLab:
         self.analysis = self._load_or_measure()
         self.reviewer = reviewer
         self.review = self._load_review()
+        self.waveform_cache: dict[tuple[str, str], list[float]] = {}
 
     def _load_candidates(self) -> dict[str, Candidate]:
         runs = {str(row["candidate_id"]): row for row in self.manifest.get("runs", [])}
@@ -250,6 +251,8 @@ class ReviewLab:
             "finalized_at": None,
             "revealed_at": None,
             "votes": {},
+            "pairwise": {},
+            "kept_by_role": {},
         }
         _atomic_json(self.session_path, payload)
         return payload
@@ -285,6 +288,32 @@ class ReviewLab:
                 "notes": str(notes or "")[:4000],
                 "updated_at": now_iso(),
             }
+            self._save_review()
+            return self.public_state()
+
+    def pairwise(self, role: str, candidate_a: str, candidate_b: str, choice: str) -> dict[str, Any]:
+        with self.lock:
+            self._check_candidate_role(role, candidate_a)
+            self._check_candidate_role(role, candidate_b)
+            if candidate_a == candidate_b:
+                raise ValueError("PAIR_REQUIRES_TWO_CANDIDATES")
+            if self.review.get("finalized_at"):
+                raise ValueError("REVIEW_FINALIZED")
+            if choice not in ("A_BETTER", "B_BETTER", "TOO_CLOSE"):
+                raise ValueError("INVALID_PAIRWISE_CHOICE")
+            self.review.setdefault("pairwise", {})[f"{role}:{candidate_a}:{candidate_b}"] = {
+                "role": role, "candidate_a": candidate_a, "candidate_b": candidate_b,
+                "choice": choice, "updated_at": now_iso(),
+            }
+            self._save_review()
+            return self.public_state()
+
+    def keep(self, role: str, candidate_id: str) -> dict[str, Any]:
+        with self.lock:
+            self._check_candidate_role(role, candidate_id)
+            if self.review.get("finalized_at"):
+                raise ValueError("REVIEW_FINALIZED")
+            self.review.setdefault("kept_by_role", {})[role] = candidate_id
             self._save_review()
             return self.public_state()
 
@@ -334,6 +363,7 @@ class ReviewLab:
             "status": "REVEALED" if revealed else "BLIND_FINALIZED",
             "selected_by_role": selected,
             "usable_by_role": usable,
+            "kept_by_role": self.review.get("kept_by_role", {}),
             "votes": self.review["votes"],
             "created_at": self.review["created_at"],
             "finalized_at": self.review.get("finalized_at"),
@@ -394,6 +424,31 @@ class ReviewLab:
         sf.write(buf, audio, rate, format="WAV", subtype="PCM_16")
         return buf.getvalue(), "audio/wav"
 
+    def waveform(self, role: str, region: str, points: int = 180) -> list[float]:
+        if role not in PUBLIC_ROLES or region not in REGIONS:
+            raise ValueError("UNKNOWN_ROLE_OR_REGION")
+        key = (role, region)
+        if key in self.waveform_cache:
+            return self.waveform_cache[key]
+        levels: list[np.ndarray] = []
+        for public_id in self.candidates:
+            path = self._matched_path(public_id, role, region)
+            audio, _ = sf.read(str(path), always_2d=True, dtype="float32")
+            mono = np.max(np.abs(audio), axis=1) if audio.size else np.zeros(1, dtype=np.float32)
+            count = min(points, max(1, len(mono)))
+            edges = np.linspace(0, len(mono), count + 1, dtype=int)
+            envelope = np.asarray([
+                float(np.max(mono[edges[i]:max(edges[i + 1], edges[i] + 1)]))
+                for i in range(count)
+            ])
+            levels.append(envelope)
+        result = np.mean(np.stack(levels), axis=0).tolist() if levels else [0.0] * points
+        peak = max(result) if result else 0.0
+        if peak > 0:
+            result = [min(1.0, value / peak) for value in result]
+        self.waveform_cache[key] = result
+        return result
+
     def public_state(self, *, include_reveal: bool = False) -> dict[str, Any]:
         votes = self.review.get("votes", {})
         candidates = []
@@ -414,6 +469,20 @@ class ReviewLab:
             "candidate_count": len(candidates),
             "candidates": candidates,
             "votes": votes,
+            "pairwise": self.review.get("pairwise", {}),
+            "kept_by_role": self.review.get("kept_by_role", {}),
+            "quick_reviewed": {
+                role: sum(
+                    1 for cid in self.candidates
+                    if self._vote_key(role, cid) in votes
+                    or any(
+                        item.get("role") == role and cid in (item.get("candidate_a"), item.get("candidate_b"))
+                        for item in self.review.get("pairwise", {}).values()
+                    )
+                )
+                for role in REQUIRED_ROLES
+            },
+            "region_bounds": {key: list(value) if value else None for key, value in REGIONS.items()},
             "complete": self.complete(),
             "finalized": bool(self.review.get("finalized_at")),
             "revealed": bool(self.review.get("revealed_at")),
@@ -479,17 +548,60 @@ class LabHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.lab.public_state(include_reveal=bool(self.lab.review.get("revealed_at"))))
             if parsed.path == "/api/audio":
                 query = parse_qs(parsed.query)
-                data, content_type = self.lab.audio_bytes(
-                    query.get("candidate", [""])[0], query.get("role", [""])[0],
-                    query.get("mode", ["matched"])[0], query.get("region", ["full"])[0],
-                )
-                self.send_response(200)
+                candidate = query.get("candidate", [""])[0]
+                role = query.get("role", [""])[0]
+                mode = query.get("mode", ["matched"])[0]
+                region = query.get("region", ["full"])[0]
+                direct_path: Path | None = None
+                if mode == "matched":
+                    direct_path = self.lab._matched_path(candidate, role, region)
+                elif mode == "raw" and region == "full":
+                    self.lab._check_candidate_role(role, candidate)
+                    direct_path = self.lab.candidates[candidate].raw_roles[role]
+                if direct_path is not None:
+                    total = direct_path.stat().st_size
+                    range_header = self.headers.get("Range")
+                    start, end, status = 0, total - 1, 200
+                    if range_header:
+                        try:
+                            unit, value = range_header.split("=", 1)
+                            if unit != "bytes" or "," in value:
+                                raise ValueError
+                            left, right = value.split("-", 1)
+                            start = int(left) if left else max(0, total - int(right))
+                            end = int(right) if right else end
+                            end = min(end, total - 1)
+                            if start < 0 or start > end or start >= total:
+                                raise ValueError
+                            status = 206
+                        except (ValueError, TypeError):
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{total}")
+                            self.end_headers()
+                            return
+                    with direct_path.open("rb") as handle:
+                        handle.seek(start)
+                        data = handle.read(end - start + 1)
+                    content_type = "audio/wav"
+                else:
+                    data, content_type = self.lab.audio_bytes(candidate, role, mode, region)
+                    total = len(data)
+                    start, end, status = 0, total - 1, 200
+                self.send_response(status)
                 self.send_header("Content-Type", content_type)
+                self.send_header("Accept-Ranges", "bytes")
+                if status == 206:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if parsed.path == "/api/waveform":
+                query = parse_qs(parsed.query)
+                role = query.get("role", [""])[0]
+                region = query.get("region", ["full"])[0]
+                return self._json(200, {"ok": True, "role": role, "region": region, "points": self.lab.waveform(role, region)})
             self.send_error(404)
         except (ValueError, FileNotFoundError, KeyError) as exc:
             self._json(400, {"ok": False, "error": str(exc)})
@@ -503,6 +615,11 @@ class LabHandler(BaseHTTPRequestHandler):
             if path == "/api/vote":
                 payload = self.lab.vote(str(body.get("role")), str(body.get("candidate_id")), dict(body.get("dimensions") or {}), str(body.get("decision")), str(body.get("notes") or ""))
                 return self._json(200, payload)
+            if path == "/api/pairwise":
+                payload = self.lab.pairwise(str(body.get("role")), str(body.get("candidate_a")), str(body.get("candidate_b")), str(body.get("choice")))
+                return self._json(200, payload)
+            if path == "/api/keep":
+                return self._json(200, self.lab.keep(str(body.get("role")), str(body.get("candidate_id"))))
             if path == "/api/finalize":
                 return self._json(200, self.lab.finalize())
             if path == "/api/reveal":

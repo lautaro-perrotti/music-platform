@@ -72,3 +72,13 @@ def test_review_is_blind_until_explicit_reveal_and_persists(tmp_path: Path) -> N
     assert revealed["revealed"]
     assert "secret-model" in json.dumps(revealed)
     assert (root / "reviews" / "final_selection.json").is_file()
+
+
+def test_quick_pairwise_and_keep_are_separate_from_detailed_votes(tmp_path: Path) -> None:
+    lab = ReviewLab(_fixture(tmp_path))
+    state = lab.pairwise("drums", "candidate_A", "candidate_B", "TOO_CLOSE")
+    state = lab.keep("drums", "candidate_A")
+    assert state["pairwise"]["drums:candidate_A:candidate_B"]["choice"] == "TOO_CLOSE"
+    assert state["kept_by_role"]["drums"] == "candidate_A"
+    assert state["quick_reviewed"]["drums"] == 2
+    assert state["votes"] == {}

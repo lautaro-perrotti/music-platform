@@ -16,6 +16,12 @@ V1 intentionally implements solo audition only. A fixed context mix is not
 defensible yet, so the UI labels `IN CONTEXT` as unavailable instead of
 creating a separator-dependent comparison.
 
+The default UI is intentionally Simple Mode: role, two candidates, one shared
+transport, waveform/regions, A/B preference, and an optional keep choice.
+Advanced Mode contains the detailed dimensions, technical metrics, notes,
+queue, finalization, and reveal controls. Audio endpoints support HTTP Range
+requests so browser seeking works on the full immutable WAVs.
+
 Model identity is not included in the public state, HTML, audio URLs, or
 normal review payload. `REVEAL MODELS` is available only after all required
 roles (drums, bass, other) have complete human ratings and an explicit blind
