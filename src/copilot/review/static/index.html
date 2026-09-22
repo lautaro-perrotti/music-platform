@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stem Review Lab</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101216; --panel:#191c23; --line:#303642; --muted:#9ba4b5; --accent:#83d2c4; --warn:#f0c674; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:#eef2f7; font:14px system-ui,sans-serif; }
+    main { max-width:1180px; margin:0 auto; padding:26px; } h1,h2,p { margin:0; } h1 { letter-spacing:.04em; font-size:22px; } h2 { font-size:16px; }
+    .sub,.hint { color:var(--muted); } .sub { margin-top:6px; } .bar,.panel,.candidate { background:var(--panel); border:1px solid var(--line); border-radius:12px; }
+    .bar { padding:14px 16px; display:flex; gap:12px; justify-content:space-between; align-items:center; margin:18px 0; flex-wrap:wrap; }
+    .tabs,.buttons,.choices { display:flex; gap:8px; flex-wrap:wrap; } button,select,textarea { font:inherit; color:inherit; background:#242a34; border:1px solid #424b5b; border-radius:7px; padding:8px 10px; }
+    button:hover,button.active { border-color:var(--accent); color:var(--accent); cursor:pointer; } button.primary { background:#234c48; border-color:var(--accent); }
+    .layout { display:grid; grid-template-columns:1fr 1.5fr; gap:16px; } .panel { padding:16px; } .panel + .panel { margin-top:16px; }
+    .player { display:grid; gap:12px; } .transport { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } input[type=range] { accent-color:var(--accent); }
+    #seek { flex:1; min-width:220px; } audio { width:100%; } .candidate-grid { display:grid; gap:12px; margin-top:14px; }
+    .candidate { padding:14px; } .candidate-head { display:flex; justify-content:space-between; align-items:center; gap:8px; } .candidate-head strong { color:var(--accent); }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:5px 12px; color:var(--muted); font-size:12px; margin:10px 0; } .stats b { color:#eef2f7; font-weight:500; }
+    .scale { display:grid; grid-template-columns:155px repeat(5,1fr); gap:5px; align-items:center; margin-top:6px; } .scale label { color:var(--muted); font-size:12px; }
+    .scale button { padding:4px; font-size:12px; } textarea { width:100%; min-height:58px; resize:vertical; margin-top:10px; } .section-title { margin-bottom:10px; }
+    .status { color:var(--warn); } .hidden { display:none !important; } .reveal { border-color:var(--warn); } .small { font-size:12px; }
+    @media (max-width:850px) { .layout { grid-template-columns:1fr; } .scale { grid-template-columns:120px repeat(5,1fr); } .stats { grid-template-columns:repeat(2,1fr); } }
+  </style>
+</head>
+<body><main>
+  <header><h1 id="title">RHYTHM ASHANTI — STEM REVIEW LAB</h1><p class="sub">Blind human review · <span class="status">LOUDER ≠ BETTER SEPARATED</span></p></header>
+  <div class="bar"><div class="tabs" id="roles"></div><div id="progress" class="hint"></div><div class="buttons"><button id="finalize" class="primary">FINALIZE BLIND REVIEW</button><button id="reveal" class="reveal hidden">REVEAL MODELS</button><button id="export">EXPORT</button></div></div>
+  <div class="layout"><section>
+    <div class="panel player"><div class="section-title"><h2>Listening</h2><p class="hint small">Level matching is for listening only. Raw files remain immutable.</p></div>
+      <div class="buttons"><button class="mode active" data-mode="matched">LOUDNESS MATCHED</button><button class="mode" data-mode="raw">RAW</button></div>
+      <div class="buttons" id="regions"></div><div class="buttons"><button id="solo" class="primary">SOLO STEM</button><button disabled title="No defensible fixed context mix in V1">IN CONTEXT · NOT IMPLEMENTED</button></div>
+      <div class="transport"><button id="play">PLAY</button><button id="abA" class="active">A</button><button id="abB">B</button><input id="seek" type="range" min="0" max="100" value="0" step="0.01"><span id="time">0:00 / 0:00</span></div>
+      <audio id="audio" preload="auto"></audio><p id="active" class="hint"></p>
+    </div>
+    <div class="panel"><h2 class="section-title">Candidates</h2><p class="hint small">Use A/B to compare at the same playhead. Keyboard: Space, A, B, 1–5.</p><div id="candidates" class="candidate-grid"></div></div>
+  </section><aside><div class="panel"><h2 class="section-title">Review guidance</h2><p class="hint">Every rating is independent. 5 always means better: cleaner, more complete, fewer artifacts, more usable.</p><p class="hint" style="margin-top:10px">Technical metrics are descriptive, not a winner score. Vocals are secondary and do not block finalization.</p></div><div class="panel" id="revealPanel"><h2 class="section-title">Results</h2><div id="results" class="hint">No models are revealed until the blind review is finalized.</div></div></aside></div>
+</main><script>
+let state, role='drums', mode='matched', region='full', active='candidate_A', compare={A:'candidate_A',B:'candidate_B'}, side='A', timer;
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(url,opts){let r=await fetch(url,opts);let d=await r.json();if(!r.ok)throw Error(d.error||'request failed');return d;}
+function fmt(n){return n==null?'—':Number(n).toFixed(2)} function time(n){n=Math.max(0,Math.floor(n||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`}
+function urlFor(id){return `/api/audio?candidate=${encodeURIComponent(id)}&role=${encodeURIComponent(role)}&mode=${mode}&region=${region}`}
+function render(){
+  $('#roles').innerHTML=state.roles.map(r=>`<button class="role ${r===role?'active':''}" data-role="${r}">${r==='other'?'HARMONIC OTHER':r.toUpperCase()}</button>`).join('');
+  $('#regions').innerHTML=state.regions.map(r=>`<button class="region ${r===region?'active':''}" data-region="${r}">${r==='full'?'FULL TRACK':r.replace('_',' ').toUpperCase()}</button>`).join('');
+  const total=state.candidate_count*state.required_roles.length, done=Object.keys(state.votes).filter(k=>state.required_roles.includes(k.split(':')[0])).length; $('#progress').textContent=`Review progress: ${done} / ${total} required`;
+  $('#candidates').innerHTML=state.candidates.map(c=>{
+    const m=c.metrics[role]||{}, v=state.votes[`${role}:${c.id}`]||{}; const dims=roleDims(role);
+    return `<article class="candidate"><div class="candidate-head"><strong>${c.label}</strong><div class="buttons"><button class="pick" data-side="A" data-id="${c.id}">A</button><button class="pick" data-side="B" data-id="${c.id}">B</button></div></div>
+      <div class="stats"><span>Raw LUFS <b>${fmt(m.raw?.lufs)}</b></span><span>Target LUFS ref <b>${fmt(m.target_lufs_reference)}</b></span><span>Matched gain <b>${fmt(m.matched_gain_db)} dB</b></span><span>Peak <b>${fmt(m.raw?.peak_dbfs)} dBFS</b></span><span>Matched peak <b>${fmt(m.matched_peak_dbfs)} dBFS</b></span><span>Duration <b>${fmt(m.raw?.duration_s)} s</b></span><span>SR <b>${m.raw?.sample_rate||'—'} Hz</b></span></div>
+      <div class="scale">${dims.map(d=>`<label>${d.replaceAll('_',' ')}</label>${[1,2,3,4,5].map(n=>`<button class="dim ${v.dimensions?.[d]===n?'active':''}" data-dim="${d}" data-value="${n}" data-id="${c.id}">${n}</button>`).join('')}`).join('')}</div>
+      <div class="choices">${['PREFERRED','USABLE','REFERENCE_ONLY','REJECTED'].map(d=>`<button class="decision ${v.decision===d?'active':''}" data-decision="${d}" data-id="${c.id}">${d.replace('_',' ')}</button>`).join('')}</div>
+      <textarea class="notes" data-id="${c.id}" placeholder="Notes…">${esc(v.notes||'')}</textarea></article>`;
+  }).join('');
+  $('#reveal').classList.toggle('hidden',!state.finalized || state.revealed); $('#finalize').disabled=state.finalized; $('#revealPanel').classList.toggle('reveal',state.revealed);
+  if(state.revealed){$('#results').innerHTML=Object.entries(state.revealed_candidates||{}).map(([id,v])=>`<p><b>${id.replace('candidate_','Candidate ').toUpperCase()}</b> → ${esc(v.model||v.private_id)} <span class="hint">(${esc(v.runtime||'')})</span></p>`).join('')||'Revealed.'} else $('#results').textContent=state.finalized?'Blind review finalized. Reveal is explicit and separate.':'No models are revealed until the blind review is finalized.';
+  $('#active').textContent=`A: ${compare.A} · B: ${compare.B} · playing ${active}`;
+}
+function roleDims(r){return {drums:['isolation_purity','completeness','transient_integrity','artifact_severity','low_end_contamination','harmonic_contamination'],bass:['isolation_purity','completeness','note_continuity','kick_contamination','harmonic_contamination','artifact_severity'],other:['isolation_purity','keyboard_completeness','bass_contamination','drum_contamination','tonal_stability','tail_naturalness','artifact_severity'],vocals:['isolation_purity','completeness','artifact_severity','tonal_stability']}[r]}
+async function refresh(){state=await api('/api/state'); render(); loadAudio(false)}
+function loadAudio(keep){let a=$('#audio'), pos=keep?a.currentTime:0; active=compare[side]; a.src=urlFor(active); a.addEventListener('loadedmetadata',()=>{a.currentTime=Math.min(pos,a.duration||pos); updateTime()}, {once:true}); a.load();}
+function updateTime(){let a=$('#audio');$('#seek').value=a.duration?100*a.currentTime/a.duration:0;$('#time').textContent=`${time(a.currentTime)} / ${time(a.duration)}`}
+document.addEventListener('click',async e=>{let t=e.target;
+  if(t.matches('.role')){role=t.dataset.role;render();loadAudio(false)} if(t.matches('.region')){region=t.dataset.region;loadAudio(false)} if(t.matches('.mode')){$$('.mode').forEach(x=>x.classList.remove('active'));t.classList.add('active');mode=t.dataset.mode;loadAudio(true)}
+  if(t.matches('.pick')){compare[t.dataset.side]=t.dataset.id;side=t.dataset.side;loadAudio(true);render()}
+  if(t.id==='abA'||t.id==='abB'){side=t.id==='abA'?'A':'B';loadAudio(true);render()} if(t.id==='play'){let a=$('#audio');a.paused?a.play():a.pause()}
+  if(t.matches('.dim')||t.matches('.decision')){let id=t.dataset.id,v=state.votes[`${role}:${id}`]||{dimensions:{},notes:''};if(t.matches('.dim'))v.dimensions={...(v.dimensions||{}),[t.dataset.dim]:Number(t.dataset.value)};else v.decision=t.dataset.decision;await api('/api/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,candidate_id:id,dimensions:v.dimensions||{},decision:v.decision||'UNREVIEWED',notes:v.notes||''})});await refresh()}
+  if(t.id==='finalize'){try{state=await api('/api/finalize',{method:'POST'});render()}catch(x){alert(x.message)}} if(t.id==='reveal'){try{state=await api('/api/reveal',{method:'POST'});render()}catch(x){alert(x.message)}} if(t.id==='export'){let d=await api('/api/export',{method:'POST'});alert(`Exported: ${d.path}`)}
+});
+document.addEventListener('input',e=>{if(e.target.matches('.notes')){clearTimeout(timer);timer=setTimeout(async()=>{let id=e.target.dataset.id,v=state.votes[`${role}:${id}`]||{dimensions:{},decision:'UNREVIEWED'};v.notes=e.target.value;await api('/api/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,candidate_id:id,dimensions:v.dimensions||{},decision:v.decision||'UNREVIEWED',notes:v.notes})});state=await api('/api/state');render()},350)}});
+$('#audio').addEventListener('timeupdate',updateTime);$('#audio').addEventListener('ended',()=>$('#audio').currentTime=0);$('#seek').addEventListener('input',e=>{let a=$('#audio');if(a.duration)a.currentTime=a.duration*Number(e.target.value)/100});
+document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;if(e.code==='Space'){e.preventDefault();$('#play').click()}if(e.key.toLowerCase()==='a'){$('#abA').click()}if(e.key.toLowerCase()==='b'){$('#abB').click()}if(/^[1-5]$/.test(e.key)){let buttons=$$('.dim[data-id="'+active+'"]');if(buttons.length)buttons[Number(e.key)-1].click()}});
+refresh().catch(e=>{$('#results').textContent=e.message});
+</script></body></html>

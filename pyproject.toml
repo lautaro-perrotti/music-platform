@@ -30,6 +30,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "copilot.human_eval" = ["static/*"]
+"copilot.review" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
