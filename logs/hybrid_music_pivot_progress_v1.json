@@ -1,7 +1,7 @@
 {
   "program": "PRODUCER_PLATFORM_V2",
-  "updated_at": "2026-09-22T04:20:00Z",
-  "checkpoint": "best_of_n_and_generated_asset_import",
+  "updated_at": "2026-09-22T08:20:00Z",
+  "checkpoint": "stem_separation_v1_human_review_hold",
   "ace_step_real_smoke_v1": "VERIFIED",
   "foundation_generation_benchmark_v1": {
     "status": "CANDIDATES_READY / HUMAN_EVALUATION_PENDING",
@@ -68,6 +68,82 @@
     "credential_present": false,
     "ableton_touched": false,
     "automatic_winner": false
+  },
+  "elevenlabs_hybrid_production_v1": {
+    "status": "TECHNICAL_RECONSTRUCTION_VERIFIED / HUMAN_STEM_QUALITY_REVIEW_IN_PROGRESS / ABLETON_IMPORT_HOLD",
+    "source": {
+      "provider": "elevenlabs-music",
+      "model": "music_v2_5",
+      "path": "C:\\Users\\lsper\\Downloads\\Rhythm Ashanti.wav",
+      "immutable_path": "D:\\music-platform-runtime\\inputs\\elevenlabs-hybrid\\external-source-ec4c425d9cdaa186.wav",
+      "sha256": "ec4c425d9cdaa186de9c596cebb8c8f84207328b78cded0d2e2b8d996a19c42b",
+      "duration_s": 120.0,
+      "sample_rate": 48000,
+      "channels": 2,
+      "immutable": true,
+      "original_project_writes": 0
+    },
+    "separator": {
+      "provider": "bs-roformer-infer",
+      "package_version": "0.1.5",
+      "model": "roformer-model-bs-roformer-sw-by-jarredou",
+      "checkpoint_sha256": "24e7d35ee9c64415673d3fd33e06a67cac2c103c5df6267ba1576459c775916e",
+      "device": "cuda / NVIDIA GeForce GTX 1660 SUPER",
+      "smoke": "VERIFIED",
+      "smoke_duration_s": 12.0,
+      "full_separation": "VERIFIED",
+      "full_latency_s": 238.7414111000253,
+      "stems": ["bass", "drums", "guitar", "instrumental", "other", "piano", "vocals"]
+    },
+    "alignment": {
+      "status": "VERIFIED",
+      "frames": 5760000,
+      "duration_s": 120.0,
+      "sample_rate": 48000,
+      "channels": 2,
+      "alignment_lag_frames": 0,
+      "sum_roles": ["vocals", "drums", "bass", "guitar", "piano", "other"],
+      "excluded_aggregate_roles": ["instrumental"],
+      "normalized_residual_energy": 4.943230932534689e-05,
+      "correlation": 0.9999998109864671,
+      "double_sum_prevented": true
+    },
+    "analysis": {
+      "reference": "REAL_DSP_ANALYZER_CLAP_EVIDENCEGRAPH",
+      "stems": ["drums", "bass", "other"],
+      "clap_model": "laion/clap-htsat-unfused",
+      "clap_revision": "8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a",
+      "clap_device": "cuda",
+      "region_activity_map": "D:\\music-platform-runtime\\outputs\\elevenlabs-hybrid-20260922\\analysis\\region_activity_map.json",
+      "musical_writes": 0,
+      "semantic_labels": "NOT_ASSIGNED"
+    },
+    "ableton_working_copy": "PROJECT_READY_ONLY / IMPORT_HOLD",
+    "stem_import": "BLOCKED_BY_HUMAN_REVIEW",
+    "partial_import_observation": {
+      "attempted": true,
+      "writes_before_stop": 1,
+      "created_track": "REF | ElevenLabs Full Mix",
+      "created_track_stable_id": "trk_d71667a236ae",
+      "loaded_audio_clips": 0,
+      "stem_tracks_created": 0,
+      "safe_write_transaction": "act_525cd371a2 / VERIFIED",
+      "second_load_transaction": "act_4c6cd33c36 / INTERRUPTED_BEFORE_AUTHORITATIVE_READBACK",
+      "readback_after_stop": {
+        "track_count": 38,
+        "target_track_clip_count": 0,
+        "stem_target_tracks_present": []
+      },
+      "note": "Import was stopped at the human review boundary. No rollback or further musical writes were performed."
+    },
+    "review_bundle": "D:\\music-platform-runtime\\outputs\\elevenlabs-hybrid-20260922\\review-bundle",
+    "human_evaluation": "IN_PROGRESS",
+    "separation_quality": "NOT_CERTIFIED",
+    "perceptual_isolation": "HUMAN_REVIEW_IN_PROGRESS",
+    "musical_quality": "NOT_EVALUATED",
+    "watermark_removal_attempts": 0,
+    "watermark_evasion_attempts": 0,
+    "provenance_laundering": false
   },
   "ace_cloud_high_quality_v1": {
     "status": "CREDENTIAL_OR_PAYMENT_AUTHORIZATION_REQUIRED",
