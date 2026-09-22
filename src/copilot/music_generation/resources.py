@@ -8,9 +8,9 @@ run here or must be sent to another worker/cloud tier.
 from __future__ import annotations
 
 import os
-import platform
 import shutil
 from pydantic import BaseModel, Field
+from copilot.platform.system import host_architecture, host_processor, host_system
 
 
 class StorageVolume(BaseModel):
@@ -94,9 +94,9 @@ def discover_worker_resources() -> WorkerResources:
         memory_bytes = 0
     gpu_name, gpu_vram_bytes = _gpu_evidence()
     return WorkerResources(
-        operating_system=platform.system(),
-        architecture=platform.machine(),
-        processor=platform.processor(),
+        operating_system=host_system(),
+        architecture=host_architecture(),
+        processor=host_processor(),
         memory_bytes=memory_bytes,
         gpu_name=gpu_name,
         gpu_vram_bytes=gpu_vram_bytes,

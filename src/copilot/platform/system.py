@@ -16,6 +16,10 @@ def host_architecture() -> str:
     return platform.machine()
 
 
+def host_processor() -> str:
+    return platform.processor()
+
+
 def host_shell(system: str | None = None) -> str:
     name = system or host_system()
     return os.environ.get("COMSPEC" if name == "Windows" else "SHELL", "")
