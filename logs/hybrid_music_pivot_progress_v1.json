@@ -1,0 +1,45 @@
+{
+  "program": "PRODUCER_PLATFORM_V2",
+  "updated_at": "2026-09-22T04:20:00Z",
+  "checkpoint": "best_of_n_and_generated_asset_import",
+  "ace_step_real_smoke_v1": "VERIFIED",
+  "foundation_generation_benchmark_v1": {
+    "status": "CANDIDATES_READY / HUMAN_EVALUATION_PENDING",
+    "output_root": "D:\\music-platform-runtime\\outputs\\foundation-generation-20260922",
+    "desired_candidates": 8,
+    "valid_candidates": 8,
+    "generation_attempts": 13,
+    "recovery_attempts": 1,
+    "technical_validation": "8/8 VALID",
+    "analyzer": "8/8 REAL",
+    "clap": "8/8 REAL",
+    "musical_winner": null,
+    "quality_claim": "HUMAN_EVALUATION_PENDING",
+    "baseline": "QUALITY_BASELINE_001",
+    "blind_bundle_items": 9
+  },
+  "generated_asset_import_v1": {
+    "status": "VERIFIED_ROLLBACK",
+    "candidate_id": "candidate_001",
+    "asset_sha256": "a15dabe5db6ae6814bd1d74423836c8a43bd2cdc0e2d80d93dd276f311f88c4c",
+    "working_copy_only": true,
+    "production_compiler": "COMPILED",
+    "safe_write": "VERIFIED",
+    "authoritative_readback": "PASS",
+    "rollback": "PASS",
+    "original_project_writes": 0,
+    "direct_generator_writes": 0,
+    "safe_write_authorities": 1
+  },
+  "executive_producer_boundary_v1": "IMPLEMENTED / PROVIDER_NEUTRAL",
+  "generator_refinement_v1": "CAPABILITY_AUDIT_PENDING",
+  "worker_recovery": {
+    "initial_worker_failure": "PORT_DROPPED_AFTER_SEVEN_CANDIDATES",
+    "runtime_reused": true,
+    "model_reinstalled": false,
+    "recovery_result": "EIGHTH_CANDIDATE_GENERATED"
+  },
+  "lucas_mac": "UNKNOWN",
+  "musical_writes": 1,
+  "original_project_writes": 0
+}
