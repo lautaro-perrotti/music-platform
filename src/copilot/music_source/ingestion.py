@@ -83,7 +83,10 @@ def _age_days(path: Path, now: datetime) -> float:
 
 
 def _configured_directories(extra_directories: Iterable[Path] | None) -> list[Path]:
-    directories: list[Path] = [Path.home() / "Downloads", Path.home() / "Desktop"]
+    # An explicit directory list is a closed discovery scope.  This keeps
+    # tests and controlled imports from accidentally seeing an unrelated
+    # user download, and preserves fail-closed ambiguity semantics.
+    directories: list[Path] = [] if extra_directories is not None else [Path.home() / "Downloads", Path.home() / "Desktop"]
     configured = os.environ.get("MUSIC_PLATFORM_IMPORT_DIRS", "")
     if configured:
         directories.extend(Path(value) for value in configured.split(os.pathsep) if value)
