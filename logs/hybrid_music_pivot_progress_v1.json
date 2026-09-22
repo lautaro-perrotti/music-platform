@@ -50,6 +50,13 @@
     "insufficient_local_resources": "CLOUD_REQUIRED",
     "quality_degradation": false
   },
+  "provider_comparison_benchmark_v1": {
+    "status": "IMPLEMENTED / HUMAN_EVALUATION_PENDING",
+    "same_brief": true,
+    "loudness_normalized": true,
+    "provider_identity_hidden_from_listener": true,
+    "automatic_winner": false
+  },
   "worker_recovery": {
     "initial_worker_failure": "PORT_DROPPED_AFTER_SEVEN_CANDIDATES",
     "runtime_reused": true,
