@@ -30,13 +30,25 @@ runtime visual layer was removed instead of being overridden.
 - This is the hard stop: do not port another page until the Projects PNG
   comparison is available and this screen is accepted.
 
+### Project Home - SOURCE TRANSPLANT ACTIVE
+
+- Source: `source/ProjectHome.dc.html`.
+- The home route now uses the source composition: breadcrumb, project header,
+  action row, current-version waveform, brief, recent generations, running
+  jobs, Ableton, references, and activity panels.
+- Available API data is connected where present; missing source-only content is
+  represented by explicit source-shaped mock data so the page is complete
+  without inventing a new visual language.
+- Browser validation: `http://127.0.0.1:8791/#home` renders with the shell,
+  source layout, waveform, and working navigation/action links.
+- Musical writes: `0`.
+
 ## Queue
 
 1. Finish Projects comparison and acceptance.
-2. Project Home.
-3. Create.
-4. Results.
-5. Remaining source pages.
+2. Create.
+3. Results.
+4. Remaining source pages.
 
 ## Validation record
 
