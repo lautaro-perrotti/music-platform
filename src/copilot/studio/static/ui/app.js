@@ -9,7 +9,7 @@ const api = async (path, options = {}) => {
 };
 const state = { project: null, snapshot: null, job: null };
 
-function shellMain() { return document.querySelector('ms-app-shell')?.shadowRoot?.querySelector('slot[name="main"]')?.assignedElements?.()[0]; }
+function shellMain() { return document.querySelector('ms-app-shell .main-slot'); }
 function navigate(route) { location.hash = route; renderRoute(); }
 function htmlFrame(title, eyebrow, body) { return `<section class="app-page"><div class="intro"><span>${eyebrow}</span><h1>${title}</h1></div><div class="app-content">${body}</div></section>`; }
 function button(label, action, tone = '') { return `<button class="app-native-button ${tone}" data-action="${action}">${label}</button>`; }
@@ -25,7 +25,7 @@ async function refresh() {
   const projects = await api('/api/projects');
   state.project = state.project && projects.projects.find(item => item.project_id === state.project.project_id) || projects.projects[0] || null;
   if (state.project) state.snapshot = await api(`/api/projects/${state.project.project_id}/workspace`);
-  const topBar = document.querySelector('ms-app-shell')?.shadowRoot?.querySelector('ms-top-bar');
+  const topBar = document.querySelector('ms-app-shell ms-top-bar');
   if (topBar) {
     topBar.setAttribute('project', state.project?.name || 'No project');
     const active = state.snapshot?.versions?.[0];
@@ -39,8 +39,8 @@ async function action(name, payload = {}) {
 }
 function syncShellContext() {
   const shell = document.querySelector('ms-app-shell');
-  const topBar = shell?.shadowRoot?.querySelector('ms-top-bar');
-  const sidebar = shell?.shadowRoot?.querySelector('ms-sidebar');
+  const topBar = shell?.querySelector('ms-top-bar');
+  const sidebar = shell?.querySelector('ms-sidebar');
   if (!topBar) return;
   topBar.setAttribute('project', state.project?.name || 'No project');
   const active = state.snapshot?.versions?.[0];
@@ -156,9 +156,9 @@ async function handle(actionName, node, event) {
 
 async function boot() {
   const health = await api('/api/health').catch(() => ({ mode: 'HYBRID' }));
-  document.body.innerHTML = `<link rel="stylesheet" href="/ui/base.css"><link rel="stylesheet" href="/ui/app.css"><ms-app-shell mode="${health.mode || 'HYBRID'}" active="create"><div slot="main"></div><ms-player slot="player"></ms-player></ms-app-shell>`;
-  const sidebar = document.querySelector('ms-app-shell')?.shadowRoot?.querySelector('ms-sidebar');
-  sidebar?.shadowRoot?.querySelectorAll('a').forEach(link => link.addEventListener('click', event => { event.preventDefault(); navigate(link.getAttribute('href').slice(1) === 'create' ? 'create' : link.getAttribute('href').slice(1)); }));
+  document.body.innerHTML = `<link rel="stylesheet" href="/ui/base.css"><link rel="stylesheet" href="/ui/app.css"><ms-app-shell mode="${health.mode || 'HYBRID'}" active="create"></ms-app-shell>`;
+  const sidebar = document.querySelector('ms-app-shell ms-sidebar');
+  sidebar?.querySelectorAll('a').forEach(link => link.addEventListener('click', event => { event.preventDefault(); navigate(link.getAttribute('href').slice(1)); }));
   window.addEventListener('hashchange', renderRoute);
   await refresh().catch(() => {});
   await renderRoute();

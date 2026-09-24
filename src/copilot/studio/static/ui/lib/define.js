@@ -17,4 +17,13 @@ export function define(name, render, css = '', { connected = null } = {}) {
   customElements.define(name, Element);
   return Element;
 }
+export function defineLight(name, render, { connected = null } = {}) {
+  if (customElements.get(name)) return customElements.get(name);
+  class Element extends HTMLElement {
+    connectedCallback() { this.paint(); if (connected) connected(this); }
+    paint() { this.innerHTML = render(this); this.querySelectorAll('[data-action]').forEach(node => node.addEventListener('click', () => emit(this, node.dataset.action, { value: node.dataset.value || node.textContent.trim() }))); }
+  }
+  customElements.define(name, Element);
+  return Element;
+}
 export function reflectProps(el, props) { Object.entries(props).forEach(([key, value]) => { if (value != null) el.setAttribute(key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`), value); }); }
