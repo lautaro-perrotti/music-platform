@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 
@@ -21,14 +20,16 @@ def test_music_studio_ui_layers_and_required_components_exist() -> None:
     assert len(list((UI / "pages").glob("ms-page-*.js"))) == 28
 
 
-def test_ui_colors_are_tokenized_outside_tokens_file() -> None:
-    hex_color = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    offenders = []
-    for path in UI.rglob("*"):
-        if path.is_file() and path.name != "tokens.css":
-            if hex_color.search(path.read_text(encoding="utf-8")):
-                offenders.append(str(path))
-    assert offenders == []
+def test_claude_source_is_the_visual_source_of_truth() -> None:
+    source = UI.parents[4] / "docs" / "design" / "music-studio-v1" / "source"
+    assert (source / "TopBar.dc.html").is_file()
+    assert (source / "Sidebar.dc.html").is_file()
+    assert (source / "Player.dc.html").is_file()
+    assert (source / "Projects.dc.html").is_file()
+    app = (UI / "app.js").read_text(encoding="utf-8")
+    assert "/ui/app.css" not in app
+    assert "/ui/tokens.css" not in app
+    assert "/ui/base.css" not in app
 
 
 def test_static_entrypoints_are_present() -> None:

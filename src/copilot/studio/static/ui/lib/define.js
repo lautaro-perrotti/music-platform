@@ -1,11 +1,9 @@
-const shared = `:host{font-family:var(--ms-font-sans);color:var(--ms-text);box-sizing:border-box}*,*:before,*:after{box-sizing:border-box}button,input,textarea,select{font:inherit}button{cursor:pointer;color:inherit}button:disabled{cursor:not-allowed;opacity:.45}:focus-visible{outline:2px solid var(--ms-cue);outline-offset:2px}`;
-
 export const esc = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const attr = (el, name, fallback = '') => el.getAttribute(name) ?? fallback;
 export const bool = (el, name) => el.hasAttribute(name) && el.getAttribute(name) !== 'false';
 export const emit = (el, type, detail = {}) => el.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail }));
 export const slotText = (el, name = '') => el.querySelector(name ? `[slot="${name}"]` : ':not([slot])')?.textContent?.trim() || '';
-export function styles(css = '') { return `<style>${shared}${css}</style>`; }
+export function styles() { return ''; }
 export function define(name, render, css = '', { connected = null } = {}) {
   if (customElements.get(name)) return customElements.get(name);
   class Element extends HTMLElement {
