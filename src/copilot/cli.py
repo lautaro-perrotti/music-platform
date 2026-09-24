@@ -41,9 +41,9 @@ from copilot.logging_setup import configure_logging
 
 # Production routing contracts (MusicPlan behavior not implemented here).
 CANONICAL_PRE_WRITE_PATH = (
-    "session-diagnose → session-run1 → session-run1-fullmix → "
-    "session-run1-astra-r2 → session-run1-causal-trace → "
-    "session-run1-source-audio → session-run1-strum-device"
+    "session-diagnose -> session-run1 -> session-run1-fullmix -> "
+    "session-run1-astra-r2 -> session-run1-causal-trace -> "
+    "session-run1-source-audio -> session-run1-strum-device"
 )
 CANONICAL_WRITE_PATH = "production-write"
 LAB_COMMANDS = frozenset(
@@ -77,6 +77,7 @@ CANONICAL_COMMANDS = (
     "regression-v1",
     "capabilities",
     "performance-report",
+    "studio",
 )
 HELP_EPILOG = """
 Canonical supported envelope:
@@ -92,6 +93,7 @@ Canonical supported envelope:
   regression-v1
   capabilities
   performance-report       (read-only latency report; no musical writes)
+  studio --port 8765      (local Music Studio vertical slice)
 
 Lab runners require --lab and are not the supported envelope.
 Live is ready only after SESSION_READY (not a listening port).
@@ -157,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             "regression-v1",
             "capabilities",
             "performance-report",
+            "studio",
         ],
     )
     parser.add_argument("eval_argv", nargs="*", default=[])
@@ -171,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", dest="eval_run", default=None)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--studio-data-dir",
+        default=None,
+        help="studio: durable local data directory (default COPILOT_STUDIO_DATA_DIR or runtime/music-studio)",
+    )
     parser.add_argument("--seed", type=int, default=20260915)
     parser.add_argument(
         "--lab",
@@ -304,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "production-write: AUDIBLE_EFFECT_VERIFICATION_V2 "
-            "(baseline-characterize → freeze high-SNR SET_TRACK_VOLUME → one write)."
+            "(baseline-characterize -> freeze high-SNR SET_TRACK_VOLUME -> one write)."
         ),
     )
     parser.add_argument(
@@ -312,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "production-write: FIRST_AUTONOMOUS_MUSICAL_IMPROVEMENT_V1 "
-            "(one blind holdout observe→diagnose→gate→optional SET_TRACK_VOLUME)."
+            "(one blind holdout observe->diagnose->gate->optional SET_TRACK_VOLUME)."
         ),
     )
     parser.add_argument(
@@ -449,6 +457,15 @@ def main(argv: list[str] | None = None) -> int:
             port=args.live_port,
             repeats=int(args.repeats),
             include_live=not args.offline,
+        )
+
+    if args.command == "studio":
+        from copilot.studio.server import run_server
+
+        return run_server(
+            host=args.host,
+            port=args.port,
+            data_dir=Path(args.studio_data_dir) if args.studio_data_dir else None,
         )
 
     if args.command == "capture-journal-recover":

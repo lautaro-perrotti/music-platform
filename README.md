@@ -41,6 +41,25 @@ python -m copilot.cli undo
 
 See `docs/discovery/LIVE_STATUS.md`.
 
+## Music Studio vertical slice
+
+The first local Music Studio application boundary is available through the
+existing provider-neutral generation contracts:
+
+```bash
+python -m copilot.cli studio --port 8765
+```
+
+It persists Projects, GenerationBriefs, Jobs, ordered events, managed audio
+Artifacts, Candidates and non-destructive Versions in a local SQLite store.
+The UI serves audio by artifact ID with browser Range support and never gives
+the browser an arbitrary filesystem path. Ableton status is read-only and
+Studio writes are always `0`. A real ACE-Step worker or authorized ElevenLabs
+credential is required for production generation; without one the job stops
+honestly at `BLOCKED / REAL_PROVIDER_REQUIRED`.
+
+See `docs/architecture/MUSIC_STUDIO_VERTICAL_SLICE_V1.md`.
+
 ## Performance and robustness
 
 `python -m copilot.cli performance-report` writes `logs/performance_report_v1.json`
