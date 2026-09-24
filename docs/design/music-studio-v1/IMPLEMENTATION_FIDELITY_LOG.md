@@ -103,12 +103,26 @@ runtime visual layer was removed instead of being overridden.
   `http://127.0.0.1:8791/`.
 - Musical writes: `0`.
 
+### Secondary source screens - SOURCE TRANSPLANT ACTIVE
+
+- The remaining Claude source designs are now routed and rendered as explicit
+  screens: AddReference, ApplyVersion, ChatResult, ChatRunning,
+  CommandPalette, CreateAdvanced, JobDetail, Mobile, ReferenceDetail, States,
+  StemCompare, StudioRegion, VersionCompare, and VoiceResults.
+- Complete source inventory: 35 `.dc.html` designs.
+- Product routes transplanted: 17.
+- Shared shell source compositions transplanted: Main, TopBar, Sidebar, and
+  Player (4).
+- Secondary routes transplanted: 14.
+- Browser validation: all 14 secondary routes rendered with a real heading or
+  source-defined dialog/mobile composition and no route-load error.
+- Musical writes: `0`.
+
 ## Queue
 
-1. Finish Projects comparison and acceptance.
-2. Create.
-3. Results.
-4. Remaining source pages.
+1. Compare each transplanted screen against its corresponding Claude PNG.
+2. Replace explicit source-shaped mocks with durable backend data as each
+   product contract becomes available.
 
 ## Validation record
 
