@@ -14,16 +14,75 @@ from copilot.music_generation.ace_step import AceStepProvider
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider
 from copilot.music_generation.schemas import GenerationBrief, GeneratorRequest
 from copilot.music_generation.benchmark import validate_generated_audio
+from copilot.audio.session_diagnose import preflight_session
+from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
+from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
+from copilot.daw.ableton_tcp import AbletonTcpAdapter
+from copilot.daw.object_ref import ref_from_track
+from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready
+from copilot.daw.state_tokens import attach_tokens
+from copilot.musicplan import build_create_track_action
+from copilot.runtime.production_compiler import ProductionCompiler
+from copilot.runtime.safe_write import build_safe_write_executor
+from copilot.schemas.musicplan import (
+    ActionTarget,
+    DiagnosisBinding,
+    ExpectedEffect,
+    ExecutionVerificationSpec,
+    MusicPlan,
+    MusicalVerificationSpec,
+    PatternActionParams,
+    PlanAction,
+    PlanIntentClass,
+    PlanStatus,
+    ProductionActionKind,
+    RollbackSpec,
+    VerificationSpec,
+)
+from copilot.schemas.session import MidiNote
 from copilot.studio.contracts import (
     ArtifactRecord,
     CandidateRecord,
+    CapabilityState,
     JobRecord,
     JobStatus,
+    ProduceCapability,
+    ProduceRequest,
     ProjectRecord,
+    VariationRecord,
     VersionRecord,
 )
 from copilot.studio.store import StudioStore, utc_now
 from copilot.studio.simulation import SimulatedMusicProvider
+
+
+class GenerationBackendNotAvailable(RuntimeError):
+    """Typed refusal: the real Ableton generation path is not certified yet."""
+
+    code = "GENERATION_BACKEND_NOT_AVAILABLE"
+
+    def __init__(self, operation: str, missing: list[str]) -> None:
+        super().__init__(self.code)
+        self.operation = operation
+        self.missing = missing
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"error": self.code, "operation": self.operation, "missing": self.missing}
+
+
+class ProduceExecutionBlocked(RuntimeError):
+    """A real variation could not be executed safely; never simulate it."""
+
+    code = "PRODUCE_EXECUTION_BLOCKED"
+
+    def __init__(self, reason: str, *, detail: str = "", evidence: dict[str, Any] | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
+        self.evidence = evidence or {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"error": self.code, "reason": self.reason, "detail": self.detail, "evidence": self.evidence}
 
 
 class StudioService:
@@ -37,6 +96,10 @@ class StudioService:
         self._threads: dict[str, threading.Thread] = {}
         self._threads_lock = threading.Lock()
         self._cancelled_jobs: set[str] = set()
+        # Runtime handles are intentionally scoped to the one vertical slice.
+        # They let KEEP/ROLLBACK reuse the same Core SafeWrite authority; the
+        # durable record never becomes a second mutation system.
+        self._variation_runtime: dict[str, tuple[Any, Any, Any]] = {}
 
     def _default_provider(self, requested: str | None) -> Any | None:
         provider_id = (requested or "").strip().lower()
@@ -336,6 +399,340 @@ class StudioService:
             raise ValueError("UNSUPPORTED_WORKSPACE_ACTION")
         self.store.set_state(project_id, "workspace", workspace)
         return self.workspace_snapshot(project_id)
+
+    # --- Produce: generate one real Ableton variation, preview here ----------
+    # This is deliberately narrower than the UI's future N-variation surface.
+    # The report describes the smallest certified bass slice, not a promise
+    # that every Produce control is executable.
+    PRODUCE_CAPABILITIES: tuple[tuple[str, CapabilityState, str], ...] = (
+        ("ABLETON_SESSION_READINESS", CapabilityState.REAL, "copilot.daw.session_ready_v1.probe_session_ready"),
+        ("REFERENCE_ANALYSIS", CapabilityState.REAL, "copilot.audio.music_analyzer.analyze_reference_file (tempo is an input)"),
+        ("TRACK_REGION_CAPTURE", CapabilityState.REAL, "copilot.audio.source_capture_pool_v1.capture_source_post_mixer_ref"),
+        ("SAFE_WRITE_KEEP_ROLLBACK", CapabilityState.REAL, "SAFE_WRITE_FOUNDATION_V2, certified producer actions only"),
+        ("READ_SELECTION", CapabilityState.PARTIAL, "V1 accepts an explicit region; Live selection is not required for this slice"),
+        ("SINGLE_VARIATION_PLAN", CapabilityState.REAL, "typed bass plan: explicit region + instruction -> one CREATE_TRACK/CREATE_PATTERN MusicPlan"),
+        ("VARIATION_PLANNER_N", CapabilityState.MISSING, "no planner returns N distinct plans from reference + instruction"),
+        ("WRITE_MIDI_CLIP", CapabilityState.REAL, "ProductionCompiler -> SafeWrite CREATE_TRACK + CREATE_PATTERN -> authoritative MIDI readback"),
+        ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded two-action compound only: CREATE_TRACK -> CREATE_PATTERN"),
+        ("COPILOT_OWNED_TRACK_POLICY", CapabilityState.REAL, "new deterministic Copilot Variation track plus persisted ownership registry"),
+        ("VARIATION_PREVIEW_CAPTURE", CapabilityState.REAL, "created Copilot track -> source_capture_post_mixer_ref -> artifact"),
+        ("STUDIO_PRODUCER_BRIDGE", CapabilityState.REAL, "POST /api/projects/{id}/produce calls the real Core compiler/executor"),
+        ("KEEP_VARIATION", CapabilityState.REAL, "same SafeWrite transaction handle supports KEEP and owned rollback"),
+        ("FOCUS_CLIP", CapabilityState.PARTIAL, "select_clip / set_detail_clip only via untyped bridge_command"),
+    )
+
+    PRODUCE_REQUIRED_FOR_ONE = frozenset({
+        "ABLETON_SESSION_READINESS", "TRACK_REGION_CAPTURE", "SAFE_WRITE_KEEP_ROLLBACK",
+        "SINGLE_VARIATION_PLAN", "WRITE_MIDI_CLIP", "MULTI_ACTION_PLAN_COMPILE",
+        "COPILOT_OWNED_TRACK_POLICY", "VARIATION_PREVIEW_CAPTURE",
+        "STUDIO_PRODUCER_BRIDGE", "KEEP_VARIATION",
+    })
+
+    def produce_capabilities(self) -> dict[str, Any]:
+        rows = [ProduceCapability(name=n, state=s, detail=d).model_dump(mode="json") for n, s, d in self.PRODUCE_CAPABILITIES]
+        missing = [r["name"] for r in rows if r["state"] != CapabilityState.REAL.value]
+        required_missing = [r["name"] for r in rows if r["name"] in self.PRODUCE_REQUIRED_FOR_ONE and r["state"] != CapabilityState.REAL.value]
+        return {
+            "generation_available": not required_missing,
+            "capabilities": rows,
+            "missing": missing,
+            "required_for_one_variation_missing": required_missing,
+            "scope": "ONE_BASS_VARIATION_ONLY",
+        }
+
+    def _require_generation_backend(self, operation: str) -> None:
+        report = self.produce_capabilities()
+        if not report["generation_available"]:
+            raise GenerationBackendNotAvailable(operation, report["required_for_one_variation_missing"])
+
+    def produce_generate(self, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.get_project(project_id)
+        start_qn = float(payload.get("start_qn", 0.0) or 0.0)
+        end_qn = payload.get("end_qn")
+        request = ProduceRequest(
+            scope=str(payload.get("scope") or "REGION").upper(),
+            instruction=str(payload.get("instruction") or "").strip(),
+            variations=int(payload.get("variations") or 0),
+            length_bars=int(payload["length_bars"]) if payload.get("length_bars") not in (None, "", "auto", "AUTO") else None,
+            start_qn=start_qn,
+            end_qn=float(end_qn) if end_qn not in (None, "") else None,
+        )
+        if request.scope not in {"TRACK", "REGION"}:
+            raise ValueError("PRODUCE_SCOPE_INVALID")
+        if not request.instruction:
+            raise ValueError("PRODUCE_INSTRUCTION_REQUIRED")
+        if request.variations not in {1, 3, 5}:
+            raise ValueError("PRODUCE_VARIATION_COUNT_INVALID")
+        if request.variations != 1:
+            raise ValueError("PRODUCE_VARIATION_COUNT_UNSUPPORTED_FOR_V1")
+        if request.length_bars not in {None, 8, 16, 32}:
+            raise ValueError("PRODUCE_LENGTH_INVALID")
+        self._require_generation_backend("produce.generate")
+        return self._produce_one_real_variation(project_id, request)
+
+    @staticmethod
+    def _bass_notes(length_beats: float) -> list[MidiNote]:
+        """Small deterministic bass vocabulary used only for this slice."""
+        motif = (36, 36, 39, 41, 36, 43, 41, 39)
+        notes: list[MidiNote] = []
+        cursor = 0.0
+        index = 0
+        while cursor + 1.5 <= length_beats:
+            notes.append(MidiNote(
+                pitch=motif[index % len(motif)],
+                start_time=cursor,
+                duration=1.5,
+                velocity=92 if index % 4 else 104,
+            ))
+            cursor += 2.0
+            index += 1
+        return notes
+
+    def _build_variation_plan(self, *, request: ProduceRequest, session: Any, variation_id: str) -> MusicPlan:
+        bars = request.length_bars or 8
+        length_beats = float(bars * 4)
+        track_name = f"Copilot Variation {variation_id[-8:]}"
+        create = build_create_track_action(
+            project_identity=session.project_identity,
+            track_name=track_name,
+            track_kind="midi",
+            reason=request.instruction,
+            evidence_refs=[f"region:{request.start_qn}:{request.end_qn or request.start_qn + length_beats}"],
+        )
+        pattern = PlanAction(
+            action_id=f"pattern_{variation_id}",
+            action_type=ProductionActionKind.CREATE_PATTERN,
+            target=ActionTarget(ref=create.target.ref),
+            params=PatternActionParams(
+                clip_index=0,
+                length_beats=length_beats,
+                notes=self._bass_notes(length_beats),
+            ),
+            reason=request.instruction,
+            evidence_refs=list(create.evidence_refs),
+            expected_effect=ExpectedEffect(
+                affected_target=f"{track_name}.clip[0]",
+                direction="add",
+                description="create one editable Copilot bass variation",
+                measurement_to_compare_after="authoritative MIDI note readback",
+            ),
+            verification=VerificationSpec(
+                execution=ExecutionVerificationSpec(parameter="clip.notes", expected_after=1.0, unit="patterned"),
+                musical=MusicalVerificationSpec(comparison="preview_capture_for_human_review", deferred=True),
+            ),
+            rollback=RollbackSpec(parameter="pattern", unit="clip", restore_value=-1.0, prepared=True),
+        )
+        return MusicPlan(
+            plan_id=f"variation_plan_{variation_id}",
+            status=PlanStatus.DRAFT,
+            intent_class=PlanIntentClass.AUTONOMOUS_MUSICAL_IMPROVEMENT,
+            diagnosis=DiagnosisBinding(
+                diagnosis_id=f"variation_reference_{variation_id}",
+                diagnosis_status="REFERENCE_REGION_BOUND",
+                diagnosis_accepted=True,
+                region_id=f"region_{variation_id}",
+            ),
+            project_state_token=session.project_token or session.project_identity or "",
+            audible_state_token=session.audible_token or "",
+            created_at=utc_now(),
+            actions=[create, pattern],
+            notes=["V1 bounded planner: one bass variation only; no N-variation claims."],
+            gate={"reference_region": {"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats}},
+        )
+
+    def _open_variation_live(self) -> tuple[AbletonTcpAdapter, Any]:
+        probe = probe_session_ready()
+        if probe.status != SESSION_READY or not probe.writes_permitted:
+            raise ProduceExecutionBlocked(
+                "ABLETON_SESSION_NOT_READY",
+                detail=probe.reason,
+                evidence=probe.to_dict(),
+            )
+        daw = AbletonTcpAdapter()
+        try:
+            daw.connect()
+            session = daw.snapshot()
+            attach_tokens(session, path=session.project_path, name=session.project_name)
+            policy = evaluate_working_copy(session.project_path, session.project_name)
+            if not policy.get("operate") or not policy.get("autonomous_writes_ok"):
+                raise ProduceExecutionBlocked(
+                    "WORKING_COPY_REQUIRED",
+                    detail=str(policy.get("reason") or "Ableton project is not a controlled working copy"),
+                    evidence={"policy": policy, "project_path": session.project_path, "project_identity": session.project_identity},
+                )
+            if not session.project_identity:
+                raise ProduceExecutionBlocked("PROJECT_IDENTITY_MISSING")
+            return daw, session
+        except Exception:
+            try:
+                daw.disconnect()
+            except Exception:
+                pass
+            raise
+
+    def _create_preview_job(self, project_id: str, variation_id: str) -> str:
+        job_id = f"variation_capture_{variation_id}"
+        if self.store.get_job(job_id) is None:
+            job = JobRecord(
+                job_id=job_id,
+                project_id=project_id,
+                status=JobStatus.SUCCEEDED,
+                brief={"kind": "VARIATION_PREVIEW_CAPTURE", "variation_id": variation_id},
+                provider_id="ableton",
+                requested_candidates=1,
+                completed_candidates=1,
+                current_stage="captured",
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            )
+            self.store.create_job(job)
+        return job_id
+
+    def _produce_one_real_variation(self, project_id: str, request: ProduceRequest) -> dict[str, Any]:
+        variation_id = f"variation_{uuid.uuid4().hex[:16]}"
+        bars = request.length_bars or 8
+        length_beats = float(bars * 4)
+        daw, session = self._open_variation_live()
+        try:
+            plan = self._build_variation_plan(request=request, session=session, variation_id=variation_id)
+            compiled = ProductionCompiler().compile(plan, session=session)
+            if compiled.status != "COMPILED" or compiled.intent is None:
+                raise ProduceExecutionBlocked("PLAN_NOT_COMPILED", detail="; ".join(compiled.reasons), evidence={"plan_id": plan.plan_id})
+            persist_dir = self.data_dir / "safe_write" / "variations"
+            executor = build_safe_write_executor(
+                daw,
+                journal_path=persist_dir / f"{variation_id}.jsonl",
+                persist_dir=persist_dir,
+            )
+            result = executor.run(compiled.intent)
+            if not result.ok:
+                raise ProduceExecutionBlocked(
+                    "SAFE_WRITE_FAILED",
+                    detail=result.error or "SafeWrite rejected the variation",
+                    evidence=result.to_dict(),
+                )
+            live_after = daw.snapshot()
+            create_target = next(item for item in compiled.intent.targets if item.action_id == compiled.intent.executions[0].action_id)
+            pattern_step = compiled.intent.executions[1]
+            track = live_after.track_by_id(create_target.stable_id)
+            clip_ref = f"{track.stable_id}:clip:{int(pattern_step.arguments['clip_index'])}"
+
+            preflight = preflight_session(daw, lab_track_exclusions=frozenset({"AI Test"}))
+            if not preflight.get("pass"):
+                executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked("CAPTURE_PREFLIGHT_NOT_READY", detail="; ".join(preflight.get("missing") or []), evidence={"preflight": preflight})
+            capture_root = self.data_dir / "variation_captures" / variation_id
+            capture = capture_source_post_mixer_ref(
+                daw,
+                session=live_after,
+                preflight={**preflight, "project_token": live_after.project_token, "audible_token": live_after.audible_token},
+                target_ref=ref_from_track(track, project_identity=live_after.project_identity),
+                start_qn=request.start_qn,
+                end_qn=request.end_qn or request.start_qn + length_beats,
+                region_id=f"region_{variation_id}",
+                tempo=float(live_after.transport.tempo),
+                dest_root=capture_root,
+            )
+            if not capture.get("ok") or not capture.get("wav_path"):
+                executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked("PREVIEW_CAPTURE_FAILED", detail=str(capture.get("error") or "capture returned no WAV"), evidence={"capture": capture})
+            wav_path = Path(str(capture["wav_path"]))
+            if not wav_path.is_file():
+                executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked("PREVIEW_ARTIFACT_MISSING", detail=str(wav_path), evidence={"capture": capture})
+            preview_job_id = self._create_preview_job(project_id, variation_id)
+            artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"
+            relative = Path("variation_captures") / variation_id / wav_path.name
+            destination = self.data_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if wav_path.resolve() != destination.resolve():
+                shutil.copy2(wav_path, destination)
+            artifact = ArtifactRecord(
+                artifact_id=artifact_id,
+                job_id=preview_job_id,
+                filename=destination.name,
+                relative_path=relative.as_posix(),
+                sha256=hashlib.sha256(destination.read_bytes()).hexdigest(),
+                bytes=destination.stat().st_size,
+                duration_s=float(capture.get("duration_s") or (length_beats * 60.0 / live_after.transport.tempo)),
+                sample_rate=int(capture.get("sample_rate") or 44100),
+                provider_metadata={"kind": "VARIATION_PREVIEW", "capture": capture, "plan_id": plan.plan_id},
+                rights={"source": "GENERATED_IN_ABLETON", "copilot_owned": True},
+                created_at=utc_now(),
+            )
+            self.store.create_artifact(artifact)
+            record = VariationRecord(
+                variation_id=variation_id,
+                project_id=project_id,
+                request_id=variation_id,
+                index=1,
+                status="READY",
+                ableton_track_ref=track.stable_id,
+                ableton_clip_ref=clip_ref,
+                preview={"artifact_id": artifact_id, "bars": bars, "duration_s": artifact.duration_s, "capture_region_id": f"region_{variation_id}"},
+                plan_id=plan.plan_id,
+                ownership={"owner": "COPILOT", "track_stable_id": track.stable_id, "track_name": track.name, "clip_index": int(pattern_step.arguments["clip_index"])},
+                safe_write={"result": result.to_dict(), "journal_path": result.journal_path, "prestate_path": result.prestate_path},
+                region={"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats, "bars": bars, "scope": request.scope},
+                created_at=utc_now(),
+            )
+            self.store.set_state(project_id, "variations", [*self.store.get_state(project_id, "variations", []), record.model_dump(mode="json")])
+            self.store.add_activity(project_id, "variation.ready", "Real Ableton bass variation captured for review", {"variation_id": variation_id, "musical_writes": result.musical_writes, "write_authority": "ProductionCompiler->SafeWriteExecutor"})
+            self._variation_runtime[variation_id] = (daw, executor, (result, compiled.intent))
+            return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None), "status": "READY", "musical_writes": result.musical_writes, "write_authority": "ProductionCompiler->SafeWriteExecutor"}
+        except Exception:
+            try:
+                if 'daw' in locals() and daw is not None:
+                    daw.disconnect()
+            except Exception:
+                pass
+            raise
+
+    def list_variations(self, project_id: str) -> dict[str, Any]:
+        self.get_project(project_id)
+        variations = [VariationRecord.model_validate(v) for v in self.store.get_state(project_id, "variations", [])]
+        return {"variations": [dict(v.model_dump(mode="json"), preview_url=v.preview.audio_url if v.preview else None) for v in variations]}
+
+    def variation_action(self, variation_id: str, action: str) -> dict[str, Any]:
+        if action not in {"keep", "open", "discard"}:
+            raise ValueError("VARIATION_ACTION_INVALID")
+        found: tuple[str, VariationRecord] | None = None
+        for project in self.list_projects():
+            rows = [VariationRecord.model_validate(v) for v in self.store.get_state(project.project_id, "variations", [])]
+            for row in rows:
+                if row.variation_id == variation_id:
+                    found = (project.project_id, row)
+                    break
+            if found:
+                break
+        if found is None:
+            raise KeyError(variation_id)
+        project_id, record = found
+        if action == "open":
+            return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None)}
+        if action == "keep":
+            if record.status not in {"READY", "KEPT"}:
+                raise ValueError("VARIATION_NOT_REVIEWABLE")
+            record = record.model_copy(update={"status": "KEPT"})
+            rows = [record.model_dump(mode="json") if item.get("variation_id") == variation_id else item for item in self.store.get_state(project_id, "variations", [])]
+            self.store.set_state(project_id, "variations", rows)
+            self.store.add_activity(project_id, "variation.kept", "Kept Copilot-owned Ableton variation", {"variation_id": variation_id})
+            return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None), "status": "KEPT"}
+        if record.status == "DISCARDED":
+            return {"variation": record.model_dump(mode="json"), "status": "DISCARDED"}
+        runtime = self._variation_runtime.get(variation_id)
+        if runtime is None:
+            raise ProduceExecutionBlocked("VARIATION_RUNTIME_UNAVAILABLE", detail="Rollback authority is not attached to this Studio process; no direct delete was attempted.")
+        _daw, executor, pair = runtime
+        result, intent = pair
+        rollback_error = executor._rollback_applied(result, intent)
+        if rollback_error:
+            raise ProduceExecutionBlocked("VARIATION_ROLLBACK_FAILED", detail=rollback_error, evidence=result.to_dict())
+        record = record.model_copy(update={"status": "DISCARDED"})
+        rows = [record.model_dump(mode="json") if item.get("variation_id") == variation_id else item for item in self.store.get_state(project_id, "variations", [])]
+        self.store.set_state(project_id, "variations", rows)
+        self.store.add_activity(project_id, "variation.discarded", "Rolled back Copilot-owned Ableton variation", {"variation_id": variation_id})
+        return {"variation": record.model_dump(mode="json"), "status": "DISCARDED", "rollback_verified": True}
 
     def ableton_status(self) -> dict[str, Any]:
         from copilot.daw.detect import detect_ableton

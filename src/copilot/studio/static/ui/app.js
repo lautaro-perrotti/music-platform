@@ -1,6 +1,7 @@
 import './all.js';
 import { esc } from './lib/define.js';
 import { wf } from './lib/waveform.js';
+import { showProduce } from './produce.js';
 
 const api = async (path, options = {}) => {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
@@ -47,14 +48,15 @@ function syncShellContext() {
   const active = state.snapshot?.versions?.[0];
   topBar.setAttribute('version', active ? active.name : 'No active version');
   const jobs = state.snapshot?.jobs || [];
-  topBar.setAttribute('jobs', jobs.length ? `${jobs.length} running` : 'No jobs');
+  const running = jobs.filter(job => !['SUCCEEDED','FAILED','BLOCKED','CANCELLED'].includes(job.status)).length;
+  topBar.setAttribute('jobs', running ? `${running} running` : 'No jobs');
   topBar.paint?.();
   const player = shell?.querySelector('ms-player');
   player?.setAttribute('title', active?.name || 'Afro Groove v7');
   player?.setAttribute('subtitle', state.project ? `${state.project.name} · Full mix` : 'Rhythm Ashanti · Full mix');
   player?.setAttribute('ab', 'off');
   player?.paint?.();
-  const route = (location.hash.slice(1) || 'projects').split('/')[0];
+  const route = (location.hash.slice(1) || 'produce').split('/')[0];
   sidebar?.setAttribute('active', route === 'home' ? 'home' : route);
   sidebar?.paint?.();
 }
@@ -366,7 +368,7 @@ function showNewProjectSimpleClaude(mode = 'empty') {
 }
 
 function normalizeSourceSemantics() {
-  const route = (location.hash.slice(1) || 'projects').split('/')[0];
+  const route = (location.hash.slice(1) || 'produce').split('/')[0];
   const main = shellMain()?.querySelector('main');
   if (!main) return;
   const controls = [...main.querySelectorAll('a,button')];
@@ -391,11 +393,12 @@ function normalizeSourceSemantics() {
 }
 
 async function renderRoute() {
-  const routeParts = (location.hash.slice(1) || 'projects').split('/');
+  const routeParts = (location.hash.slice(1) || 'produce').split('/');
   const route = routeParts[0];
   const routeArg = routeParts[1] || 'idea';
   syncShellContext();
   try {
+    if (route === 'produce') return showProduce({ api, getState: () => state, action, refresh, navigate, main: shellMain() });
     if (route === 'projects') return showProjects();
     if (route === 'home') return showProjectHomeClaude();
     if (route === 'create') return showCreateClaude();
@@ -438,8 +441,8 @@ async function renderRoute() {
 async function handle(actionName, node, event) {
   try {
     const id = node?.dataset?.projectId || node?.dataset?.candidateId || node?.dataset?.referenceId || node?.dataset?.jobId || event?.detail?.value || state.snapshot?.jobs?.[0]?.job_id;
-    if (actionName === 'create-project') { const name = document.querySelector('#new-project-name')?.value || 'Untitled project'; state.project = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }); return navigate('home'); }
-    if (actionName === 'open-project') { state.project = await api(`/api/projects/${id}`); return navigate('home'); }
+    if (actionName === 'create-project') { const name = document.querySelector('#new-project-name')?.value || 'Untitled project'; state.project = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }); return navigate('produce'); }
+    if (actionName === 'open-project') { state.project = await api(`/api/projects/${id}`); return navigate('produce'); }
     if (actionName === 'go-create') return navigate(node?.textContent?.includes('New project') ? 'new-project' : 'create');
     if (actionName === 'go-new-project') return navigate('new-project');
     if (actionName === 'use-prompt') { const promptNode = shellMain().querySelector('#prompt'); if (promptNode) promptNode.value = node.dataset.prompt || ''; return; }
@@ -475,8 +478,8 @@ async function handle(actionName, node, event) {
     if (actionName === 'go-version-compare') return navigate('version-compare');
     if (actionName === 'go-voice-results') return navigate('voice-results');
     if (actionName === 'new-project-mode') return navigate(`new-project/${node.dataset.mode || 'idea'}`);
-    if (actionName === 'new-project-save') { const name = shellMain().querySelector('#new-project-name')?.value || 'Untitled project'; state.project = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }); return navigate('home'); }
-    if (actionName === 'activate-project') { state.project = await api(`/api/projects/${node.dataset.projectId}`); return navigate('home'); }
+    if (actionName === 'new-project-save') { const name = shellMain().querySelector('#new-project-name')?.value || 'Untitled project'; state.project = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }); return navigate('produce'); }
+    if (actionName === 'activate-project') { state.project = await api(`/api/projects/${node.dataset.projectId}`); return navigate('produce'); }
     if (actionName === 'activate-version') return navigate('versions');
     if (actionName === 'generate' || actionName === 'ms-generate') {
       const promptNode = shellMain().querySelector('#prompt');

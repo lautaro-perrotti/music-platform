@@ -89,3 +89,57 @@ class StudioEvent(BaseModel):
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+
+
+# --- Produce: "Generate in Ableton, preview here." -------------------------
+# Ableton is the canonical musical state. A variation is editable material on a
+# Copilot-owned track in the Working Copy; the WAV preview is only an audition
+# artifact captured from that material and served by /api/artifacts/{id}/audio.
+
+class CapabilityState(StrEnum):
+    REAL = "REAL"
+    PARTIAL = "PARTIAL"
+    UNCERTIFIED = "UNCERTIFIED"
+    MISSING = "MISSING"
+
+
+class ProduceCapability(BaseModel):
+    name: str
+    state: CapabilityState
+    detail: str
+
+
+class VariationPreview(BaseModel):
+    artifact_id: str
+    bars: int
+    duration_s: float
+    capture_region_id: str | None = None
+
+    @property
+    def audio_url(self) -> str:
+        return f"/api/artifacts/{self.artifact_id}/audio"
+
+
+class VariationRecord(BaseModel):
+    variation_id: str
+    project_id: str
+    request_id: str
+    index: int
+    status: str  # PLANNED | CREATING_IN_ABLETON | CAPTURING | READY | KEPT | DISCARDED | FAILED
+    ableton_track_ref: str | None = None
+    ableton_clip_ref: str | None = None
+    preview: VariationPreview | None = None
+    plan_id: str | None = None
+    ownership: dict[str, Any] = Field(default_factory=dict)
+    safe_write: dict[str, Any] = Field(default_factory=dict)
+    region: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ProduceRequest(BaseModel):
+    scope: str  # TRACK | REGION
+    instruction: str
+    variations: int  # 1 | 3 | 5
+    length_bars: int | None = None  # 8 | 16 | 32 | None == Auto
+    start_qn: float = 0.0
+    end_qn: float | None = None

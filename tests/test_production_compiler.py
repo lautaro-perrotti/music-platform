@@ -45,7 +45,8 @@ def test_compiler_rejects_actions_outside_producer_execution_v1():
     plan = create_controlled_volume_plan(session=session, track=track, delta=-0.15)
     plan.actions[0].action_type = ProductionActionKind.CREATE_PATTERN
     result = ProductionCompiler().compile(plan, session=session)
-    assert result.status == "UNCERTIFIED_ACTION"
+    assert result.status == "PLAN_REJECTED"
+    assert "CREATE_PATTERN_REQUIRES_COPILOT_TRACK_COMPOUND_PLAN" in result.reasons
     assert result.intent is None
 
 

@@ -619,6 +619,23 @@ class SafeWriteExecutor:
                         created, project_identity=session.project_identity or ""
                     ).model_dump(mode="json")
                     resolved[step.action_id] = created
+                    # Bind dependent CREATE_PATTERN targets to the exact
+                    # authoritative track just created.  A pattern can never
+                    # resolve against a user track by name before this point.
+                    for dependent in intent.executions:
+                        if step.action_id not in dependent.rollback.depends_on:
+                            continue
+                        dependent_target = next(
+                            item for item in intent.targets if item.action_id == dependent.action_id
+                        )
+                        dependent_target.stable_id = created.stable_id
+                        dependent_target.name_at_plan = created.name
+                        dependent_target.locator = TargetLocator(track_index=created.index)
+                        dependent_target.fingerprint = TargetFingerprint(**fingerprint_track(created))
+                        dependent_target.ref = ref_from_track(
+                            created, project_identity=session.project_identity or ""
+                        ).model_dump(mode="json")
+                        resolved[dependent.action_id] = created
             except WriteInDoubt as exc:
                 unknown.append(step.action_id)
                 unknown.extend(not_attempted)
@@ -851,6 +868,18 @@ class SafeWriteExecutor:
                 # created track receives its PersistentObjectRef after write.
                 resolved[target.action_id] = None  # type: ignore[assignment]
                 continue
+            if step is not None and step.action_type == "CREATE_PATTERN":
+                dependencies = set(step.rollback.depends_on)
+                if len(dependencies) == 1:
+                    dependency = next(iter(dependencies))
+                    dependency_step = next(
+                        (item for item in intent.executions if item.action_id == dependency), None
+                    )
+                    if dependency_step is not None and dependency_step.action_type == "CREATE_TRACK":
+                        # This is intentionally unresolved until the CREATE_TRACK
+                        # readback binds the dependent target.
+                        resolved[target.action_id] = None  # type: ignore[assignment]
+                        continue
             ref = PersistentObjectRef.model_validate(target.ref)
             outcome = resolve_track(session, ref)
             if outcome.status is ResolveStatus.PROJECT_MISMATCH:
@@ -875,6 +904,11 @@ class SafeWriteExecutor:
             return {
                 "track_ids": [item.stable_id for item in session.tracks],
                 "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
+            }
+        if step.action_type == "CREATE_PATTERN" and session.track_by_name(target_name) is None:
+            return {
+                "track_ids": [item.stable_id for item in session.tracks],
+                "pattern_absent": True,
             }
         track = session.track_by_name(target_name)
         if track is None:
@@ -917,6 +951,16 @@ class SafeWriteExecutor:
                     return (MutationFailure.PRECONDITION_FAILED, "track count changed before CREATE_TRACK")
                 if any(item.name == str(step.arguments.get("name", "")) for item in _session.tracks):
                     return (MutationFailure.PRECONDITION_FAILED, "track name already exists")
+                if not step.rollback.prepared:
+                    return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
+                continue
+            if step.action_type == "CREATE_PATTERN":
+                if track is not None:
+                    return (MutationFailure.PRECONDITION_FAILED, "pattern target already exists")
+                if not step.arguments.get("notes"):
+                    return (MutationFailure.PRECONDITION_FAILED, "pattern notes are required")
+                if float(step.arguments.get("length_beats", 0)) <= 0:
+                    return (MutationFailure.PRECONDITION_FAILED, "pattern length must be positive")
                 if not step.rollback.prepared:
                     return (MutationFailure.PRECONDITION_FAILED, f"rollback not prepared for {step.action_id}")
                 continue
@@ -1046,6 +1090,8 @@ class SafeWriteExecutor:
     ) -> dict[str, Any]:
         if step.action_type == "CREATE_TRACK":
             return self._execute_create_track(step, session)
+        if step.action_type == "CREATE_PATTERN":
+            return self._execute_create_pattern(step, track, session)
         if step.action_type == "LOAD_DEVICE":
             return self._execute_load_device(step, track, session)
         if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
@@ -1135,6 +1181,51 @@ class SafeWriteExecutor:
             expected_revision=session.revision,
         )
         return {**result, "track_stable_id": track.stable_id, "track_index": track.index}
+
+    def _execute_create_pattern(
+        self, step: MutationExecution, track: TrackState | None, session: SessionState
+    ) -> dict[str, Any]:
+        """Create one editable MIDI clip and notes inside the SafeWrite txn."""
+        if track is None:
+            raise RuntimeError("CREATE_PATTERN target track is unresolved")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, step.operation)
+        clip_index = int(step.arguments["clip_index"])
+        length_beats = float(step.arguments["length_beats"])
+        from copilot.schemas.session import MidiNote
+
+        notes = [MidiNote.model_validate(note) for note in step.arguments.get("notes", [])]
+        try:
+            self.tools.daw.create_midi_clip(track.index, clip_index, length_beats)
+            self.tools.daw.replace_clip_notes(track.index, clip_index, notes)
+        except WriteInDoubt as exc:
+            live = self.tools.get_session_snapshot()
+            live_track = live.track_by_id(track.stable_id)
+            clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+            if clip is None or len(clip.notes) != len(notes):
+                raise WriteInDoubt(step.operation, command_id) from exc
+        live = self.tools.get_session_snapshot()
+        live_track = live.track_by_id(track.stable_id)
+        clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+        if clip is None or len(clip.notes) != len(notes):
+            raise RuntimeError("CREATE_PATTERN clip or notes missing on readback")
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, clip_index=clip_index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)),
+            target_name_at_apply=live_track.name,
+            operation=step.operation,
+            before={"clip_exists": False, "clip_index": clip_index},
+            after={"clip_stable_id": clip.stable_id, "note_count": len(clip.notes)},
+            expected_after={"clip_stable_id": clip.stable_id, "note_count": len(notes)},
+            inverse_operation="delete_clip",
+            inverse_params={},
+            asset_id=clip.stable_id,
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        step.expected_after["clip_stable_id"] = clip.stable_id
+        return {"clip_stable_id": clip.stable_id, "clip_index": clip_index, "note_count": len(clip.notes)}
 
     def _created_track_from_result(self, result: dict[str, Any]) -> TrackState:
         stable_id = str(result.get("track_stable_id") or "")
@@ -1368,6 +1459,24 @@ class SafeWriteExecutor:
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "created track missing on readback")
                 continue
+            if step.action_type == "CREATE_PATTERN":
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                track = session.track_by_id(target.stable_id)
+                clip_index = int(step.arguments["clip_index"])
+                clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+                expected_count = int(step.expected_after.get("note_count", 0))
+                matched = clip is not None and len(clip.notes) == expected_count
+                rows.append(MutationReadback(
+                    action_id=step.action_id,
+                    parameter="clip.notes",
+                    expected=expected_count,
+                    observed=None if clip is None else len(clip.notes),
+                    matched=matched,
+                    authoritative=True,
+                ))
+                if not matched:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "pattern notes missing on readback")
+                continue
             if step.action_type == "LOAD_DEVICE":
                 target = next(item for item in intent.targets if item.action_id == step.action_id)
                 track = session.track_by_id(target.stable_id)
@@ -1464,6 +1573,14 @@ class SafeWriteExecutor:
                 after_ids = {item.stable_id for item in after.tracks}
                 if target.stable_id not in after_ids or (after_ids - before_ids - {target.stable_id}):
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
+                continue
+            if step.action_type == "CREATE_PATTERN":
+                target_track = after.track_by_id(target.stable_id)
+                clip_index = int(step.arguments["clip_index"])
+                clip = next((item for item in target_track.clips if item.slot_index == clip_index), None)
+                expected_count = int(step.expected_after.get("note_count", 0))
+                if clip is None or len(clip.notes) != expected_count:
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_pattern_state"})
                 continue
             if step.action_type == "LOAD_DEVICE":
                 before_ids = set(guards[target.name_at_plan].get("device_ids", []))
@@ -1585,6 +1702,11 @@ class SafeWriteExecutor:
                 if present:
                     return rows, (MutationFailure.ROLLBACK_FAILED, "created track still present after rollback")
                 continue
+            if step.action_type == "CREATE_PATTERN":
+                # The dependent clip is checked indirectly by the CREATE_TRACK
+                # rollback below.  Keeping this branch avoids treating the
+                # now-deleted track as a missing user target.
+                continue
             if step.action_type == "LOAD_DEVICE":
                 target_track = session.track_by_id(target.stable_id)
                 device_id = str(step.expected_after.get("device_stable_id", ""))
@@ -1668,6 +1790,8 @@ class SafeWriteExecutor:
                     if before_fingerprints == after_fingerprints:
                         continue
                     unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
+                continue
+            if step.action_type == "CREATE_PATTERN":
                 continue
             post = snapshot_guard_state(restored, target.name_at_plan)
             diff = diff_guard_state(

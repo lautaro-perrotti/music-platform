@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from copilot.studio.service import StudioService
+from copilot.studio.service import GenerationBackendNotAvailable, ProduceExecutionBlocked, StudioService
 
 
 def _default_data_dir() -> Path:
@@ -65,7 +65,11 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return self._json({"projects": [p.model_dump(mode="json") for p in self.service.list_projects()]})
             if path == "/api/ableton/status":
                 return self._json(self.service.ableton_status())
+            if path == "/api/produce/capabilities":
+                return self._json(self.service.produce_capabilities())
             parts = [part for part in path.split("/") if part]
+            if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "variations":
+                return self._json(self.service.list_variations(parts[2]))
             if len(parts) == 3 and parts[0] == "api" and parts[1] == "projects":
                 project_id = parts[2]
                 return self._json(self.service.project_snapshot(project_id))
@@ -117,12 +121,20 @@ class StudioHandler(BaseHTTPRequestHandler):
                 # machine or mutate the durable store directly.
                 result = self.service.cancel_job(parts[2]) if parts[3] == "cancel" else self.service.retry_job(parts[2])
                 return self._json(result)
+            if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "produce":
+                return self._json(self.service.produce_generate(parts[2], self._body()), 202)
+            if len(parts) == 4 and parts[:2] == ["api", "variations"]:
+                return self._json(self.service.variation_action(parts[2], parts[3]))
             if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "actions":
                 body = self._body()
                 return self._json(self.service.workspace_action(parts[2], str(body.get("action") or ""), body.get("payload") or {}), 200)
             self._json({"error": "NOT_FOUND"}, 404)
         except KeyError as exc:
             self._json({"error": "NOT_FOUND", "detail": str(exc)}, 404)
+        except GenerationBackendNotAvailable as exc:
+            self._json(exc.to_dict(), 501)
+        except ProduceExecutionBlocked as exc:
+            self._json(exc.to_dict(), 409)
         except ValueError as exc:
             self._json({"error": str(exc)}, 422)
         except Exception as exc:

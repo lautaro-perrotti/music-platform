@@ -54,6 +54,7 @@ class ProductionCompiler:
             ProductionActionKind.SAMPLE_LOAD,
             ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
             ProductionActionKind.DEVICE_TWEAK,
+            ProductionActionKind.CREATE_PATTERN,
         })
     )
 
@@ -71,6 +72,17 @@ class ProductionCompiler:
                 uncertified_action_ids=unsupported,
                 reasons=("PLAN_CONTAINS_UNCERTIFIED_ACTIONS",),
             )
+        # The first real creative vertical slice is deliberately the only
+        # compound plan certified here: create a new Copilot MIDI track and
+        # put one editable pattern on it.  This is still one SafeWrite intent
+        # and one durable transaction, not a second writer or a general
+        # multi-action escape hatch.
+        if (
+            len(plan.actions) == 2
+            and plan.actions[0].action_type is ProductionActionKind.CREATE_TRACK
+            and plan.actions[1].action_type is ProductionActionKind.CREATE_PATTERN
+        ):
+            return self._compile_midi_variation(plan, session=session)
         if len(plan.actions) != 1:
             return ProductionCompileResult(
                 status="PLAN_REJECTED",
@@ -129,6 +141,11 @@ class ProductionCompiler:
                 status="COMPILED",
                 intent=intent,
                 certified_action_ids=(target_id,),
+            )
+        if action.action_type is ProductionActionKind.CREATE_PATTERN:
+            return ProductionCompileResult(
+                status="PLAN_REJECTED",
+                reasons=("CREATE_PATTERN_REQUIRES_COPILOT_TRACK_COMPOUND_PLAN",),
             )
         if action.action_type in {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD}:
             validated = validate_device_load_plan(plan, session=session)
@@ -265,4 +282,111 @@ class ProductionCompiler:
             status="COMPILED",
             intent=intent,
             certified_action_ids=(action.action_id,),
+        )
+
+    def _compile_midi_variation(
+        self, plan: MusicPlan, *, session: SessionState
+    ) -> ProductionCompileResult:
+        """Compile exactly CREATE_TRACK -> CREATE_PATTERN for one variation."""
+        create, pattern = plan.actions
+        create_validated = validate_create_track_plan(
+            plan.model_copy(update={"actions": [create]}), session=session
+        )
+        if create_validated.status.value != "READY_FOR_EXECUTION":
+            return ProductionCompileResult(
+                status="PLAN_REJECTED",
+                reasons=(create_validated.rejection_reason or "CREATE_TRACK_PLAN_REJECTED",),
+            )
+        params = pattern.params
+        if getattr(params, "kind", None) != "create_pattern":
+            return ProductionCompileResult(
+                status="PLAN_REJECTED", reasons=("PATTERN_PARAMS_INVALID",)
+            )
+        if not getattr(params, "notes", None):
+            return ProductionCompileResult(
+                status="PLAN_REJECTED", reasons=("PATTERN_NOTES_REQUIRED",)
+            )
+        if float(params.length_beats) <= 0:
+            return ProductionCompileResult(
+                status="PLAN_REJECTED", reasons=("PATTERN_LENGTH_INVALID",)
+            )
+        if not pattern.rollback or not pattern.rollback.prepared:
+            return ProductionCompileResult(
+                status="PLAN_REJECTED", reasons=("PATTERN_ROLLBACK_REQUIRED",)
+            )
+
+        track_name = create.params.track_name
+        create_id = create.action_id
+        pattern_id = pattern.action_id
+        create_target = MutationTarget(
+            action_id=create_id,
+            ref=create.target.ref,
+            name_at_plan=track_name,
+            fingerprint=TargetFingerprint(),
+            locator=None,
+            session_incarnation_id=session.session_incarnation_id or "",
+        )
+        # The pattern target intentionally has no pre-existing persistent ref.
+        # SafeWrite binds it to the newly-created track after CREATE_TRACK
+        # readback, and refuses any pattern action that is not dependent on it.
+        pattern_target = MutationTarget(
+            action_id=pattern_id,
+            ref={"object_type": "track", "project_identity": session.project_identity or "", "role": "midi", "name": track_name},
+            name_at_plan=track_name,
+            fingerprint=TargetFingerprint(),
+            locator=None,
+            session_incarnation_id=session.session_incarnation_id or "",
+        )
+        notes = [note.model_dump(mode="json") for note in params.notes]
+        intent = MutationIntent(
+            plan_id=plan.plan_id,
+            kind=KIND_PRODUCER_EXECUTION_V1,
+            user_intent=create.reason,
+            project_identity=session.project_identity or "",
+            expected_revision=session.revision,
+            expected_session_hash=session.state_hash,
+            expected_project_token=session.project_token or "",
+            expected_audible_token=session.audible_token or "",
+            expected_incarnation_id=session.session_incarnation_id or "",
+            targets=[create_target, pattern_target],
+            executions=[
+                MutationExecution(
+                    action_id=create_id,
+                    action_type="CREATE_TRACK",
+                    operation="create_midi_track",
+                    arguments={"name": track_name, "index": create.params.index_hint},
+                    expected_before={"track_count": len(session.tracks)},
+                    expected_after={"track_count": len(session.tracks) + 1},
+                    certified=True,
+                    rollback=MutationRollback(
+                        inverse_operation="delete_track",
+                        reversibility=RollbackReversibility.INDEPENDENT,
+                        prepared=True,
+                    ),
+                ),
+                MutationExecution(
+                    action_id=pattern_id,
+                    action_type="CREATE_PATTERN",
+                    operation="create_pattern",
+                    arguments={
+                        "clip_index": int(params.clip_index),
+                        "length_beats": float(params.length_beats),
+                        "notes": notes,
+                    },
+                    expected_before={"clip_exists": False, "clip_index": int(params.clip_index)},
+                    expected_after={"clip_index": int(params.clip_index), "note_count": len(notes)},
+                    certified=True,
+                    rollback=MutationRollback(
+                        inverse_operation="delete_clip",
+                        depends_on=[create_id],
+                        reversibility=RollbackReversibility.DEPENDENT,
+                        prepared=True,
+                    ),
+                ),
+            ],
+        )
+        return ProductionCompileResult(
+            status="COMPILED",
+            intent=intent,
+            certified_action_ids=(create_id, pattern_id),
         )

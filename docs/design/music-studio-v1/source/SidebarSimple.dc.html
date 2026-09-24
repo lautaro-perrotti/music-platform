@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar simple</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<nav aria-label="Main" style="width:212px;height:788px;box-sizing:border-box;background:#141518;border-right:1px solid #26292E;display:flex;flex-direction:column;padding:12px 10px;font-family:Geist,system-ui,sans-serif;color:#EDEBE7">
+<div style="display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{main}}" as="it" hint-placeholder-count="3">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+</a>
+</sc-for>
+</div>
+<sc-if value="{{adv}}" hint-placeholder-val="{{false}}">
+<div style="padding:18px 10px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Debug</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{debug}}" as="it" hint-placeholder-count="10">
+<a href="{{it.href}}" style="display:flex;align-items:center;height:28px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:12.5px;color:#8D8A85">{{it.label}}</a>
+</sc-for>
+</div>
+</sc-if>
+<div style="flex:1"></div>
+<div style="border-top:1px solid #26292E;padding-top:8px">
+<div style="display:flex;align-items:center;justify-content:space-between;height:36px;padding:0 10px">
+<span style="font-size:12.5px;color:#8D8A85">Advanced / Debug</span>
+<button role="switch" aria-checked="{{advOn}}" aria-label="Advanced / Debug" style="width:30px;height:18px;border-radius:9px;border:0;padding:2px;background:{{advTrack}};display:flex;justify-content:{{advJustify}};cursor:pointer"><span style="width:14px;height:14px;border-radius:50%;background:#ECE8E1;display:block"></span></button>
+</div>
+</div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["produce","library","settings"],"default":"produce"},"advanced":{"editor":"boolean","default":false},"$preview":{"width":212,"height":788}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var a = this.props.active || 'produce';
+    var adv = this.props.advanced === true || this.props.advanced === 'true';
+    var M = [
+      ['produce', 'Produce', 'Produce.dc.html', 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M18.5 16v4M16.5 18h4'],
+      ['library', 'Library', 'Projects.dc.html', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
+      ['settings', 'Settings', 'Providers.dc.html', 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4']
+    ];
+    var D = [['Evidence / analysis', 'ReferenceDetail.dc.html'], ['Astra response', 'ChatResult.dc.html'], ['Capture status', 'Ableton.dc.html'], ['Journals and state tokens', 'ApplyVersion.dc.html'], ['Jobs and logs', 'Jobs.dc.html'], ['Stem review', 'StemCompare.dc.html'], ['Versions and provenance', 'Versions.dc.html'], ['Studio', 'Studio.dc.html'], ['System health', 'SystemHealth.dc.html']];
+    return {
+      main: M.map(function (m) { var on = m[0] === a; return { label: m[1], href: m[2], d: m[3], bg: on ? '#24262B' : 'transparent', fg: on ? '#EDEBE7' : '#B0ADA7', ic: on ? '#5EC6D3' : '#8D8A85', fw: on ? '500' : '400' }; }),
+      debug: D.map(function (d) { return { label: d[0], href: d[1] }; }),
+      adv: adv, advOn: adv ? 'true' : 'false', advTrack: adv ? '#5EC6D3' : '#34373D', advJustify: adv ? 'flex-end' : 'flex-start'
+    };
+  }
+}
+</script>
+</body>
+</html>

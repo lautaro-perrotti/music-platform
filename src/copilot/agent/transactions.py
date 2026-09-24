@@ -517,6 +517,31 @@ class TransactionManager:
             if actual == expected:
                 return ReconcileResult.SATISFIED
             return ReconcileResult.ABSENT
+        if operation == "create_pattern":
+            expected_clip_id = str(expected_after.get("clip_stable_id", ""))
+            matches = [
+                clip
+                for track in session.tracks
+                for clip in track.clips
+                if expected_clip_id and clip.stable_id == expected_clip_id
+            ]
+            if len(matches) == 1:
+                return ReconcileResult.SATISFIED
+            if matches:
+                return ReconcileResult.AMBIGUOUS
+            clip_index = expected_after.get("clip_index")
+            note_count = expected_after.get("note_count")
+            candidates = [
+                clip
+                for track in session.tracks
+                for clip in track.clips
+                if clip_index is not None
+                and clip.slot_index == int(clip_index)
+                and (note_count is None or len(clip.notes) == int(note_count))
+            ]
+            if len(candidates) == 1:
+                return ReconcileResult.SATISFIED
+            return ReconcileResult.ABSENT if not candidates else ReconcileResult.AMBIGUOUS
         return ReconcileResult.AMBIGUOUS
 
     def _value_matches(self, session: SessionState, expected_after: dict[str, Any]) -> bool:
