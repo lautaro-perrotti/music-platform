@@ -43,6 +43,21 @@ runtime visual layer was removed instead of being overridden.
   source layout, waveform, and working navigation/action links.
 - Musical writes: `0`.
 
+### Create simple - SOURCE TRANSPLANT ACTIVE
+
+- Source: `source/Create.dc.html`.
+- The simple create route now uses the source composition: brief editor,
+  starting point, duration, version count, vocals, quality, references,
+  Lucas tip, recent prompts, and generation action.
+- Generation remains connected to the existing API contract. Duration and
+  candidate count are submitted through the existing `generate` action;
+  recent prompts and the version stepper are interactive local controls.
+- Missing reference content falls back to an explicit source-shaped mock; no
+  new visual language or provider behavior was invented.
+- Browser validation: `http://127.0.0.1:8791/#create`; visual layout renders,
+  recent prompt selection works, and version count changes work.
+- Musical writes: `0`.
+
 ## Queue
 
 1. Finish Projects comparison and acceptance.
