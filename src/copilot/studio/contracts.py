@@ -17,6 +17,8 @@ class JobStatus(StrEnum):
     FAILED = "FAILED"
     BLOCKED = "BLOCKED"
     CANCELLED = "CANCELLED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    IN_DOUBT = "IN_DOUBT"
 
 
 class ProjectRecord(BaseModel):

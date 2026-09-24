@@ -60,7 +60,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             if path == "/ui" or path.startswith("/ui/"):
                 return self._serve_ui(path)
             if path == "/api/health":
-                return self._json({"ok": True, "service": "music-studio", "musical_writes": 0})
+                return self._json({"ok": True, "service": "music-studio", "mode": self.service.mode, "musical_writes": 0})
             if path == "/api/projects":
                 return self._json({"projects": [p.model_dump(mode="json") for p in self.service.list_projects()]})
             if path == "/api/ableton/status":
@@ -69,6 +69,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[0] == "api" and parts[1] == "projects":
                 project_id = parts[2]
                 return self._json(self.service.project_snapshot(project_id))
+            if len(parts) == 4 and parts[:3] == ["api", "projects", parts[2]] and parts[3] == "workspace":
+                return self._json(self.service.workspace_snapshot(parts[2]))
             if len(parts) == 4 and parts[:3] == ["api", "projects", parts[2]] and parts[3] in {"jobs", "versions"}:
                 project_id = parts[2]
                 snapshot = self.service.project_snapshot(project_id)
@@ -82,6 +84,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                     return self._json({"events": [e.model_dump(mode="json") for e in self.service.store.events_since(job_id, after)]})
                 if len(parts) == 5 and parts[3] == "events" and parts[4] == "stream":
                     return self._stream_events(job_id, int((query.get("after") or ["0"])[0]))
+                if len(parts) == 4 and parts[3] in {"cancel", "retry"}:
+                    return self._json(self.service.cancel_job(job_id) if parts[3] == "cancel" else self.service.retry_job(job_id))
             if len(parts) == 4 and parts[:2] == ["api", "artifacts"] and parts[3] == "audio":
                 return self._serve_audio(parts[2])
             self._json({"error": "NOT_FOUND"}, 404)
@@ -107,6 +111,15 @@ class StudioHandler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ["api", "candidates"] and parts[3] == "keep":
                 version = self.service.keep_candidate(parts[2])
                 return self._json(version.model_dump(mode="json"), 201)
+            if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] in {"cancel", "retry"}:
+                # Job lifecycle mutations are explicit POSTs.  Keep the operation
+                # behind the service so the browser cannot invent a second state
+                # machine or mutate the durable store directly.
+                result = self.service.cancel_job(parts[2]) if parts[3] == "cancel" else self.service.retry_job(parts[2])
+                return self._json(result)
+            if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "actions":
+                body = self._body()
+                return self._json(self.service.workspace_action(parts[2], str(body.get("action") or ""), body.get("payload") or {}), 200)
             self._json({"error": "NOT_FOUND"}, 404)
         except KeyError as exc:
             self._json({"error": "NOT_FOUND", "detail": str(exc)}, 404)
@@ -203,8 +216,6 @@ class StudioHandler(BaseHTTPRequestHandler):
 
 def run_server(*, host: str = "127.0.0.1", port: int = 8765, data_dir: Path | None = None) -> int:
     service = StudioService(data_dir or _default_data_dir())
-    if not service.list_projects():
-        service.create_project("Untitled Studio Project")
     handler = type("BoundStudioHandler", (StudioHandler,), {"service": service, "static_root": Path(__file__).parent / "static"})
     server = ThreadingHTTPServer((host, port), handler)
     print(json.dumps({"ok": True, "url": f"http://{host}:{port}/", "data_dir": str(service.data_dir), "musical_writes": 0}), flush=True)

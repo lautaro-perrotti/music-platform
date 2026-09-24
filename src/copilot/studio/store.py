@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -122,6 +123,21 @@ class StudioStore:
                     name TEXT NOT NULL,
                     source_candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
                     manifest_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS studio_state (
+                    project_id TEXT NOT NULL REFERENCES projects(project_id),
+                    state_key TEXT NOT NULL,
+                    value_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(project_id, state_key)
+                );
+                CREATE TABLE IF NOT EXISTS activity (
+                    activity_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(project_id),
+                    kind TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
                 """
@@ -309,3 +325,34 @@ class StudioStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM jobs WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
         return [self._job(row) for row in rows]
+
+    def get_state(self, project_id: str, key: str, default: Any = None) -> Any:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value_json FROM studio_state WHERE project_id=? AND state_key=?", (project_id, key)).fetchone()
+        return _decode(row["value_json"]) if row else default
+
+    def set_state(self, project_id: str, key: str, value: Any) -> None:
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO studio_state(project_id,state_key,value_json,updated_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(project_id,state_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+                (project_id, key, _json(value), now),
+            )
+
+    def all_state(self, project_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT state_key,value_json FROM studio_state WHERE project_id=?", (project_id,)).fetchall()
+        return {row["state_key"]: _decode(row["value_json"]) for row in rows}
+
+    def add_activity(self, project_id: str, kind: str, message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        activity = {"activity_id": f"activity_{uuid.uuid4().hex[:16]}", "project_id": project_id,
+                    "kind": kind, "message": message, "payload": payload or {}, "created_at": utc_now()}
+        with self._lock, self._connect() as conn:
+            conn.execute("INSERT INTO activity VALUES(?,?,?,?,?,?)", (activity["activity_id"], project_id, kind, message, _json(payload or {}), activity["created_at"]))
+        return activity
+
+    def list_activity(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM activity WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
+        return [{"activity_id": r["activity_id"], "project_id": project_id, "kind": r["kind"], "message": r["message"], "payload": _decode(r["payload_json"]), "created_at": r["created_at"]} for r in rows]

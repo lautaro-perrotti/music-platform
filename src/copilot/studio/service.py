@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,7 @@ from copilot.studio.contracts import (
     VersionRecord,
 )
 from copilot.studio.store import StudioStore, utc_now
+from copilot.studio.simulation import SimulatedMusicProvider
 
 
 class StudioService:
@@ -31,20 +33,29 @@ class StudioService:
         self.store = StudioStore(data_dir)
         self.data_dir = Path(data_dir).resolve()
         self.provider_factory = provider_factory or self._default_provider
+        self.mode = os.environ.get("COPILOT_STUDIO_MODE", "HYBRID").upper()
         self._threads: dict[str, threading.Thread] = {}
         self._threads_lock = threading.Lock()
+        self._cancelled_jobs: set[str] = set()
 
     def _default_provider(self, requested: str | None) -> Any | None:
         provider_id = (requested or "").strip().lower()
+        if provider_id in {"simulation", "simulated", "demo"}:
+            return SimulatedMusicProvider()
         if provider_id in {"ace", "ace-step", "acestep"} or (not provider_id and os.environ.get("ACESTEP_API_URL")):
             return AceStepProvider()
         if provider_id in {"elevenlabs", "elevenlabs-music"} or (not provider_id and os.environ.get("ELEVENLABS_API_KEY")):
             return ElevenLabsMusicProvider()
+        if self.mode in {"HYBRID", "SIMULATION"}:
+            return SimulatedMusicProvider()
         return None
 
     def create_project(self, name: str) -> ProjectRecord:
         project_id = f"project_{uuid.uuid4().hex[:16]}"
-        return self.store.create_project(project_id, name)
+        project = self.store.create_project(project_id, name, {"mode": self.mode, "current_version_id": None})
+        self.store.set_state(project_id, "workspace", {"mode": self.mode, "references": [], "chat": [], "reviews": [], "stems": [], "voice": [], "mixes": [], "studio": {"selected_region": None, "operations": []}, "notifications": []})
+        self.store.add_activity(project_id, "project.created", f"Project created: {project.name}")
+        return project
 
     def list_projects(self) -> list[ProjectRecord]:
         return self.store.list_projects()
@@ -94,11 +105,17 @@ class StudioService:
         return job, True
 
     def _emit_status(self, job_id: str, status: JobStatus, stage: str, payload: dict[str, Any] | None = None) -> None:
+        if status not in {JobStatus.CANCEL_REQUESTED, JobStatus.CANCELLED} and self._is_cancelled(job_id):
+            return
         job = self.store.update_job(job_id, status=status, current_stage=stage)
         body = {"status": status.value, "stage": stage}
         if payload:
             body.update(payload)
         self.store.append_event(job_id, "job.status", body)
+
+    def _is_cancelled(self, job_id: str) -> bool:
+        with self._threads_lock:
+            return job_id in self._cancelled_jobs
 
     def _run_job(self, job_id: str) -> None:
         try:
@@ -106,7 +123,11 @@ class StudioService:
             if job is None:
                 return
             brief = GenerationBrief.model_validate(job.brief)
+            if self._is_cancelled(job_id):
+                return
             self._emit_status(job_id, JobStatus.QUEUED, "queued")
+            if self.mode == "SIMULATION" and os.environ.get("STUDIO_SIMULATION_FAST", "1") != "1":
+                time.sleep(0.35)
             self._emit_status(job_id, JobStatus.PROVISIONING, "provider_selection")
             requested = None if job.provider_id in {None, "", "auto"} else job.provider_id
             provider = self.provider_factory(requested)
@@ -129,6 +150,8 @@ class StudioService:
             output_dir = self.data_dir / "provider_runs" / job_id
             output_dir.mkdir(parents=True, exist_ok=True)
             for ordinal in range(1, brief.candidate_count + 1):
+                if self._is_cancelled(job_id):
+                    return
                 request_id = f"{job_id}-candidate-{ordinal:02d}"
                 request = GeneratorRequest(
                     request_id=request_id, brief=brief, seed=1721 + ordinal - 1,
@@ -146,7 +169,11 @@ class StudioService:
                 completed = len(self.store.list_candidates(job_id))
                 self.store.update_job(job_id, completed_candidates=completed, current_stage="generation")
                 self.store.append_event(job_id, "candidate.progress", {"ordinal": ordinal, "completed_candidates": completed, "requested_candidates": brief.candidate_count})
+                if descriptor.provider_id == "simulated-music" and os.environ.get("STUDIO_SIMULATION_FAST", "1") != "1":
+                    time.sleep(0.45)
             completed = len(self.store.list_candidates(job_id))
+            if self._is_cancelled(job_id):
+                return
             if completed:
                 self._emit_status(job_id, JobStatus.REVIEW_REQUIRED, "review", {"completed_candidates": completed})
                 self._emit_status(job_id, JobStatus.SUCCEEDED, "ready", {"completed_candidates": completed})
@@ -196,6 +223,29 @@ class StudioService:
             raise KeyError(job_id)
         return {"job": job.model_dump(mode="json"), "candidates": [c.model_dump(mode="json") for c in self.store.list_candidates(job_id)]}
 
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        if job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.BLOCKED, JobStatus.CANCELLED}:
+            return self.get_job(job_id)
+        with self._threads_lock:
+            self._cancelled_jobs.add(job_id)
+        self._emit_status(job_id, JobStatus.CANCEL_REQUESTED, "cancel_requested")
+        self._emit_status(job_id, JobStatus.CANCELLED, "cancelled")
+        self.store.add_activity(job.project_id, "job.cancelled", f"Job cancelled: {job_id}")
+        return self.get_job(job_id)
+
+    def retry_job(self, job_id: str) -> dict[str, Any]:
+        job = self.store.get_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        retry_key = f"retry:{job_id}:{uuid.uuid4().hex[:8]}"
+        brief = dict(job.brief)
+        retry_job, _ = self.submit_generation(job.project_id, brief, idempotency_key=retry_key)
+        self.store.add_activity(job.project_id, "job.retry", f"Retry started for {job_id}", {"attempt_of": job_id, "retry_job_id": retry_job.job_id})
+        return {"job": retry_job.model_dump(mode="json"), "attempt_of": job_id}
+
     def keep_candidate(self, candidate_id: str) -> VersionRecord:
         candidate = self.store.get_candidate(candidate_id)
         if candidate is None:
@@ -223,6 +273,8 @@ class StudioService:
         )
         self.store.create_version(version)
         self.store.append_event(job.job_id, "version.created", version.model_dump(mode="json"))
+        self.store.set_state(job.project_id, "active_version_id", version.version_id)
+        self.store.add_activity(job.project_id, "version.created", f"{version.name} kept from {candidate.label}", {"version_id": version.version_id, "candidate_id": candidate_id})
         return version
 
     def project_snapshot(self, project_id: str) -> dict[str, Any]:
@@ -231,7 +283,59 @@ class StudioService:
             "project": project.model_dump(mode="json"),
             "jobs": [job.model_dump(mode="json") for job in self.store.list_jobs(project_id)],
             "versions": [version.model_dump(mode="json") for version in self.store.list_versions(project_id)],
+            "workspace": self.store.get_state(project_id, "workspace", {}),
+            "activity": self.store.list_activity(project_id),
+            "mode": self.mode,
         }
+
+    def workspace_snapshot(self, project_id: str) -> dict[str, Any]:
+        self.get_project(project_id)
+        return self.project_snapshot(project_id)
+
+    def workspace_action(self, project_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.get_project(project_id)
+        workspace = self.store.get_state(project_id, "workspace", {})
+        if action == "project.rename":
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                raise ValueError("PROJECT_NAME_REQUIRED")
+            with self.store._lock, self.store._connect() as conn:
+                conn.execute("UPDATE projects SET name=?, updated_at=? WHERE project_id=?", (name, utc_now(), project_id))
+            self.store.add_activity(project_id, "project.renamed", f"Project renamed to {name}")
+        elif action == "reference.add":
+            reference = {"reference_id": f"reference_{uuid.uuid4().hex[:12]}", "name": str(payload.get("name") or "Demo reference"), "rights": str(payload.get("rights") or "UNKNOWN"), "purposes": list(payload.get("purposes") or ["groove"]), "status": "REGISTERED", "analysis_source": None}
+            workspace.setdefault("references", []).append(reference)
+            self.store.add_activity(project_id, "reference.added", f"Added reference: {reference['name']}", reference)
+        elif action == "reference.analyze":
+            reference_id = payload.get("reference_id")
+            for reference in workspace.setdefault("references", []):
+                if reference.get("reference_id") == reference_id:
+                    reference.update({"status": "ANALYZED", "analysis_source": "SIMULATED", "tempo": 128.0, "key": "F minor", "sections": ["Intro", "Groove", "Drop", "Break", "Outro"], "energy": [0.2, 0.55, 0.9, 0.35, 0.18]})
+                    self.store.add_activity(project_id, "reference.analyzed", f"Reference analyzed: {reference['name']}", {"analysis_source": "SIMULATED"})
+                    break
+        elif action == "chat.send":
+            message = str(payload.get("message") or "").strip()
+            if not message:
+                raise ValueError("CHAT_MESSAGE_REQUIRED")
+            workspace.setdefault("chat", []).append({"role": "user", "message": message, "origin": "USER"})
+            response = {"role": "assistant", "message": "I can make that change as a simulated producer proposal. I will preserve the current version and create a reviewable derived version.", "origin": "SIMULATED_PRODUCER", "proposal": {"kind": "GENERATE_VARIATION", "safe": True}}
+            workspace["chat"].append(response)
+            self.store.add_activity(project_id, "chat.message", "Producer conversation updated", {"origin": "SIMULATED_PRODUCER"})
+        elif action in {"studio.operation", "voice.generate", "stems.generate", "mix.run", "ableton.apply"}:
+            record = {"operation_id": f"op_{uuid.uuid4().hex[:12]}", "kind": action, "status": "SIMULATED", "payload": payload, "provenance": "SIMULATED", "created_at": utc_now()}
+            key = "studio" if action == "studio.operation" else "voice" if action == "voice.generate" else "stems" if action == "stems.generate" else "mixes" if action == "mix.run" else "ableton"
+            workspace.setdefault(key, []).append(record) if isinstance(workspace.get(key), list) else workspace.__setitem__(key, [record])
+            if action == "ableton.apply":
+                record.update({"status": "VERIFIED_SIMULATED", "real_ableton_writes": 0, "stages": ["preparing", "applying", "verifying", "verified"]})
+            self.store.add_activity(project_id, action, f"{action.replace('.', ' ').title()} simulated", {"provenance": "SIMULATED"})
+        elif action == "compare.review":
+            review = {"review_id": f"review_{uuid.uuid4().hex[:12]}", "kind": payload.get("kind", "candidate"), "choice": payload.get("choice", "TOO_CLOSE"), "notes": payload.get("notes", ""), "created_at": utc_now()}
+            workspace.setdefault("reviews", []).append(review)
+            self.store.add_activity(project_id, "review.created", "Comparison review saved", review)
+        else:
+            raise ValueError("UNSUPPORTED_WORKSPACE_ACTION")
+        self.store.set_state(project_id, "workspace", workspace)
+        return self.workspace_snapshot(project_id)
 
     def ableton_status(self) -> dict[str, Any]:
         from copilot.daw.detect import detect_ableton
