@@ -1,0 +1,2 @@
+import { define, attr } from '../lib/define.js'; import { wf } from '../lib/waveform.js';
+define('ms-waveform', el => `<svg class="wave" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="${attr(el,'label','Audio waveform')}"><path d="${wf(attr(el,'seed','7'),{jag:.7})}"/></svg>`, `.wave{display:block;width:100%;height:64px;background:var(--ms-shell);border-radius:var(--ms-radius-badge)}path{fill:var(--ms-text-soft);fill-opacity:.72}`);

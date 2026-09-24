@@ -1,0 +1,1 @@
+import { define } from '../lib/define.js'; define('ms-overlay', el => `<div class="overlay"><slot></slot></div>`, `.overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:20px;background:color-mix(in srgb,var(--ms-app) 72%,transparent)}`);

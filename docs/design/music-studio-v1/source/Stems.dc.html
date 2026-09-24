@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stems</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="stems" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+<div style="display:flex;align-items:flex-end;gap:12px">
+<div style="flex:1;display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Stems</h1><div style="font-size:12.5px;color:#8D8A85">From Afro Groove v7 · full mix · 4 separations compared · 01:40</div></div>
+<div role="group" aria-label="Mode" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="true" style="height:28px;padding:0 12px;border:0;border-radius:4px;background:#34373D;font-size:12.5px">Simple</button><button aria-pressed="false" style="height:28px;padding:0 12px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Advanced</button></div>
+<button style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Export stems</button>
+<a href="Studio.dc.html" style="height:34px;padding:0 14px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;font-weight:600;font-size:13px">Use as Studio layers</a>
+</div>
+<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:#17181B;border:1px solid #26292E">
+<span style="font-size:13px;font-weight:600">Best per stem</span>
+<span style="font-size:12.5px;color:#8D8A85">Different separations can win different stems. Your picks are saved with v7.</span>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;overflow:hidden">
+<sc-for list="{{stems}}" as="s" hint-placeholder-count="5">
+<div style="display:flex;align-items:center;gap:14px;height:92px;padding:0 16px;border-bottom:1px solid #222429;opacity:{{s.op}}">
+<div style="width:120px;display:flex;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:2px;background:{{s.c}}"></span><span style="font-size:12px;font-weight:600;letter-spacing:.06em">{{s.n}}</span></div>
+<div style="display:flex;gap:4px">
+<button aria-label="Play {{s.n}}" style="width:30px;height:30px;border-radius:50%;border:1px solid #34373D;background:transparent;display:flex;align-items:center;justify-content:center"><svg width="11" height="11" viewBox="0 0 24 24" fill="#B0ADA7" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"></path></svg></button>
+<button aria-label="Solo {{s.n}}" style="width:30px;height:30px;border-radius:6px;border:1px solid #2B2E34;background:{{s.sb}};color:{{s.sf}};font-size:11px;font-weight:600">S</button>
+<button aria-label="Mute {{s.n}}" style="width:30px;height:30px;border-radius:6px;border:1px solid #2B2E34;background:transparent;color:#8D8A85;font-size:11px;font-weight:600">M</button>
+</div>
+<div style="flex:1;height:60px;position:relative;background:#141518;border-radius:4px">
+<sc-if value="{{s.w}}" hint-placeholder-val="{{true}}"><svg width="100%" height="60" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{s.w}}" fill="{{s.c}}" fill-opacity="0.85"></path></svg></sc-if>
+<sc-if value="{{s.none}}" hint-placeholder-val="{{false}}"><div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:14px;font-size:12px;color:#8D8A85">No vocals detected in this mix</div></sc-if>
+<div style="position:absolute;left:25%;top:0;bottom:0;width:2px;background:#5EC6D3"></div>
+</div>
+<div style="width:210px;display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+<span style="font-size:13px;font-weight:500">{{s.pick}}</span>
+<span style="font-size:11.5px;color:{{s.pc}}">{{s.state}}</span>
+</div>
+<a href="StemCompare.dc.html" style="height:30px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;font-size:12px">Compare 4</a>
+</div>
+</sc-for>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Drums · Candidate C" sub="Stem of Afro Groove v7 · soloed" seed="11" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+var ENV={drums:[[0,.04],[.09,.06],[.095,.8],[.27,.85],[.275,.08],[.316,.3],[.361,.5],[.365,1],[.542,.95],[.548,.8],[.813,.5],[.82,.35],[1,.05]],bass:[[0,.02],[.09,.03],[.095,.7],[.27,.75],[.275,.05],[.361,.1],[.365,.95],[.542,.95],[.548,.7],[.813,.7],[.82,.3],[1,.02]],keys:[[0,.55],[.18,.6],[.27,.62],[.275,.8],[.361,.7],[.542,.65],[.813,.6],[1,.3]],other:[[0,.2],[.18,.3],[.275,.55],[.361,.85],[.365,.3],[.542,.35],[.813,.3],[1,.15]]};
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      stems: [
+        { n: 'DRUMS', c: '#D98A5B', w: wf(11, { n: 260, env: ENV.drums, jag: .8 }), none: false, pick: 'Candidate C', state: '✓ Selected by you', pc: '#5CC08C', op: 1, sb: '#1E3437', sf: '#5EC6D3' },
+        { n: 'BASS', c: '#6FA0E6', w: wf(13, { n: 260, env: ENV.bass, jag: .3 }), none: false, pick: 'Candidate A', state: '✓ Selected by you', pc: '#5CC08C', op: 1, sb: 'transparent', sf: '#8D8A85' },
+        { n: 'HARMONIC', c: '#A9C46A', w: wf(17, { n: 260, env: ENV.keys, jag: .3 }), none: false, pick: 'Candidate D', state: '✓ Selected by you', pc: '#5CC08C', op: 1, sb: 'transparent', sf: '#8D8A85' },
+        { n: 'VOCALS', c: '#D68CB2', w: false, none: true, pick: '—', state: 'Nothing to separate', pc: '#8D8A85', op: 0.7, sb: 'transparent', sf: '#8D8A85' },
+        { n: 'OTHER', c: '#A09AC8', w: wf(23, { n: 260, env: ENV.other, jag: .6 }), none: false, pick: 'Not picked yet', state: '◆ Review required', pc: '#93A7FF', op: 1, sb: 'transparent', sf: '#8D8A85' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

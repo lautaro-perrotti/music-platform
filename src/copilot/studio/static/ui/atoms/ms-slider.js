@@ -1,0 +1,1 @@
+import { define, attr } from '../lib/define.js'; define('ms-slider', el => `<input aria-label="${attr(el,'label','Value')}" type="range" min="${attr(el,'min','0')}" max="${attr(el,'max','100')}" value="${attr(el,'value','50')}" />`, `input{width:100%;accent-color:var(--ms-cue)}`);

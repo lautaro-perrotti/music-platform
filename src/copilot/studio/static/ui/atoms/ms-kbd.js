@@ -1,0 +1,1 @@
+import { define } from '../lib/define.js'; define('ms-kbd', el => `<kbd>${el.textContent || el.getAttribute('key') || ''}</kbd>`, `kbd{font:11px var(--ms-font-mono);padding:2px 6px;border:1px solid var(--ms-line-strong);border-radius:var(--ms-radius-badge);color:var(--ms-muted);background:var(--ms-raised)}`);

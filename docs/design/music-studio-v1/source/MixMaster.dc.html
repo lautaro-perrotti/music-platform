@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mix and master</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" version="Stronger Drop 2 v8" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="mix" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:22px 32px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:14px">
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Mix / Master</h1>
+<div role="tablist" aria-label="Stage" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button role="tab" aria-selected="true" style="height:28px;padding:0 14px;border:0;border-radius:4px;background:#34373D;font-size:12.5px">Mix</button><button role="tab" aria-selected="false" style="height:28px;padding:0 14px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Master</button></div>
+<span style="font-size:12.5px;color:#8D8A85">Stronger Drop 2 v8 · Working Copy in Ableton</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px">
+<span style="font-size:12px;color:#8D8A85;width:92px">Mix direction</span>
+<sc-for list="{{dirs}}" as="d" hint-placeholder-count="6"><button aria-pressed="{{d.sel}}" style="height:32px;padding:0 14px;border-radius:6px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};font-size:13px">{{d.l}}</button></sc-for>
+<span style="flex:1"></span>
+<button style="height:32px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#5CC08C;font-size:12.5px">✓ Mix analyzed</button>
+<button style="height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Generate mix strategy</button>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px">
+<section style="background:#161A1C;border:1px solid #283236;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">Mix analysis</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8FB8BE;border:1px solid #2F4A4E;border-radius:4px;padding:2px 6px">Measured</span></div>
+<sc-for list="{{facts}}" as="f" hint-placeholder-count="5"><div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0"><span style="color:#8D8A85">{{f.k}}</span><span style="font-family:'Geist Mono',monospace;font-size:12px">{{f.v}}</span></div></sc-for>
+</section>
+<section style="background:#1C1916;border:1px solid #3A3129;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:20px;height:20px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">L</span><span style="font-size:13px;font-weight:600">Mix strategy</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#D9B98F;border:1px solid #4A3E2E;border-radius:4px;padding:2px 6px">Musical judgment</span></div>
+<div style="font-size:13px;line-height:1.6;color:#D6D0C6">Kick and bass crowd each other around 60 Hz in both drops. For warm and punchy, I’d pull the bass back slightly, lift the Rhodes in the breaks, and leave the drums alone.</div>
+<div style="font-size:12px;color:#A89E90">Based on the analysis on the left and your direction: Warm, Punchy.</div>
+</section>
+</div>
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid #26292E"><span style="font-size:13px;font-weight:600;flex:1">Safe adjustments</span><span style="font-size:12px;color:#8D8A85">Each change is read back from Live and rolled back if it doesn’t match</span></div>
+<sc-for list="{{adj}}" as="a" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;border-bottom:1px solid #222429;opacity:{{a.op}}">
+<span style="width:16px;height:16px;border-radius:4px;border:1.5px solid {{a.cb}};background:{{a.cf}};color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">{{a.m}}</span>
+<span style="flex:1;font-size:13px">{{a.t}}</span>
+<span style="font-family:'Geist Mono',monospace;font-size:12px;color:#B0ADA7;width:90px">{{a.v}}</span>
+<span style="font-size:12px;color:{{a.sc}};width:220px;text-align:right">{{a.s}}</span>
+</div>
+</sc-for>
+</section>
+<div style="display:flex;align-items:center;gap:10px">
+<div style="flex:1;display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:#17181B;border:1px solid #26292E">
+<div role="group" aria-label="Before or after" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Before</button><button aria-pressed="true" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:#ECE8E1;color:#141518;font-weight:600;font-size:12px">After</button></div>
+<svg width="100%" height="28" viewBox="0 0 1000 100" preserveAspectRatio="none" style="flex:1" aria-hidden="true"><path d="{{song}}" fill="#6A6D73"></path></svg>
+<span style="font-size:12px;color:#5CC08C;white-space:nowrap">✓ Volume matched</span>
+</div>
+<a href="ApplyVersion.dc.html" style="height:40px;padding:0 16px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;font-weight:600;font-size:13px">Apply 3 adjustments…</a>
+</div>
+<section style="display:flex;align-items:center;gap:10px;border-top:1px solid #26292E;padding-top:12px">
+<span style="font-size:12px;color:#8D8A85;width:92px">Master preview</span>
+<sc-for list="{{masters}}" as="m" hint-placeholder-count="4"><button style="flex:1;padding:8px 12px;border-radius:6px;background:#17181B;border:1px solid #26292E;text-align:left;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px">{{m.l}}</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85">{{m.d}}</span></button></sc-for>
+</section>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Mix · after" sub="Stronger Drop 2 v8 · preview" ab="B" seed="8" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    var D = ['Clean', 'Warm', 'Punchy', 'Club', 'Wide', 'Dynamic'];
+    var A = [
+      ['Bass volume', '−1.5 dB', 'Certified · safe to apply', 1],
+      ['Keys volume in breaks', '+1.0 dB', 'Certified · safe to apply', 1],
+      ['Drums volume', '−0.5 dB', 'Certified · safe to apply', 1],
+      ['Low shelf on bass, 60 Hz', '−2 dB', 'Not available yet · volume only for now', 2]
+    ];
+    return {
+      song: wf(8, { n: 160 }),
+      dirs: D.map(function (l) { var on = l === 'Warm' || l === 'Punchy'; return { l: l, sel: on ? 'true' : 'false', bg: on ? '#1D2527' : 'transparent', bd: on ? '#5EC6D3' : '#2B2E34', fg: on ? '#EDEBE7' : '#B0ADA7' }; }),
+      facts: [{ k: 'Integrated loudness', v: '−10.8 LUFS' }, { k: 'True peak', v: '−0.6 dBTP' }, { k: 'Low end 40–120 Hz vs The Funk', v: '+3.1 dB' }, { k: 'Kick / bass overlap at 60 Hz', v: 'high in drops' }, { k: 'Stereo width, 1–8 kHz', v: '0.62' }],
+      adj: A.map(function (a) { var ok = a[3] === 1; return { t: a[0], v: a[1], s: a[2], op: ok ? 1 : 0.5, m: ok ? '✓' : '', cb: ok ? '#5EC6D3' : '#4A4C52', cf: ok ? '#5EC6D3' : 'transparent', sc: ok ? '#5CC08C' : '#8D8A85' }; }),
+      masters: [{ l: 'Club', d: '−8 LUFS · −0.3 dBTP' }, { l: 'Streaming', d: '−14 LUFS · −1 dBTP' }, { l: 'Dynamic', d: '−12 LUFS · wide crest' }, { l: 'Reference match', d: 'The Funk · −9.4 LUFS' }]
+    };
+  }
+}
+</script>
+</body>
+</html>

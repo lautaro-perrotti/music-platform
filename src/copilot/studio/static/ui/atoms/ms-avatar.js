@@ -1,0 +1,1 @@
+import { define, attr } from '../lib/define.js'; define('ms-avatar', el => `<span class="avatar">${attr(el,'initials',el.textContent||'LP')}</span>`, `.avatar{display:inline-grid;place-items:center;width:28px;height:28px;border:1px solid var(--ms-line-strong);border-radius:50%;background:var(--ms-control);font-size:11px;font-weight:650}`);

@@ -1,0 +1,1 @@
+import { define, attr } from '../lib/define.js'; define('ms-monogram', el => `<span class="mono">${attr(el,'value',el.textContent||'L')}</span>`, `.mono{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--ms-ivory);color:var(--ms-shell);font-size:11px;font-weight:700}`);

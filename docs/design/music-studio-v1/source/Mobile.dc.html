@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mobile review</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1400px;height:1060px;background:#0B0C0D;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;padding:48px 56px;display:flex;flex-direction:column;gap:28px">
+<div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Phone · review, not production</div><div style="font-size:15px;color:#B0ADA7">On a phone you can listen, compare, approve, check jobs and chat with Lucas. Studio isn’t available on mobile.</div></div>
+<div style="display:flex;gap:56px">
+
+<div style="width:390px;height:844px;border-radius:28px;border:1px solid #2B2E34;background:#121315;overflow:hidden;display:flex;flex-direction:column">
+<div style="height:56px;display:flex;align-items:center;padding:0 18px;gap:10px;border-bottom:1px solid #222429"><span style="font-size:15px;font-weight:600;flex:1">Rhythm Ashanti</span><span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8D8A85"><span style="width:7px;height:7px;border-radius:50%;background:#5CC08C"></span>Live</span></div>
+<div style="flex:1;padding:22px 18px;display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8D8A85">Review</span><span style="font-size:22px;font-weight:600">Stronger Drop 2 v8</span><span style="font-size:13px;color:#8D8A85">vs Afro Groove v7 · only Drop 2 differs</span></div>
+<div style="position:relative;height:120px;background:#17181B;border-radius:8px">
+<svg width="100%" height="120" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{song}}" fill="#CFCBC4" fill-opacity="0.85"></path></svg>
+<div style="position:absolute;left:36.1%;width:18.1%;top:0;bottom:0;background:rgba(94,198,211,0.14);border-left:1px solid #5EC6D3;border-right:1px solid #5EC6D3"></div>
+<div style="position:absolute;left:40.4%;top:0;bottom:0;width:2px;background:#5EC6D3"></div>
+</div>
+<div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:12px;color:#8D8A85"><span>02:14</span><span>05:32</span></div>
+<div style="display:flex;align-items:center;justify-content:center;gap:16px">
+<button style="width:64px;height:52px;border-radius:10px;border:1px solid #34373D;background:#1D1F23;color:#8D8A85;font-family:'Geist Mono',monospace;font-size:18px;font-weight:700">A</button>
+<button aria-label="Pause" style="width:60px;height:60px;border-radius:50%;border:0;background:#ECE8E1;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="#141518" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"></path></svg></button>
+<button style="width:64px;height:52px;border-radius:10px;border:0;background:#ECE8E1;color:#141518;font-family:'Geist Mono',monospace;font-size:18px;font-weight:700">B</button>
+</div>
+<div style="text-align:center;font-size:12px;color:#5EC6D3">Same playhead · switching never restarts</div>
+<input aria-label="Comment" placeholder="Add a comment at 02:14…" style="height:44px;padding:0 14px;border-radius:8px;background:#1D1F23;border:1px solid #2B2E34;font-size:14px">
+<div style="display:flex;gap:10px;margin-top:auto"><button style="flex:1;height:48px;border-radius:8px;background:#24262B;border:1px solid #34373D;font-size:14px">Keep v7</button><button style="flex:1;height:48px;border-radius:8px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:14px">Approve v8</button></div>
+</div>
+</div>
+
+<div style="width:390px;height:844px;border-radius:28px;border:1px solid #2B2E34;background:#121315;overflow:hidden;display:flex;flex-direction:column">
+<div style="height:56px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid #222429"><span style="font-size:15px;font-weight:600">Jobs</span></div>
+<div style="flex:1;padding:12px;display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{jobs}}" as="j" hint-placeholder-count="5">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;flex:1">{{j.t}}</span><span style="font-size:12px;color:{{j.c}}">{{j.g}} {{j.l}}</span></div>
+<span style="font-size:13px;color:#8D8A85">{{j.m}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="width:390px;height:844px;border-radius:28px;border:1px solid #2B2E34;background:#121315;overflow:hidden;display:flex;flex-direction:column">
+<div style="height:56px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid #222429;gap:10px"><span style="width:26px;height:26px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">L</span><span style="font-size:15px;font-weight:600">Lucas</span></div>
+<div style="flex:1;padding:18px;display:flex;flex-direction:column;gap:14px">
+<div style="align-self:flex-end;max-width:280px;background:#24262B;border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.5">How does v8 sound on the second drop?</div>
+<div style="background:#1C1916;border:1px solid #3A3129;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px">
+<span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#D9B98F">MUSICAL JUDGMENT</span>
+<span style="font-size:14px;line-height:1.55;color:#D6D0C6">It finally lifts. The congas carry it. I’d still check the transition at bar 97 on big speakers.</span>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:13px;font-weight:600">Apply v8 to Ableton?</span>
+<span style="font-size:12.5px;color:#8D8A85;line-height:1.5">Adds 2 audio tracks and a Drop 2 locator in the Working Copy. The original isn’t touched.</span>
+<button style="height:44px;border-radius:8px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:14px">Review on desktop</button>
+</div>
+<div style="margin-top:auto;display:flex;align-items:center;gap:8px;height:48px;padding:0 8px 0 14px;border-radius:24px;background:#1D1F23;border:1px solid #34373D"><input aria-label="Message Lucas" placeholder="Ask Lucas…" style="flex:1;border:0;background:transparent;outline:none;font-size:14px"><button aria-label="Send" style="width:36px;height:36px;border-radius:50%;border:0;background:#ECE8E1;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#141518" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button></div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1400,"height":1060}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.75],[.365,1.06],[.542,1.02],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      song: wf(7, { n: 120 }),
+      jobs: [
+        { t: 'Generate 4 versions', m: 'Rhythm Ashanti · candidate 3 of 4', g: '●', l: 'Running', c: '#5EC6D3' },
+        { t: 'Analyze reference', m: 'Warehouse bassline · detecting sections', g: '●', l: 'Running', c: '#5EC6D3' },
+        { t: 'Separate stems', m: 'Pick an “Other” stem', g: '◆', l: 'Review', c: '#93A7FF' },
+        { t: 'Apply Live Bass v5', m: 'Salt & Copper · open on desktop to reconcile', g: '?', l: 'In doubt', c: '#F08A4B' },
+        { t: 'Apply v8 to Ableton', m: 'Verified · 6 of 6', g: '✓', l: 'Done', c: '#5CC08C' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

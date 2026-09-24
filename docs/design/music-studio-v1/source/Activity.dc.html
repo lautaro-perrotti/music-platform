@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project activity</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" version="Stronger Drop 2 v8" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="activity" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;justify-content:center;padding:24px 32px;overflow:hidden">
+<div style="width:820px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:flex-end;gap:12px">
+<div style="flex:1;display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Activity</h1><div style="font-size:12.5px;color:#8D8A85">What happened to Rhythm Ashanti, in musical terms.</div></div>
+<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#8D8A85">Technical events<button role="switch" aria-checked="false" aria-label="Show technical events" style="width:30px;height:18px;border-radius:9px;border:0;padding:2px;background:#34373D;display:flex"><span style="width:14px;height:14px;border-radius:50%;background:#ECE8E1;display:block"></span></button></label>
+</div>
+<div role="tablist" aria-label="Filter" style="display:flex;gap:6px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><button role="tab" aria-selected="{{t.sel}}" style="height:28px;padding:0 12px;border-radius:6px;background:{{t.bg}};border:1px solid {{t.bd}};color:{{t.fg}};font-size:12.5px">{{t.l}}</button></sc-for>
+</div>
+<sc-for list="{{days}}" as="d" hint-placeholder-count="2">
+<section style="display:flex;flex-direction:column">
+<h2 style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">{{d.t}}</h2>
+<sc-for list="{{d.items}}" as="i" hint-placeholder-count="6">
+<div style="display:flex;gap:14px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #1F2125">
+<span style="width:44px;font-family:'Geist Mono',monospace;font-size:12px;color:#8D8A85;padding-top:3px">{{i.at}}</span>
+<span style="width:22px;height:22px;flex-shrink:0;border-radius:{{i.r}};background:{{i.ab}};color:{{i.af}};border:1px solid {{i.abd}};display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700">{{i.a}}</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:13.5px">{{i.x}}</span><span style="font-size:12px;color:#8D8A85">{{i.s}}</span></div>
+<sc-if value="{{i.link}}" hint-placeholder-val="{{false}}"><a href="{{i.href}}" style="font-size:12px;color:#B0ADA7">{{i.link}}</a></sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Stronger Drop 2 v8" sub="Rhythm Ashanti · active" seed="8" playing="false" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+var A={you:['LP','50%','#2A2C32','#EDEBE7','#3A3D44'],lucas:['L','50%','#ECE8E1','#141518','#ECE8E1'],core:['C','5px','#24262B','#B0ADA7','#34373D']};
+function e(at,who,x,s,link,href){var a=A[who];return {at:at,a:a[0],r:a[1],ab:a[2],af:a[3],abd:a[4],x:x,s:s,link:link||false,href:href||'#'};}
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      tabs: ['All', 'Versions', 'Generations', 'Ableton', 'Lucas'].map(function (l, i) { return { l: l, sel: i === 0 ? 'true' : 'false', bg: i === 0 ? '#24262B' : 'transparent', bd: i === 0 ? '#34373D' : '#2B2E34', fg: i === 0 ? '#EDEBE7' : '#B0ADA7' }; }),
+      days: [
+        { t: 'Today', items: [
+          e('02:31', 'core', 'Applied v8 to Ableton', 'Verified · 6 of 6 checks matched', 'Ableton', 'Ableton.dc.html'),
+          e('02:24', 'you', 'Activated Stronger Drop 2 v8', 'Preferred over v7 in compare', 'Compare', 'VersionCompare.dc.html'),
+          e('01:52', 'core', 'Created v8 from a Drop 2 variation', 'Bars 65–97 · percussion layer and bass lift', 'Open', 'Versions.dc.html'),
+          e('01:48', 'core', 'Applied v7 to Ableton', 'Verified'),
+          e('01:44', 'lucas', 'Lucas suggested a bass variation', 'Musical judgment · “second drop feels too similar”', 'Chat', 'ChatResult.dc.html'),
+          e('01:41', 'you', 'Added reference', 'Sophia Guerrero — The Funk · groove, arrangement, keys', 'Reference', 'ReferenceDetail.dc.html'),
+          e('01:38', 'you', 'Candidate B kept as v7', 'Afro percussion pass'),
+          e('01:32', 'core', 'Generated 4 candidates', 'Afro percussion pass · 5:30 each', 'Results', 'Results.dc.html')
+        ] },
+        { t: 'Yesterday', items: [
+          e('18:42', 'core', 'Applied v6 to Ableton', 'Verified'),
+          e('18:20', 'you', 'Kept Darker Bass as v6', 'Take B of 3')
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

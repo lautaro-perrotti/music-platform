@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create advanced</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="create" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;overflow:hidden">
+<div style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:12px">
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em;flex:1">Create music</h1>
+<a href="Create.dc.html" style="font-size:12.5px;color:#B0ADA7;display:flex;align-items:center;gap:6px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B0ADA7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>Advanced · hide</a>
+</div>
+<div style="background:#17181B;border:1px solid #34373D;border-radius:10px;padding:14px 18px;display:flex;gap:14px;align-items:flex-start">
+<textarea aria-label="Describe the music you want" rows="2" style="flex:1;border:0;background:transparent;resize:none;outline:none;font-size:15px;line-height:1.5;color:#EDEBE7">Funky club house at 128 BPM with warm Rhodes, syncopated percussion and an elastic bassline.</textarea>
+<div style="display:flex;gap:6px;font-size:12px;color:#B0ADA7;flex-shrink:0"><span style="padding:4px 8px;border:1px solid #2B2E34;border-radius:4px">5:30</span><span style="padding:4px 8px;border:1px solid #2B2E34;border-radius:4px">4 versions</span><span style="padding:4px 8px;border:1px solid #2B2E34;border-radius:4px">Instrumental</span><span style="padding:4px 8px;border:1px solid #2B2E34;border-radius:4px">The Funk</span></div>
+</div>
+
+<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:#1D1B15;border:1px solid #3F3822">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E2BE5A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"></path></svg>
+<span style="font-size:12.5px;color:#D9D0B5;flex:1"><b style="color:#EDEBE7;font-weight:600">Fast</b> ignores Key, Mode and Swing. Those controls are off. Switch to Best available to use them.</span>
+<button style="height:28px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">Use Best available</button>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;flex:1;min-height:0">
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Tempo and key</h2>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">BPM<input value="128" style="height:34px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-family:'Geist Mono',monospace;font-size:13px;color:#EDEBE7"></label>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">BPM range<input value="126 – 130" style="height:34px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-family:'Geist Mono',monospace;font-size:13px;color:#EDEBE7"></label>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#5E5C59">Key <span style="font-size:11px">not supported by Fast</span><input disabled="" value="F" style="height:34px;padding:0 10px;border-radius:6px;background:#17181B;border:1px dashed #2B2E34;font-size:13px;color:#5E5C59"></label>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#5E5C59">Mode <span style="font-size:11px">not supported by Fast</span><input disabled="" value="Minor" style="height:34px;padding:0 10px;border-radius:6px;background:#17181B;border:1px dashed #2B2E34;font-size:13px;color:#5E5C59"></label>
+</div>
+<h2 style="margin:6px 0 0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Arrangement</h2>
+<div role="group" aria-label="Arrangement" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="true" style="flex:1;height:30px;border:0;border-radius:4px;background:#34373D;font-size:12.5px">Club</button><button aria-pressed="false" style="flex:1;height:30px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Radio</button><button aria-pressed="false" style="flex:1;height:30px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Extended</button></div>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">Shape<button style="height:34px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;text-align:left;font-size:13px;color:#EDEBE7">Two drops, second bigger</button></label>
+</section>
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:13px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Character</h2>
+<sc-for list="{{sliders}}" as="s" hint-placeholder-count="5">
+<div style="display:flex;flex-direction:column;gap:7px;opacity:{{s.op}}">
+<div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:{{s.lc}}">{{s.l}}</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">{{s.v}}</span></div>
+<div role="slider" aria-label="{{s.l}}" aria-valuenow="{{s.n}}" aria-valuemin="0" aria-valuemax="100" style="position:relative;height:14px;display:flex;align-items:center"><div style="width:100%;height:4px;border-radius:2px;background:#2B2E34"></div><div style="position:absolute;left:0;height:4px;width:{{s.n}}%;border-radius:2px;background:{{s.fc}}"></div><div style="position:absolute;left:{{s.n}}%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:{{s.tc}}"></div></div>
+</div>
+</sc-for>
+</section>
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:13px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Balance</h2>
+<sc-for list="{{bipolar}}" as="s" hint-placeholder-count="3">
+<div style="display:flex;flex-direction:column;gap:7px">
+<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#B0ADA7"><span>{{s.a}}</span><span>{{s.b}}</span></div>
+<div role="slider" aria-label="{{s.a}} to {{s.b}}" aria-valuenow="{{s.n}}" aria-valuemin="0" aria-valuemax="100" style="position:relative;height:14px;display:flex;align-items:center"><div style="width:100%;height:4px;border-radius:2px;background:#2B2E34"></div><div style="position:absolute;left:50%;width:1px;height:10px;background:#4A4C52"></div><div style="position:absolute;left:{{s.fl}}%;width:{{s.fw}}%;height:4px;background:#5EC6D3;border-radius:2px"></div><div style="position:absolute;left:{{s.n}}%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#ECE8E1"></div></div>
+</div>
+</sc-for>
+<h2 style="margin:8px 0 0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Generate with</h2>
+<div role="radiogroup" aria-label="Generate with" style="display:flex;flex-direction:column;gap:6px">
+<button role="radio" aria-checked="false" style="display:flex;justify-content:space-between;align-items:center;height:36px;padding:0 12px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-size:13px">Best available<span style="font-size:11.5px;color:#8D8A85">all controls</span></button>
+<button role="radio" aria-checked="false" style="display:flex;justify-content:space-between;align-items:center;height:36px;padding:0 12px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-size:13px">Local only<span style="font-size:11.5px;color:#E2BE5A">unavailable now</span></button>
+<button role="radio" aria-checked="true" style="display:flex;justify-content:space-between;align-items:center;height:36px;padding:0 12px;border-radius:6px;background:#1E2A2C;border:1px solid #5EC6D3;font-size:13px">Fast<span style="font-size:11.5px;color:#8D8A85">no key, mode, swing</span></button>
+</div>
+</section>
+</div>
+<div style="display:flex;align-items:center;gap:12px">
+<span style="font-size:12.5px;color:#8D8A85;flex:1">4 × 5:30 instrumental · 128 BPM · club arrangement · guided by The Funk (groove, arrangement, keys)</span>
+<a href="Results.dc.html" style="height:40px;padding:0 18px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px">Generate 4 versions<span style="font-family:'Geist Mono',monospace;font-size:11px;padding:0 5px;border-radius:4px;border:1px solid #B7B2AA;color:#57544F">G</span></a>
+</div>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var S = [['Energy', 72, true], ['Darkness', 58, true], ['Groove', 80, true], ['Swing · not supported by Fast', 55, false], ['Density', 46, true]];
+    var B = [['Organic', 'Electronic', 34], ['Repetitive', 'Evolving', 62], ['Dry', 'Atmospheric', 40]];
+    return {
+      sliders: S.map(function (s) { return { l: s[0], n: s[1], v: s[2] ? s[1] + '' : 'off', op: s[2] ? 1 : 0.5, lc: s[2] ? '#EDEBE7' : '#8D8A85', fc: s[2] ? '#5EC6D3' : '#3A3D44', tc: s[2] ? '#ECE8E1' : '#5E5C59' }; }),
+      bipolar: B.map(function (b) { var n = b[2]; return { a: b[0], b: b[1], n: n, fl: Math.min(n, 50), fw: Math.abs(n - 50) }; })
+    };
+  }
+}
+</script>
+</body>
+</html>

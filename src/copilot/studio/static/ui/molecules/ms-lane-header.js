@@ -1,0 +1,1 @@
+import { define, attr } from '../lib/define.js'; define('ms-lane-header', el => `<div class="lane"><ms-role-dot role="${attr(el,'role','other')}"></ms-role-dot><b>${attr(el,'label','Lane')}</b><span>${attr(el,'meta','')}</span></div>`, `.lane{display:flex;align-items:center;gap:8px;height:32px}.lane span{margin-left:auto;color:var(--ms-faint);font:11px var(--ms-font-mono)}`);

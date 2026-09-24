@@ -8,7 +8,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from copilot.studio.service import StudioService
 
@@ -57,6 +57,8 @@ class StudioHandler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 return self._serve_static()
+            if path == "/ui" or path.startswith("/ui/"):
+                return self._serve_ui(path)
             if path == "/api/health":
                 return self._json({"ok": True, "service": "music-studio", "musical_writes": 0})
             if path == "/api/projects":
@@ -117,6 +119,25 @@ class StudioHandler(BaseHTTPRequestHandler):
         path = self.static_root / "index.html"
         data = path.read_bytes()
         self._headers(200, "text/html; charset=utf-8", len(data))
+        self.wfile.write(data)
+
+    def _serve_ui(self, request_path: str) -> None:
+        relative = unquote(request_path.removeprefix("/ui/") or "catalog.html")
+        root = (self.static_root / "ui").resolve()
+        target = (root / relative).resolve()
+        if root not in target.parents and target != root:
+            return self._json({"error": "NOT_FOUND"}, 404)
+        if target.is_dir():
+            target = target / "catalog.html"
+        if not target.is_file():
+            return self._json({"error": "NOT_FOUND"}, 404)
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if content_type == "text/javascript":
+            content_type = "text/javascript; charset=utf-8"
+        elif content_type.startswith("text/"):
+            content_type = f"{content_type}; charset=utf-8"
+        data = target.read_bytes()
+        self._headers(200, content_type, len(data))
         self.wfile.write(data)
 
     def _serve_audio(self, artifact_id: str) -> None:

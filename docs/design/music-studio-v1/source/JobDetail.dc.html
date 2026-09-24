@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden;position:relative">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="jobs" advanced="true" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:16px;opacity:0.45">
+<h1 style="margin:0;font-size:22px;font-weight:600">Jobs</h1>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;height:560px"></div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+
+<aside role="dialog" aria-label="Job detail" style="position:absolute;right:0;top:48px;bottom:64px;width:560px;background:#17181B;border-left:1px solid #34373D;box-shadow:-24px 0 48px rgba(0,0,0,0.45);display:flex;flex-direction:column">
+<div style="display:flex;align-items:flex-start;gap:12px;padding:18px 20px;border-bottom:1px solid #26292E">
+<div style="flex:1;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0;font-size:17px;font-weight:600">Generate 4 versions</h2><span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:4px;font-size:12px;font-weight:500;color:#5EC6D3;background:#5EC6D31F"><span style="font-size:11px">●</span>Running</span></div>
+<div style="font-size:12.5px;color:#8D8A85">Rhythm Ashanti · Afro percussion pass · started 01:32 · <span style="font-family:'Geist Mono',monospace">3:12</span> elapsed</div>
+</div>
+<a href="Jobs.dc.html" aria-label="Close" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#8D8A85">×</a>
+</div>
+<div style="flex:1;overflow:hidden;padding:16px 20px;display:flex;flex-direction:column;gap:16px">
+<section style="display:flex;flex-direction:column;gap:0">
+<h3 style="margin:0 0 8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Stages</h3>
+<sc-for list="{{stages}}" as="s" hint-placeholder-count="8">
+<div style="display:flex;align-items:center;gap:10px;height:28px">
+<span style="width:14px;text-align:center;font-size:12px;color:{{s.c}}">{{s.g}}</span>
+<span style="flex:1;font-size:13px;color:{{s.fc}}">{{s.t}}</span>
+<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">{{s.e}}</span>
+</div>
+</sc-for>
+</section>
+<section style="display:flex;flex-direction:column;gap:8px">
+<h3 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Result so far</h3>
+<div style="display:flex;gap:8px"><a href="Results.dc.html" style="height:30px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;font-size:12.5px">Candidate A · ready</a><a href="Results.dc.html" style="height:30px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;font-size:12.5px">Candidate B · ready</a></div>
+</section>
+<section style="display:flex;flex-direction:column;gap:8px;border-top:1px solid #26292E;padding-top:14px">
+<div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85;flex:1">Advanced</h3><span style="font-size:11px;color:#8D8A85">visible because Advanced mode is on</span></div>
+<div style="display:grid;grid-template-columns:120px minmax(0,1fr);row-gap:6px;font-size:12.5px">
+<sc-for list="{{adv}}" as="a" hint-placeholder-count="9"><span style="color:#8D8A85">{{a.k}}</span><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#D6D3CE">{{a.v}}</span></sc-for>
+</div>
+<div style="background:#101113;border:1px solid #26292E;border-radius:6px;padding:10px 12px;font-family:'Geist Mono',monospace;font-size:11.5px;line-height:1.7;color:#8D8A85">
+01:32:04 queued · 4 candidates · 330 s each<br>
+01:32:12 provider ready · cloud · region eu<br>
+01:34:40 candidate_a.wav saved · 48 kHz · 24-bit<br>
+01:34:41 validate ok · duration 331.2 s · no clipping<br>
+01:36:02 candidate_b.wav saved · validate ok<br>
+01:36:05 candidate_c generating…
+</div>
+</section>
+</div>
+<div style="display:flex;gap:8px;padding:14px 20px;border-top:1px solid #26292E">
+<button style="height:32px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#B0ADA7;font-size:12.5px">Copy diagnostics</button>
+<span style="flex:1"></span>
+<button style="height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Cancel remaining</button>
+</div>
+</aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var S = [['✓', 'Queued', '0:00', 'd'], ['✓', 'Preparing provider', '0:08', 'd'], ['✓', 'Loading model', '0:31', 'd'], ['✓', 'Candidate A · generated, validated, saved', '1:58', 'd'], ['✓', 'Candidate B · generated, validated, saved', '1:21', 'd'], ['●', 'Candidate C · generating audio', '1:04', 'r'], ['○', 'Candidate D', '', 'q'], ['○', 'Final check', '', 'q']];
+    return {
+      stages: S.map(function (s) { return { g: s[0], t: s[1], e: s[2], c: s[3] === 'd' ? '#5CC08C' : (s[3] === 'r' ? '#5EC6D3' : '#5E5C59'), fc: s[3] === 'q' ? '#8D8A85' : '#EDEBE7' }; }),
+      adv: [
+        { k: 'Provider', v: 'ElevenMusic · cloud' }, { k: 'Model', v: 'music_v2.5' }, { k: 'Hardware', v: 'provider-managed' },
+        { k: 'Cost', v: '$0.42 estimated · $0.21 so far' }, { k: 'Job ID', v: 'job_9182' }, { k: 'Seeds', v: '48213 · 48214 · 48215 · 48216' },
+        { k: 'Inputs', v: 'prompt · ref The Funk (groove, arrangement, keys)' }, { k: 'Artifacts', v: 'candidate_a.wav sha256 3f9c…e21' }, { k: 'Retries', v: '0' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

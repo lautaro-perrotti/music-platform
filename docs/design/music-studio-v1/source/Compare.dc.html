@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Candidate compare</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="1" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="create" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:18px;overflow:hidden">
+<div style="display:flex;align-items:flex-end;gap:12px">
+<div style="flex:1;display:flex;flex-direction:column;gap:5px">
+<div style="font-size:12px;color:#8D8A85"><a href="Results.dc.html" style="color:#8D8A85">Afro percussion pass</a> / Compare</div>
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Candidate A vs Candidate B</h1>
+</div>
+<span title="Both play at the same loudness. Details in Advanced." style="height:28px;padding:0 10px;border-radius:6px;border:1px solid #2B2E34;display:flex;align-items:center;gap:6px;font-size:12px;color:#B0ADA7"><span style="color:#5CC08C">✓</span>Volume matched</span>
+<button aria-pressed="true" style="height:28px;padding:0 10px;border-radius:6px;background:#1E3437;border:1px solid #2F4A4E;color:#5EC6D3;font-size:12px;display:flex;align-items:center;gap:6px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5EC6D3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V9a3 3 0 0 1 3-3h12l-3-3M20 13v2a3 3 0 0 1-3 3H5l3 3"></path></svg>Loop Drop · 01:00–01:30</button>
+</div>
+<div style="display:flex;gap:6px">
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><button style="height:26px;padding:0 10px;border-radius:4px;border:1px solid {{s.bd}};background:{{s.bg}};color:{{s.fg}};font-size:12px">{{s.l}}</button></sc-for>
+</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+<sc-for list="{{sides}}" as="c" hint-placeholder-count="2">
+<section style="background:#17181B;border:1px solid {{c.bd}};border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;opacity:{{c.op}}">
+<div style="display:flex;align-items:center;gap:10px">
+<span style="width:30px;height:30px;border-radius:6px;background:{{c.kb}};color:{{c.kf}};display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:14px;font-weight:700">{{c.k}}</span>
+<div style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:600">Candidate {{c.k}}</span><span style="font-size:12px;color:#8D8A85">5:3{{c.d}} · {{c.hint}}</span></div>
+<span style="flex:1"></span>
+<span style="font-size:11.5px;font-weight:600;color:{{c.lc}}">{{c.live}}</span>
+</div>
+<div style="position:relative;height:200px;background:#141518;border-radius:4px;overflow:hidden">
+<div style="position:absolute;left:18%;width:9%;top:0;bottom:0;background:rgba(94,198,211,0.08);border-left:1px solid #2F4A4E;border-right:1px solid #2F4A4E"></div>
+<svg width="100%" height="200" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{c.w}}" fill="#CFCBC4" fill-opacity="{{c.wo}}"></path></svg>
+<div style="position:absolute;left:25%;top:0;bottom:0;width:2px;background:#5EC6D3"></div>
+</div>
+<div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85"><span>0:00</span><span>01:23</span><span>5:3{{c.d}}</span></div>
+</section>
+</sc-for>
+</div>
+<div style="display:flex;align-items:center;justify-content:center;gap:28px;padding:4px 0">
+<div role="group" aria-label="Switch A or B" style="display:flex;align-items:center;gap:10px">
+<button aria-pressed="false" style="width:64px;height:52px;border-radius:8px;border:1px solid #34373D;background:#1D1F23;color:#8D8A85;font-family:'Geist Mono',monospace;font-size:20px;font-weight:700">A</button>
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#5EC6D3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"></path></svg>
+<button aria-pressed="true" style="width:64px;height:52px;border-radius:8px;border:0;background:#ECE8E1;color:#141518;font-family:'Geist Mono',monospace;font-size:20px;font-weight:700">B</button>
+</div>
+<div style="display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Geist Mono',monospace;font-size:30px;font-weight:500;letter-spacing:-0.02em">01:23</span><span style="font-size:12px;color:#5EC6D3">Same playhead. Switching never restarts.</span></div>
+<div style="display:flex;gap:6px;font-size:12px;color:#8D8A85;align-items:center"><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">A</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">B</span>switch <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">Space</span>play <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">L</span>loop</div>
+</div>
+<div style="display:flex;align-items:center;gap:12px;border-top:1px solid #26292E;padding-top:16px">
+<div role="radiogroup" aria-label="Preference" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34">
+<button role="radio" aria-checked="false" style="height:32px;padding:0 14px;border:0;border-radius:4px;background:transparent;color:#B0ADA7;font-size:13px">Prefer A</button>
+<button role="radio" aria-checked="false" style="height:32px;padding:0 14px;border:0;border-radius:4px;background:transparent;color:#B0ADA7;font-size:13px">Too close</button>
+<button role="radio" aria-checked="true" style="height:32px;padding:0 14px;border:0;border-radius:4px;background:#34373D;font-size:13px">Prefer B</button>
+</div>
+<input aria-label="Notes" value="B’s congas sit further back. The groove breathes more." style="flex:1;height:36px;padding:0 12px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-size:13px;color:#EDEBE7">
+<button style="height:36px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Keep A</button>
+<a href="ChatResult.dc.html" style="height:36px;padding:0 16px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;font-weight:600;font-size:13px">Keep B as new version</a>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Candidate B" sub="Comparing with Candidate A" ab="B" loop="true" seed="7" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    var S = ['Intro', 'Groove', 'Drop', 'Break', 'Build', 'Drop 2', 'Groove B', 'Outro'];
+    return {
+      sections: S.map(function (l) { var on = l === 'Drop'; return { l: l, bd: on ? '#2F4A4E' : '#2B2E34', bg: on ? '#1E3437' : 'transparent', fg: on ? '#5EC6D3' : '#B0ADA7' }; }),
+      sides: [
+        { k: 'A', d: '1', hint: 'tighter hats, busier bass', w: wf(101, { n: 200 }), wo: 0.55, bd: '#26292E', op: 0.8, kb: '#24262B', kf: '#B0ADA7', live: 'Press A', lc: '#8D8A85' },
+        { k: 'B', d: '2', hint: 'looser congas, more space', w: wf(7, { n: 200 }), wo: 0.9, bd: '#5EC6D3', op: 1, kb: '#ECE8E1', kf: '#141518', live: 'Listening', lc: '#5EC6D3' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

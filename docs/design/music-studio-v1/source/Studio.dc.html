@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Studio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="studio" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;overflow:hidden">
+<div style="flex:1;min-width:0;display:flex;flex-direction:column">
+<div style="height:52px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid #26292E">
+<span style="font-size:15px;font-weight:600">Studio</span><span style="font-size:12.5px;color:#8D8A85">Afro Groove v7 · stems separated 01:40</span>
+<span style="flex:1"></span>
+<div role="group" aria-label="Zoom" style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8D8A85">Zoom<button aria-label="Zoom out" style="width:26px;height:26px;border-radius:4px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7">−</button><div style="width:80px;height:4px;border-radius:2px;background:#2B2E34"><div style="width:22px;height:4px;border-radius:2px;background:#B0ADA7"></div></div><button aria-label="Zoom in" style="width:26px;height:26px;border-radius:4px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7">+</button></div>
+<button style="height:28px;padding:0 10px;border-radius:6px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7;font-size:12px">Snap · Bar</button>
+<button style="height:28px;padding:0 10px;border-radius:6px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7;font-size:12px">Loop</button>
+<button style="height:28px;padding:0 10px;border-radius:6px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7;font-size:12px">+ Marker</button>
+</div>
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:168px;flex-shrink:0;border-right:1px solid #26292E;background:#141518;display:flex;flex-direction:column">
+<div style="height:28px;border-bottom:1px solid #222429"></div>
+<div style="height:26px;border-bottom:1px solid #222429;display:flex;align-items:center;padding:0 12px;font-size:11px;color:#8D8A85;letter-spacing:.06em">SECTIONS</div>
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="6">
+<div style="height:{{l.h}}px;border-bottom:1px solid #222429;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px">
+<span style="width:8px;height:8px;border-radius:2px;background:{{l.c}}"></span>
+<span style="flex:1;font-size:11.5px;font-weight:600;letter-spacing:.06em">{{l.n}}</span>
+<button aria-label="Solo {{l.n}}" style="width:22px;height:20px;border-radius:4px;border:1px solid #2B2E34;background:transparent;color:#8D8A85;font-size:10.5px;font-weight:600">S</button>
+<button aria-label="Mute {{l.n}}" style="width:22px;height:20px;border-radius:4px;border:1px solid #2B2E34;background:transparent;color:#8D8A85;font-size:10.5px;font-weight:600">M</button>
+</div>
+</sc-for>
+</div>
+<div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column">
+<div style="height:28px;border-bottom:1px solid #222429;position:relative">
+<sc-for list="{{ruler}}" as="r" hint-placeholder-count="9"><span style="position:absolute;left:{{r.p}}%;top:0;height:28px;border-left:1px solid #34373D;padding-left:4px;display:flex;flex-direction:column;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:#8D8A85;line-height:1.2"><span style="color:#B0ADA7">{{r.b}}</span>{{r.t}}</span></sc-for>
+</div>
+<div style="height:26px;border-bottom:1px solid #222429;position:relative">
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><span style="position:absolute;left:{{s.a}}%;width:{{s.w}}%;top:3px;height:20px;padding:0 6px;border-left:1px solid #3A3D44;background:#1A1B1F;font-size:11px;color:#B0ADA7;display:flex;align-items:center;overflow:hidden;white-space:nowrap">{{s.l}}</span></sc-for>
+</div>
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="6">
+<div style="height:{{l.h}}px;border-bottom:1px solid #222429;position:relative;background:{{l.bg}}">
+<sc-if value="{{l.w}}" hint-placeholder-val="{{true}}"><svg width="100%" height="{{l.h}}" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{l.w}}" fill="{{l.c}}" fill-opacity="0.8"></path></svg></sc-if>
+<sc-if value="{{l.empty}}" hint-placeholder-val="{{false}}"><div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:14px;gap:10px;font-size:12px;color:#8D8A85">No vocals in this version<a href="Voice.dc.html" style="color:#B0ADA7;text-decoration:underline">Generate vocals</a></div></sc-if>
+</div>
+</sc-for>
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><div style="position:absolute;left:{{s.a}}%;top:54px;bottom:0;width:1px;background:#26292E"></div></sc-for>
+<div style="position:absolute;left:60.2%;top:28px;bottom:0;border-left:1px dashed #D9B98F"></div>
+<span style="position:absolute;left:60.2%;top:84px;margin-left:4px;height:20px;padding:0 6px;border-radius:4px;background:#2A2520;border:1px solid #4A3E2E;font-size:11px;color:#D9B98F;display:flex;align-items:center;white-space:nowrap">Lucas · percussion thins here</span>
+<div style="position:absolute;left:25%;top:0;bottom:0;width:2px;background:#5EC6D3"></div>
+<div style="position:absolute;left:25%;top:0;margin-left:-5px;width:12px;height:10px;background:#5EC6D3;clip-path:polygon(0 0,100% 0,50% 100%)"></div>
+<div style="flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8D8A85;gap:8px">Drag across any lane to select a region · Shift-drag snaps to sections</div>
+</div>
+</div>
+</div>
+<aside style="width:300px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:20px;display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Song</h2>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;font-size:12.5px">
+<div><div style="color:#8D8A85">Version</div><div>Afro Groove v7</div></div>
+<div><div style="color:#8D8A85">Length</div><div style="font-family:'Geist Mono',monospace">5:32 · 177 bars</div></div>
+<div><div style="color:#8D8A85">Tempo</div><div style="font-family:'Geist Mono',monospace">128.0 constant</div></div>
+<div><div style="color:#8D8A85">Key</div><div>F minor · est.</div></div>
+</div>
+<div style="border-top:1px solid #26292E;padding-top:14px;display:flex;flex-direction:column;gap:8px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Sections</h2>
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><button style="display:flex;justify-content:space-between;height:28px;padding:0 8px;border-radius:4px;border:0;background:transparent;font-size:12.5px;color:#B0ADA7"><span>{{s.l}}</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">{{s.bars}}</span></button></sc-for>
+</div>
+<div style="margin-top:auto;font-size:12px;color:#8D8A85;line-height:1.55">Select a region to edit, ask Lucas or critique. Studio is for directing changes. Detailed editing stays in Ableton.</div>
+</aside>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+var ENV={drums:[[0,.04],[.09,.06],[.095,.8],[.27,.85],[.275,.08],[.316,.3],[.361,.5],[.365,1],[.542,.95],[.548,.8],[.6,.75],[.62,.45],[.813,.45],[.82,.35],[1,.05]],bass:[[0,.02],[.09,.03],[.095,.7],[.27,.75],[.275,.05],[.361,.1],[.365,.95],[.542,.95],[.548,.7],[.813,.7],[.82,.3],[1,.02]],keys:[[0,.55],[.18,.6],[.27,.62],[.275,.8],[.361,.7],[.542,.65],[.813,.6],[1,.3]],other:[[0,.2],[.18,.3],[.275,.55],[.361,.85],[.365,.3],[.542,.35],[.813,.3],[1,.15]]};
+class Component extends DCLogic {
+  renderVals() {
+    var S = [['Intro', 0, 9, '1–16'], ['Groove', 9, 18, '17–32'], ['Drop', 18, 27, '33–48'], ['Break', 27, 31.6, '49–56'], ['Build', 31.6, 36.1, '57–64'], ['Drop 2', 36.1, 54.2, '65–97'], ['Groove B', 54.2, 81.3, '97–144'], ['Outro', 81.3, 100, '145–177']];
+    return {
+      sections: S.map(function (s) { return { l: s[0], a: s[1], w: s[2] - s[1], bars: s[3] }; }),
+      ruler: [[1, '0:00', 0], [17, '0:30', 9], [33, '1:00', 18], [49, '1:30', 27], [65, '2:00', 36.1], [81, '2:30', 45.2], [97, '3:00', 54.2], [129, '4:00', 72.3], [161, '5:00', 90.4]].map(function (r) { return { b: r[0], t: r[1], p: r[2] }; }),
+      lanes: [
+        { n: 'FULL MIX', c: '#CFCBC4', h: 92, w: wf(7, { n: 300 }), bg: '#15161A', empty: false },
+        { n: 'DRUMS', c: '#D98A5B', h: 64, w: wf(11, { n: 300, env: ENV.drums, jag: .8 }), bg: 'transparent', empty: false },
+        { n: 'BASS', c: '#6FA0E6', h: 64, w: wf(13, { n: 300, env: ENV.bass, jag: .3 }), bg: 'transparent', empty: false },
+        { n: 'KEYS', c: '#A9C46A', h: 64, w: wf(17, { n: 300, env: ENV.keys, jag: .3 }), bg: 'transparent', empty: false },
+        { n: 'VOCALS', c: '#D68CB2', h: 46, w: false, bg: '#131417', empty: true },
+        { n: 'OTHER', c: '#A09AC8', h: 64, w: wf(23, { n: 300, env: ENV.other, jag: .6 }), bg: 'transparent', empty: false }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

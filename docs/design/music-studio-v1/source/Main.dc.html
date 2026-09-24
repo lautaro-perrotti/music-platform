@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Music Studio system</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:#5EC6D3;text-decoration:none}a:hover{color:#8ADBE5}
+</style>
+</helmet>
+<div style="width:1440px;height:2480px;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;padding:64px 72px;display:flex;flex-direction:column;gap:56px;overflow:hidden">
+
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Music Studio · Product system v1 · “Control Room”</div>
+<h1 style="margin:0;font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-0.02em;max-width:980px">An AI production control surface. Ableton stays the DAW.</h1>
+<p style="margin:0;font-size:16px;line-height:1.55;color:#B0ADA7;max-width:860px">Lucas, the AI producer, decides what should change musically. Core measures, executes and verifies. The musician sees songs, versions and sections first. The technical details are one click away and stay out of the creative flow.</p>
+<div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+<sc-for list="{{loop}}" as="s" hint-placeholder-count="6">
+<span style="height:32px;padding:0 14px;border-radius:6px;background:#17181B;border:1px solid #2B2E34;display:flex;align-items:center;font-size:12px;font-weight:600;letter-spacing:.08em">{{s.l}}</span>
+<span style="color:#4A4C52;font-size:14px">{{s.arrow}}</span>
+</sc-for>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px">
+<sc-for list="{{principles}}" as="p" hint-placeholder-count="4">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:8px">
+<div style="font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85">{{p.n}}</div>
+<div style="font-size:15px;font-weight:600">{{p.t}}</div>
+<div style="font-size:13px;line-height:1.55;color:#B0ADA7">{{p.d}}</div>
+</div>
+</sc-for>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:20px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Surfaces and color</h2>
+<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px">
+<sc-for list="{{surfaces}}" as="s" hint-placeholder-count="6">
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="height:64px;border-radius:6px;background:{{s.c}};border:1px solid #34373D"></div>
+<div style="font-size:12.5px;font-weight:500">{{s.n}}</div>
+<div style="font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85">{{s.c}} · {{s.u}}</div>
+</div>
+</sc-for>
+</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:14px">
+<div style="font-size:13px;font-weight:600">Text and action</div>
+<div style="display:flex;gap:16px;align-items:center">
+<span style="font-size:15px;color:#EDEBE7">Primary #EDEBE7</span><span style="font-size:15px;color:#B0ADA7">Secondary #B0ADA7</span><span style="font-size:15px;color:#8D8A85">Meta #8D8A85</span><span style="font-size:15px;color:#5E5C59">Disabled #5E5C59</span>
+</div>
+<div style="display:flex;gap:12px;align-items:center">
+<span style="width:40px;height:40px;border-radius:6px;background:#ECE8E1"></span><div style="font-size:12.5px;color:#B0ADA7;line-height:1.5"><b style="color:#EDEBE7">Ivory #ECE8E1</b> is used for primary actions and the active version. There is one per view.</div>
+</div>
+<div style="display:flex;gap:12px;align-items:center">
+<span style="width:40px;height:40px;border-radius:6px;background:#5EC6D3"></span><div style="font-size:12.5px;color:#B0ADA7;line-height:1.5"><b style="color:#EDEBE7">Cue #5EC6D3</b> marks the playhead, selection, focus, running work and sync. It is not decorative.</div>
+</div>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:12px">
+<div style="font-size:13px;font-weight:600">Audio roles: muted, consistent, never a rainbow</div>
+<sc-for list="{{roles}}" as="r" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:12px">
+<span style="width:10px;height:10px;border-radius:2px;background:{{r.c}}"></span>
+<span style="width:84px;font-size:12.5px">{{r.n}}</span>
+<svg width="420" height="22" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{r.w}}" fill="{{r.c}}" fill-opacity="0.85"></path></svg>
+<span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85">{{r.c}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px">
+<div style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">States: glyph + word + color, never color alone</h2>
+<div style="display:flex;flex-wrap:wrap;gap:8px">
+<sc-for list="{{states}}" as="x" hint-placeholder-count="10">
+<span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:4px;font-size:12.5px;font-weight:500;color:{{x.c}};background:{{x.bg}}"><span style="width:10px;text-align:center;font-size:11px">{{x.g}}</span>{{x.l}}</span>
+</sc-for>
+</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.55">There are no fake percentages. A running job shows its current stage: <i>Preparing provider → Generating audio → Validating file → Saving candidate</i>. Spinners are used only when no stage is known.</div>
+<h2 style="margin:12px 0 0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Rights: visible, quiet</h2>
+<div style="display:flex;gap:8px">
+<sc-for list="{{rights}}" as="x" hint-placeholder-count="4">
+<span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:4px;border:1px solid #34373D;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:{{x.c}}">{{x.l}}</span>
+</sc-for>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Typography · Geist and Geist Mono</h2>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Project 28/600</span><span style="font-size:28px;font-weight:600;letter-spacing:-0.02em">Rhythm Ashanti</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Screen 22/600</span><span style="font-size:22px;font-weight:600;letter-spacing:-0.01em">Compare versions</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Title 15/600</span><span style="font-size:15px;font-weight:600">Candidate B</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Label 11/600 caps</span><span style="font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Recent generations</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Body 13.5/400</span><span style="font-size:13.5px;color:#B0ADA7">Keep the keys exactly as they are.</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Meta 12/400</span><span style="font-size:12px;color:#8D8A85">Kept from Candidate B · 2 hours ago</span></div>
+<div style="display:flex;align-items:baseline;gap:16px"><span style="width:120px;font-size:11px;color:#8D8A85">Mono 12/500</span><span style="font-family:'Geist Mono',monospace;font-size:12px">01:23 · bars 65–97 · −10.2 LUFS</span></div>
+<div style="font-size:12px;color:#8D8A85">Mono is only for time, bars, measurements and IDs. It is never used for product copy.</div>
+</div>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr);gap:24px">
+<div style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">App shell</h2>
+<div style="position:relative;height:380px;background:#0F1012;border:1px solid #34373D;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;font-size:12px">
+<div style="height:34px;background:#141518;border-bottom:1px solid #2B2E34;display:flex;align-items:center;padding:0 12px;gap:10px;color:#B0ADA7">Top bar 48 · project / active version · ⌘K · Ableton · compute · jobs</div>
+<div style="flex:1;display:flex">
+<div style="width:130px;background:#141518;border-right:1px solid #2B2E34;padding:12px;color:#B0ADA7;line-height:1.7">Sidebar 212<br>collapses to 56<br><span style="color:#8D8A85">Song · Work · System</span></div>
+<div style="flex:1;padding:14px;color:#B0ADA7;display:flex;flex-direction:column;gap:8px"><b style="color:#EDEBE7;font-weight:600">Workspace</b><span>One task per screen. Dense and calm, with no card wall.</span><div style="flex:1;border:1px dashed #34373D;border-radius:6px"></div></div>
+<div style="width:150px;background:#17181B;border-left:1px solid #2B2E34;padding:12px;color:#B0ADA7;line-height:1.7">Inspector 320<br>or live Jobs<br><span style="color:#8D8A85">collapsible · Advanced lives here</span></div>
+</div>
+<div style="height:40px;background:#17181B;border-top:1px solid #2B2E34;display:flex;align-items:center;padding:0 12px;color:#B0ADA7">Player 64 · persists across every screen · A/B · loop · Ask Lucas</div>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Two intelligences, two visual voices</h2>
+<div style="background:#1C1916;border:1px solid #3A3129;border-radius:8px;padding:16px;display:flex;gap:12px">
+<span style="width:24px;height:24px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">L</span>
+<div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><b style="font-size:13px">Lucas</b><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#D9B98F;border:1px solid #4A3E2E;border-radius:4px;padding:2px 6px">Musical judgment</span></div><div style="font-size:13px;color:#C9C3BA;line-height:1.5">The second drop feels too close to the first one. I’d add a percussion lift before touching the bass.</div></div>
+</div>
+<div style="background:#161A1C;border:1px solid #283236;border-radius:8px;padding:16px;display:flex;gap:12px">
+<span style="width:24px;height:24px;border-radius:5px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B0ADA7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17 17 4l3 3L7 20z M8 13l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5"></path></svg></span>
+<div style="display:flex;flex-direction:column;gap:6px;flex:1"><div style="display:flex;gap:8px;align-items:center"><b style="font-size:13px">Core</b><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8FB8BE;border:1px solid #2F4A4E;border-radius:4px;padding:2px 6px">Measured</span></div>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-family:'Geist Mono',monospace;font-size:12px"><span><span style="color:#8D8A85">Tempo</span> 128.0</span><span><span style="color:#8D8A85">Key</span> F min · 0.82</span><span><span style="color:#8D8A85">Int.</span> −9.1 LUFS</span></div></div>
+</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.55">Lucas uses a round ivory monogram on a warm surface. Core uses a square ruler glyph, a cool surface and mono values. The two never share a card. Nothing becomes a musical fact because a model said so.</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Controls</h2>
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+<button style="height:34px;padding:0 14px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:13px">Generate 4 versions</button>
+<button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;color:#EDEBE7;font-weight:500;font-size:13px">Compare</button>
+<button style="height:34px;padding:0 14px;border-radius:6px;background:transparent;border:1px solid transparent;color:#B0ADA7;font-size:13px">Advanced ▸</button>
+<button style="height:34px;padding:0 14px;border-radius:6px;background:transparent;border:1px solid #5A3A34;color:#EF8A80;font-weight:500;font-size:13px">Roll back</button>
+<button disabled="" style="height:34px;padding:0 14px;border-radius:6px;background:#1B1C20;border:1px solid #26292E;color:#5E5C59;font-size:13px">Swing · not supported by Fast</button>
+<button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;color:#EDEBE7;font-size:13px;outline:2px solid #5EC6D3;outline-offset:2px">Focus ring</button>
+<div role="group" aria-label="Segmented" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button style="height:28px;padding:0 12px;border:0;border-radius:4px;background:#34373D;color:#EDEBE7;font-size:12.5px">Instrumental</button><button style="height:28px;padding:0 12px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Vocal</button></div>
+<span style="display:flex;gap:6px;align-items:center;font-size:12px;color:#8D8A85">Shortcuts <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">Space</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">A</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">B</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">G</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">/</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid #3A3D44">Ctrl K</span></span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;font-size:12.5px;color:#B0ADA7">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px;line-height:1.6"><b style="color:#EDEBE7">Spacing</b><br>4 · 8 · 12 · 16 · 24 · 32 · 48<br>Rows 34–40, controls 32–36, targets ≥ 32 with 44 hit area</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px;line-height:1.6"><b style="color:#EDEBE7">Radius</b><br>4 badges · 6 controls · 8 panels · 10 dialogs<br>No pill-shaped cards, no 24 px bubbles</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px;line-height:1.6"><b style="color:#EDEBE7">Elevation</b><br>Surfaces step up one shade per layer. Shadows are only for overlays: palette, drawer, toast.</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px;line-height:1.6"><b style="color:#EDEBE7">Icons</b><br>24 grid, 1.6 stroke, round caps, drawn in text color. The cue color only marks active or live items. No emoji.</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:16px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Waveform anatomy</h2>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:20px 24px;display:flex;flex-direction:column;gap:6px">
+<div style="position:relative;height:22px">
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><span style="position:absolute;left:{{s.a}}%;top:0;font-size:11px;color:#8D8A85;padding-left:6px;border-left:1px solid #3A3D44;height:22px;display:flex;align-items:center">{{s.l}}</span></sc-for>
+</div>
+<div style="position:relative;height:120px;background:#141518;border-radius:4px">
+<div style="position:absolute;left:36.1%;width:18.1%;top:0;bottom:0;background:rgba(94,198,211,0.10);border-left:1px solid #5EC6D3;border-right:1px solid #5EC6D3"></div>
+<svg width="100%" height="120" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{songWave}}" fill="#CFCBC4" fill-opacity="0.82"></path></svg>
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><div style="position:absolute;left:{{s.a}}%;top:0;bottom:0;width:1px;background:#2F3238"></div></sc-for>
+<div style="position:absolute;left:60.2%;top:0;bottom:0;width:0;border-left:1px dashed #D9B98F"></div>
+<div style="position:absolute;left:25%;top:-6px;bottom:-6px;width:2px;background:#5EC6D3"></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;font-size:12px;color:#B0ADA7;margin-top:10px">
+<span><b style="color:#EDEBE7">Playhead</b> is 2 px cue and runs through every lane</span><span><b style="color:#EDEBE7">Selection</b> uses a cue tint with edge handles</span><span><b style="color:#EDEBE7">Sections</b> are hairlines with labels above, not colored blocks</span><span><b style="color:#EDEBE7">Markers</b> are dashed. Warm ones come from Lucas.</span><span><b style="color:#EDEBE7">Mirrored</b> fill with lower half at 90% so peaks read clearly</span>
+</div>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,0.7fr);gap:24px">
+<div style="display:flex;flex-direction:column;gap:12px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Progressive disclosure</h2>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;overflow:hidden">
+<div style="display:grid;grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr);padding:10px 16px;border-bottom:1px solid #26292E;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85"><span>Default</span><span>Advanced (inspector / drawer)</span></div>
+<sc-for list="{{disclosure}}" as="d" hint-placeholder-count="4">
+<div style="display:grid;grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr);padding:12px 16px;border-bottom:1px solid #222429;gap:12px;align-items:center">
+<span style="font-size:13px">{{d.a}}</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85;line-height:1.5">{{d.b}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Responsive</h2>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px;font-size:12.5px;color:#B0ADA7;line-height:1.5">
+<div><b style="color:#EDEBE7">1920 / ultrawide</b> Inspector and Jobs panel can both stay open. The Studio timeline gains width, not bigger type.</div>
+<div><b style="color:#EDEBE7">1440 × 900</b> The reference layout. Shows sidebar, workspace, one right panel and the player.</div>
+<div><b style="color:#EDEBE7">1280 × 800</b> The sidebar collapses to icons (56) and the inspector opens as an overlay drawer.</div>
+<div><b style="color:#EDEBE7">Tablet</b> For review: listen, compare, comment and approve.</div>
+<div><b style="color:#EDEBE7">Phone</b> Listen, jobs, chat and approve. No Studio.</div>
+</div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2480}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+var ENV={drums:[[0,.04],[.09,.06],[.095,.8],[.27,.85],[.275,.08],[.316,.3],[.361,.5],[.365,1],[.542,.95],[.548,.8],[.813,.5],[.82,.35],[1,.05]],bass:[[0,.02],[.09,.03],[.095,.7],[.27,.75],[.275,.05],[.361,.1],[.365,.95],[.542,.95],[.548,.7],[.813,.7],[.82,.3],[1,.02]],keys:[[0,.55],[.18,.6],[.27,.62],[.275,.8],[.361,.7],[.542,.65],[.813,.6],[1,.3]],vox:[[0,0],[.36,0],[.365,.7],[.45,.75],[.46,.1],[.5,.6],[.542,.7],[.55,0],[1,0]],other:[[0,.2],[.18,.3],[.275,.55],[.361,.85],[.365,.3],[.542,.35],[.813,.3],[1,.15]]};
+var ST={queued:['○','Queued','#8D8A85'],provisioning:['◌','Provisioning','#5EC6D3'],running:['●','Running','#5EC6D3'],validating:['◐','Validating','#5EC6D3'],review:['◆','Review required','#93A7FF'],ok:['✓','Succeeded','#5CC08C'],failed:['✕','Failed','#EF6A5F'],blocked:['⊘','Blocked','#E2BE5A'],cancelled:['–','Cancelled','#8D8A85'],doubt:['?','In doubt','#F08A4B']};
+function st(k,l){var s=ST[k];return {g:s[0],l:l||s[1],c:s[2],bg:s[2]+'1F'};}
+class Component extends DCLogic {
+  renderVals() {
+    var L = ['CREATE', 'LISTEN', 'COMPARE', 'KEEP', 'MODIFY', 'ITERATE'];
+    return {
+      loop: L.map(function (l, i) { return { l: l, arrow: i < L.length - 1 ? '→' : '↺' }; }),
+      principles: [
+        { n: '01', t: 'Music is the interface', d: 'The app is organized around projects, versions, sections, drums, bass and vocals. Models, workers and pipelines are never in the main navigation.' },
+        { n: '02', t: 'Simple by default', d: 'Every screen works with Advanced turned off. Providers, seeds, hashes and state tokens stay in inspectors and drawers.' },
+        { n: '03', t: 'Nothing is overwritten', d: 'Every change creates a version you can keep, compare, activate or revert. Ableton writes are reviewed first, then verified, and rolled back if they don’t match.' },
+        { n: '04', t: 'Lucas proposes, Core proves', d: 'Musical opinion is labelled as judgment and measurements are labelled as measured. They never appear on the same card.' }
+      ],
+      surfaces: [
+        { n: 'App', c: '#0F1012', u: 'behind shell' }, { n: 'Shell', c: '#141518', u: 'bars, sidebar' }, { n: 'Panel', c: '#17181B', u: 'player, inspector' },
+        { n: 'Raised', c: '#1D1F23', u: 'inputs, rows' }, { n: 'Control', c: '#24262B', u: 'buttons, active nav' }, { n: 'Line', c: '#2B2E34', u: 'borders 1 px' }
+      ],
+      roles: [
+        { n: 'Full mix', c: '#CFCBC4', w: wf(7, { n: 140 }) }, { n: 'Drums', c: '#D98A5B', w: wf(11, { n: 140, env: ENV.drums, jag: .8 }) },
+        { n: 'Bass', c: '#6FA0E6', w: wf(13, { n: 140, env: ENV.bass, jag: .3 }) }, { n: 'Harmonic', c: '#A9C46A', w: wf(17, { n: 140, env: ENV.keys, jag: .3 }) },
+        { n: 'Vocals', c: '#D68CB2', w: wf(19, { n: 140, env: ENV.vox, jag: .5 }) }, { n: 'Other / FX', c: '#A09AC8', w: wf(23, { n: 140, env: ENV.other, jag: .6 }) }
+      ],
+      states: ['queued', 'provisioning', 'running', 'validating', 'review', 'ok', 'failed', 'blocked', 'cancelled', 'doubt'].map(function (k) { return st(k); }),
+      rights: [{ l: 'Owned', c: '#B0ADA7' }, { l: 'Licensed', c: '#B0ADA7' }, { l: 'Reference only', c: '#B0ADA7' }, { l: 'Unknown', c: '#E2BE5A' }],
+      sections: [{ l: 'Intro', a: 0 }, { l: 'Groove', a: 9 }, { l: 'Drop', a: 18 }, { l: 'Break', a: 27 }, { l: 'Build', a: 31.6 }, { l: 'Drop 2', a: 36.1 }, { l: 'Groove B', a: 54.2 }, { l: 'Outro', a: 81.3 }],
+      songWave: wf(7),
+      disclosure: [
+        { a: 'Candidate A · ▶ Play · Keep', b: 'ElevenMusic v2.5 · job_9182 · seed 48213 · $0.11 · sha256 3f9c…e21 · provider 41.2 s' },
+        { a: 'Ableton · Connected', b: 'state token 7c1e/gen 412 · Remote Script caps: session.read, compound_temporary_mutation · last txn readback OK · journal 01:48:06' },
+        { a: 'Volume matched', b: 'A −10.2 LUFS · B −9.4 LUFS · peak −0.8 dBTP · gain −0.8 dB applied to B for playback only' },
+        { a: 'Drums · Candidate C · Selected', b: 'engine revealed after pick · LUFS −17.9 · purity review: clean · artifacts: none heard · provenance chain 3 steps' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

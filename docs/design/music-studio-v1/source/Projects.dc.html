@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Projects</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="projects" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:28px 32px;display:flex;flex-direction:column;gap:20px;overflow:hidden">
+<div style="display:flex;align-items:flex-end;gap:16px">
+<div style="flex:1;display:flex;flex-direction:column;gap:4px">
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Projects</h1>
+<div style="font-size:12.5px;color:#8D8A85">6 songs · 1 attached to Ableton · 2 jobs running</div>
+</div>
+<label style="width:300px;height:34px;display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM20 20l-4-4"></path></svg>
+<input aria-label="Search projects and versions" placeholder="Search projects and versions" style="flex:1;border:0;background:transparent;outline:none;font-size:13px">
+</label>
+<button style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><span style="color:#8D8A85">Sort</span>Last activity<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<a href="Create.dc.html" style="height:34px;padding:0 14px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#141518" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New project</a>
+</div>
+<div role="tablist" aria-label="Filter" style="display:flex;gap:6px">
+<button role="tab" aria-selected="true" style="height:28px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">All <span style="color:#8D8A85">6</span></button>
+<button role="tab" aria-selected="false" style="height:28px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#B0ADA7;font-size:12.5px">With jobs <span style="color:#8D8A85">4</span></button>
+<button role="tab" aria-selected="false" style="height:28px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#B0ADA7;font-size:12.5px">In Ableton <span style="color:#8D8A85">2</span></button>
+<button role="tab" aria-selected="false" style="height:28px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#B0ADA7;font-size:12.5px">Archived <span style="color:#8D8A85">3</span></button>
+</div>
+<div role="table" aria-label="Projects" style="background:#17181B;border:1px solid #26292E;border-radius:8px;overflow:hidden">
+<div role="row" style="display:grid;grid-template-columns:52px minmax(0,2.4fr) minmax(0,1.5fr) 70px 60px minmax(0,1fr) minmax(0,1fr) 96px;align-items:center;height:36px;padding-right:16px;border-bottom:1px solid #26292E;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">
+<span></span><span>Song</span><span>Current version</span><span>Length</span><span>Refs</span><span>Jobs</span><span>Ableton</span><span style="text-align:right">Updated</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div role="row" style="display:grid;grid-template-columns:52px minmax(0,2.4fr) minmax(0,1.5fr) 70px 60px minmax(0,1fr) minmax(0,1fr) 96px;align-items:center;height:68px;padding-right:16px;border-bottom:1px solid #222429;background:{{r.bg}}">
+<span style="display:flex;justify-content:center"><button aria-label="Play {{r.v}}" style="width:30px;height:30px;border-radius:50%;border:1px solid #34373D;background:{{r.pbg}};display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="{{r.pfg}}" aria-hidden="true"><path d="{{r.pd}}"></path></svg></button></span>
+<a href="ProjectHome.dc.html" style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-size:14px;font-weight:600">{{r.n}}</span><span style="font-size:12.5px;color:#8D8A85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{r.d}}</span></a>
+<span style="display:flex;flex-direction:column;gap:5px;min-width:0"><span style="font-size:13px">{{r.v}}</span><svg width="150" height="16" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{r.w}}" fill="#6A6D73"></path></svg></span>
+<span style="font-family:'Geist Mono',monospace;font-size:12px;color:#B0ADA7">{{r.len}}</span>
+<span style="font-size:13px;color:#B0ADA7">{{r.refs}}</span>
+<span>
+<sc-if value="{{r.job}}" hint-placeholder-val="{{false}}"><span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:4px;font-size:12px;font-weight:500;color:{{r.job.c}};background:{{r.job.bg}}"><span style="width:10px;text-align:center;font-size:11px">{{r.job.g}}</span>{{r.job.l}}</span></sc-if>
+<sc-if value="{{r.nojob}}" hint-placeholder-val="{{false}}"><span style="color:#5E5C59">—</span></sc-if>
+</span>
+<span style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#B0ADA7"><span style="width:7px;height:7px;border-radius:50%;background:{{r.lc}}"></span>{{r.live}}</span>
+<span style="text-align:right;font-size:12.5px;color:#8D8A85">{{r.up}}</span>
+</div>
+</sc-for>
+</div>
+<div style="font-size:12px;color:#8D8A85">Every project is non-destructive. Archived songs keep all their versions.</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+var ST={queued:['○','Queued','#8D8A85'],provisioning:['◌','Provisioning','#5EC6D3'],running:['●','Running','#5EC6D3'],validating:['◐','Validating','#5EC6D3'],review:['◆','Review required','#93A7FF'],ok:['✓','Succeeded','#5CC08C'],failed:['✕','Failed','#EF6A5F'],blocked:['⊘','Blocked','#E2BE5A'],cancelled:['–','Cancelled','#8D8A85'],doubt:['?','In doubt','#F08A4B']};
+function st(k,l){var s=ST[k];return {g:s[0],l:l||s[1],c:s[2],bg:s[2]+'1F'};}
+class Component extends DCLogic {
+  renderVals() {
+    var rows = [
+      { n: 'Rhythm Ashanti', d: 'Funky club house · warm Rhodes, elastic bass, afro percussion', v: 'Afro Groove v7', len: '5:32', refs: '3', job: st('running', '2 running'), live: 'Working copy', lc: '#5CC08C', up: '4 min ago', seed: 7, on: true },
+      { n: 'Salt & Copper', d: 'Organic house · live bass, sparse vocal chops', v: 'Live Bass v5', len: '6:10', refs: '4', job: st('doubt'), live: 'Working copy', lc: '#F08A4B', up: 'Yesterday', seed: 31 },
+      { n: 'Night Market', d: 'Downtempo broken beat · kalimba and dub chords', v: 'Dub Chords v3', len: '4:48', refs: '2', job: st('review', '1 to review'), live: 'Not attached', lc: '#4A4C52', up: '2 days ago', seed: 44 },
+      { n: 'Carabela', d: 'Afro-Latin percussion study · 118 BPM', v: 'Perc Study v9', len: '3:40', refs: '5', job: st('failed', '1 failed'), live: 'Not attached', lc: '#4A4C52', up: 'Sep 18', seed: 52 },
+      { n: 'Low Tide', d: 'Ambient cue for a short film · 84 BPM', v: 'Sketch v2', len: '2:15', refs: '1', job: false, live: 'Not attached', lc: '#4A4C52', up: 'Sep 12', seed: 63 },
+      { n: 'Vellum', d: 'Minimal techno · dry and hypnotic', v: 'First Pass v1', len: '7:02', refs: '0', job: false, live: 'Not attached', lc: '#4A4C52', up: 'Aug 30', seed: 71 }
+    ];
+    return {
+      rows: rows.map(function (r) {
+        return Object.assign({}, r, {
+          nojob: !r.job, w: wf(r.seed, { n: 70 }), bg: r.on ? '#1D1F23' : 'transparent',
+          pbg: r.on ? '#ECE8E1' : 'transparent', pfg: r.on ? '#141518' : '#B0ADA7', pd: r.on ? 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z' : 'M8 5.5v13l11-6.5z'
+        });
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

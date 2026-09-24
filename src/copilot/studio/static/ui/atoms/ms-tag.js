@@ -1,0 +1,1 @@
+import { define, attr } from '../lib/define.js'; define('ms-tag', el => `<span class="tag">${attr(el,'label',el.textContent||'Tag')}</span>`, `.tag{display:inline-flex;padding:3px 7px;border-radius:var(--ms-radius-badge);background:var(--ms-raised);color:var(--ms-muted);font-size:11px}`);

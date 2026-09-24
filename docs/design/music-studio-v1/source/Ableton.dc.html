@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ableton status</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" version="Stronger Drop 2 v8" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="ableton" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:14px">
+<div style="flex:1;display:flex;flex-direction:column;gap:4px">
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em;display:flex;align-items:center;gap:12px">Ableton Live 12<span style="display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 10px;border-radius:4px;background:#5CC08C1F;color:#5CC08C;font-size:13px;font-weight:500"><span style="width:8px;height:8px;border-radius:50%;background:#5CC08C"></span>Connected</span></h1>
+<div style="font-size:12.5px;color:#8D8A85">Rhythm Ashanti - Working Copy · last checked 4 s ago</div>
+</div>
+<button style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Capture</button>
+<button style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Analyze</button>
+<button style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Verify</button>
+<a href="ApplyVersion.dc.html" style="height:34px;padding:0 14px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;font-weight:600;font-size:13px">Apply version…</a>
+</div>
+<div role="status" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:8px;background:#172019;border:1px solid #2C4533">
+<span style="color:#5CC08C">✓</span><span style="font-size:13px"><b style="font-weight:600">Stronger Drop 2 v8 applied and verified</b><span style="color:#B0ADA7"> · 6 of 6 checks matched · 02:31</span></span>
+<span style="flex:1"></span><a href="ProjectHome.dc.html" style="font-size:12.5px;color:#EDEBE7;text-decoration:underline">Continue producing</a>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+<sc-for list="{{facts}}" as="f" hint-placeholder-count="8">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8D8A85">{{f.k}}</span><span style="font-size:15px;font-weight:500">{{f.v}}</span><span style="font-size:11.5px;color:#8D8A85">{{f.n}}</span></div>
+</sc-for>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;flex:1;min-height:0">
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Recent operations</h2>
+<sc-for list="{{ops}}" as="o" hint-placeholder-count="5">
+<div style="display:flex;align-items:center;gap:10px;height:38px;border-bottom:1px solid #222429">
+<span style="width:14px;font-size:12px;color:{{o.c}}">{{o.g}}</span>
+<span style="flex:1;font-size:13px">{{o.t}}</span>
+<span style="font-size:12px;color:{{o.c}}">{{o.s}}</span>
+<span style="width:70px;text-align:right;font-size:12px;color:#8D8A85">{{o.at}}</span>
+</div>
+</sc-for>
+<div style="font-size:12px;color:#8D8A85;margin-top:6px">Analyze and Capture are read-only for your mix. Temporary routing is always restored exactly.</div>
+</section>
+<section style="display:flex;flex-direction:column;gap:10px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Connection states</h2>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<div style="padding:10px 12px;border-radius:6px;border:1px solid #2C4533;background:#172019;font-size:12px;line-height:1.45"><b style="color:#5CC08C;font-weight:600">● Connected</b><br><span style="color:#B0ADA7">Live is open and verified</span></div>
+<div style="padding:10px 12px;border-radius:6px;border:1px solid #34373D;background:#17181B;font-size:12px;line-height:1.45"><b style="color:#B0ADA7;font-weight:600">○ Disconnected</b><br><span style="color:#8D8A85">Music generation still works</span></div>
+<div style="padding:10px 12px;border-radius:6px;border:1px solid #3F3822;background:#1D1B15;font-size:12px;line-height:1.45"><b style="color:#E2BE5A;font-weight:600">◐ Degraded</b><br><span style="color:#B0ADA7">Reads are slow, so writes are paused</span></div>
+<div style="padding:10px 12px;border-radius:6px;border:1px solid #5A3B28;background:repeating-linear-gradient(135deg,#1F1813 0 8px,#231B15 8px 16px);font-size:12px;line-height:1.45"><b style="color:#F08A4B;font-weight:600">? In doubt</b><br><span style="color:#B0ADA7">A write wasn’t verified</span></div>
+</div>
+<div style="border:1px solid #5A3B28;border-radius:8px;background:#1F1813;padding:14px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid #F08A4B;color:#F08A4B;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">?</span><b style="font-size:13.5px;font-weight:600">Salt &amp; Copper · Apply Live Bass v5 is in doubt</b></div>
+<div style="font-size:12.5px;color:#D1C3B6;line-height:1.5">An Ableton write may have occurred but could not be verified. Core saved the pre-state before writing, so nothing is lost.</div>
+<div style="display:flex;gap:8px"><button style="height:30px;padding:0 12px;border-radius:6px;background:#2A211B;border:1px solid #5A3B28;font-size:12.5px">Inspect</button><button style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Reconcile</button></div>
+</div>
+<button style="display:flex;align-items:center;gap:6px;border:0;background:transparent;color:#8D8A85;font-size:12px;padding:0;margin-top:auto"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>Advanced · state token, Remote Script, transactions, readback, journal</button>
+</section>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Stronger Drop 2 v8" sub="Rhythm Ashanti · in Ableton" seed="8" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      facts: [
+        { k: 'Working copy', v: 'Working Copy', n: 'original is never modified' }, { k: 'Tempo', v: '128.00 BPM', n: 'constant · 4/4' },
+        { k: 'Tracks', v: '16', n: '14 + 2 from v8' }, { k: 'Version in Live', v: 'Stronger Drop 2 v8', n: 'matches active' },
+        { k: 'Last snapshot', v: '02:31', n: '16 tracks read' }, { k: 'Last verified write', v: 'v8 · 02:31', n: '6 of 6 checks' },
+        { k: 'In doubt', v: '0 here', n: '1 in Salt & Copper' }, { k: 'Capture', v: '4 sources + Main', n: 'per pass, discovered' }
+      ],
+      ops: [
+        { g: '✓', t: 'Apply Stronger Drop 2 v8', s: 'Verified', c: '#5CC08C', at: '02:31' },
+        { g: '✓', t: 'Capture Main + 4 sources', s: 'Routing restored', c: '#5CC08C', at: '01:40' },
+        { g: '✓', t: 'Apply Afro Groove v7', s: 'Verified', c: '#5CC08C', at: '01:48' },
+        { g: '✓', t: 'Analyze project', s: 'Read-only', c: '#8D8A85', at: '01:31' },
+        { g: '–', t: 'Apply Darker Bass v6', s: 'Rolled back, readback differed', c: '#E2BE5A', at: 'Yesterday' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

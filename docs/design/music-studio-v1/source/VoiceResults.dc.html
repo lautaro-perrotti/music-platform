@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voice results</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="voice" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;overflow:hidden">
+<div style="flex:1;min-width:0;padding:24px 28px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:flex-end;gap:12px">
+<div style="flex:1;display:flex;flex-direction:column;gap:5px"><div style="font-size:12px;color:#8D8A85"><a href="Voice.dc.html" style="color:#8D8A85">Voice</a> / Lead takes</div><h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">3 lead takes · Warm alto</h1><div style="font-size:12.5px;color:#8D8A85">Over Drop 2 + Groove B · from lyrics and Rhodes melody.mid · volume matched</div></div>
+<div role="group" aria-label="Listen" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="false" style="height:28px;padding:0 12px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12.5px">Solo</button><button aria-pressed="true" style="height:28px;padding:0 12px;border:0;border-radius:4px;background:#34373D;font-size:12.5px">In the mix</button></div>
+</div>
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{takes}}" as="t" hint-placeholder-count="3">
+<article style="background:#17181B;border:1px solid {{t.bd}};border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:14px">
+<button aria-label="Play {{t.n}}" style="width:36px;height:36px;border-radius:50%;border:0;background:{{t.pb}};display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="{{t.pf}}" aria-hidden="true"><path d="{{t.pd}}"></path></svg></button>
+<div style="width:120px;display:flex;flex-direction:column;gap:3px"><span style="font-size:14px;font-weight:600">{{t.n}}</span><span style="font-size:11.5px;color:{{t.sc}}">{{t.s}}</span></div>
+<div style="flex:1;height:64px;position:relative;background:#141518;border-radius:4px">
+<svg width="100%" height="64" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{t.w}}" fill="#D68CB2" fill-opacity="{{t.wo}}"></path></svg>
+<sc-if value="{{t.playing}}" hint-placeholder-val="{{false}}"><div style="position:absolute;left:31%;top:0;bottom:0;width:2px;background:#5EC6D3"></div></sc-if>
+</div>
+<button style="height:30px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Compare</button>
+<button style="height:30px;padding:0 12px;border-radius:6px;border:{{t.kbd}};background:{{t.kbg}};color:{{t.kfg}};font-size:12.5px;font-weight:600">{{t.kl}}</button>
+</article>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:10px;background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px 16px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">Build on Lead B</span><span style="font-size:12px;color:#8D8A85">Each one is a separate layer you can compare and keep</span></div>
+<div style="display:flex;gap:8px"><button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Generate double</button><button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Generate harmony</button><button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Generate adlibs</button><button style="height:34px;padding:0 14px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Backing “ooh” pad</button></div>
+</div>
+<div style="display:flex;gap:16px;font-size:12px;color:#8D8A85;margin-top:auto"><span>Rights: <b style="color:#B0ADA7;font-weight:500">Owned output</b></span><span>Voice: synthetic, no real-artist cloning</span><span>Source: lyrics v2 + Rhodes melody.mid</span><span>Generated today 02:06</span></div>
+</div>
+<aside style="width:300px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:22px 20px;display:flex;flex-direction:column;gap:14px">
+<div style="background:#1C1916;border:1px solid #3A3129;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:20px;height:20px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">L</span><span style="font-size:12.5px;font-weight:600">Lucas</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#D9B98F">JUDGMENT</span></div>
+<div style="font-size:12.5px;line-height:1.55;color:#C9C3BA">B sits in the pocket. A oversings the hook, and C’s phrasing fights the congas in bar 81.</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Lead B · measured</h2>
+<div style="display:flex;justify-content:space-between"><span style="color:#8D8A85">Pitch range</span><span style="font-family:'Geist Mono',monospace">F3 – C5</span></div>
+<div style="display:flex;justify-content:space-between"><span style="color:#8D8A85">Timing vs grid</span><span style="font-family:'Geist Mono',monospace">+12 ms avg</span></div>
+<div style="display:flex;justify-content:space-between"><span style="color:#8D8A85">Sibilance</span><span>moderate</span></div>
+</div>
+</aside>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" title="Lead B" sub="Warm alto · in the mix of v8" time="02:43" pos="0.49" seed="8" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var VOX=[[0,.05],[.04,.8],[.12,.7],[.14,.1],[.18,.85],[.3,.75],[.32,.05],[.4,.8],[.55,.9],[.57,.1],[.62,.75],[.78,.8],[.8,.1],[.85,.6],[.98,.5],[1,.05]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||VOX,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    var PAUSE = 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z', PLAY = 'M8 5.5v13l11-6.5z';
+    function t(n, seed, kept, playing) {
+      return { n: n, w: wf(seed, { n: 220, jag: .55 }), s: kept ? '✓ Kept as layer' : 'Ready', sc: kept ? '#5CC08C' : '#8D8A85', bd: kept ? '#5A4250' : '#26292E', wo: kept ? 0.95 : 0.6, playing: playing,
+        pb: playing ? '#ECE8E1' : '#24262B', pf: playing ? '#141518' : '#EDEBE7', pd: playing ? PAUSE : PLAY,
+        kl: kept ? '✓ Kept' : 'Keep', kbg: kept ? '#ECE8E1' : '#24262B', kfg: kept ? '#141518' : '#EDEBE7', kbd: kept ? '0' : '1px solid #34373D' };
+    }
+    return { takes: [t('Lead A', 701, false, false), t('Lead B', 702, true, true), t('Lead C', 703, false, false)] };
+  }
+}
+</script>
+</body>
+</html>

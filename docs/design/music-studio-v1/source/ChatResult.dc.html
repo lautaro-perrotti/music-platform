@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chat result</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" jobs="0" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="chat" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;overflow:hidden">
+<div style="flex:1;min-width:0;display:flex;flex-direction:column">
+<div style="flex:1;overflow:hidden;padding:20px 56px 10px;display:flex;flex-direction:column;gap:16px">
+
+<div style="display:flex;gap:12px;max-width:780px">
+<span style="width:26px;height:26px;border-radius:5px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B0ADA7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17 17 4l3 3L7 20z M8 13l1.5 1.5M11 10l1.5 1.5M14 7l1.5 1.5"></path></svg></span>
+<section aria-label="Result" style="flex:1;background:#17181B;border:1px solid #26292E;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">Afro percussion pass</span><span style="font-size:12px;color:#8D8A85">4 candidates · volume matched</span></div>
+<sc-for list="{{cands}}" as="c" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;height:34px">
+<span style="width:22px;height:22px;border-radius:4px;background:{{c.kb}};color:{{c.kf}};display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:11.5px;font-weight:600">{{c.k}}</span>
+<button aria-label="Play candidate {{c.k}}" style="width:24px;height:24px;border-radius:50%;border:1px solid #34373D;background:transparent;display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="#B0ADA7" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"></path></svg></button>
+<svg width="300" height="22" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{c.w}}" fill="{{c.wc}}"></path></svg>
+<span style="flex:1"></span><span style="font-size:12px;color:{{c.sc}}">{{c.s}}</span>
+</div>
+</sc-for>
+<div style="display:flex;align-items:center;gap:8px;padding-top:8px;border-top:1px solid #222429;font-size:12.5px"><span style="color:#5CC08C">✓</span>Candidate B kept as <b style="font-weight:600">Afro Groove v7</b><span style="color:#8D8A85">· now active · 01:38</span><a href="Versions.dc.html" style="margin-left:auto;color:#B0ADA7;font-size:12px">Open version →</a></div>
+</section>
+</div>
+
+<div style="display:flex;gap:12px;max-width:780px">
+<span style="width:26px;height:26px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">L</span>
+<section aria-label="Lucas critique" style="flex:1;background:#1C1916;border:1px solid #3A3129;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#EDEBE7">LUCAS CRITIQUE</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#D9B98F;border:1px solid #4A3E2E;border-radius:4px;padding:2px 6px">Musical judgment</span><span style="margin-left:auto;font-size:11.5px;color:#8D8A85">on v7</span></div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;font-size:13px;line-height:1.6">
+<div><div style="font-size:12px;color:#A8B98A;margin-bottom:4px">Strong</div><div style="color:#D6D0C6">Bass groove locks with the congas<br>Keyboard identity survived intact</div></div>
+<div><div style="font-size:12px;color:#D9B98F;margin-bottom:4px">Needs work</div><div style="color:#D6D0C6">Second drop feels too similar to the first<br>Percussion loses movement after 3:20</div></div>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><a href="StudioRegion.dc.html" style="height:28px;padding:0 10px;border-radius:6px;background:#2A2520;border:1px solid #4A3E2E;display:flex;align-items:center;font-size:12px">Create stronger second drop</a><button style="height:28px;padding:0 10px;border-radius:6px;background:#2A2520;border:1px solid #4A3E2E;font-size:12px">Generate percussion variation</button><button style="height:28px;padding:0 10px;border-radius:6px;background:transparent;border:1px solid transparent;color:#8D8A85;font-size:12px">Ignore</button></div>
+</section>
+</div>
+
+<div style="align-self:flex-end;max-width:560px;background:#24262B;border-radius:10px;padding:12px 14px;font-size:14px">Make the second drop stronger</div>
+
+<div style="display:flex;gap:12px;max-width:780px">
+<span style="width:26px;height:26px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">L</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:10px">
+<div style="font-size:14px;line-height:1.6;color:#D6D3CE">Drop 2 reuses most of Drop 1’s bass and percussion. I’d keep the Rhodes, add a percussion layer for lift and generate a bass variation for those 32 bars only.</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12.5px"><b style="font-weight:600">Drop 2</b><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">bars 65–97 · 02:00 → 03:00</span></div>
+<div style="position:relative;height:40px">
+<svg width="100%" height="40" viewBox="0 0 1000 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0" aria-hidden="true"><path d="{{song}}" fill="#4A4C52"></path></svg>
+<div style="position:absolute;left:36.1%;width:18.1%;top:0;bottom:0;background:rgba(94,198,211,0.14);border-left:1px solid #5EC6D3;border-right:1px solid #5EC6D3"></div>
+</div>
+<div style="display:flex;gap:8px"><a href="StudioRegion.dc.html" style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;font-weight:600;font-size:12.5px">Open region in Studio</a><a href="Versions.dc.html" style="height:30px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;font-size:12.5px">Generate variation now</a></div>
+</div>
+</div>
+</div>
+</div>
+<div style="padding:0 56px 18px">
+<div style="background:#1D1F23;border:1px solid #34373D;border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px">
+<input aria-label="Message Lucas" placeholder="Reply to Lucas…" style="flex:1;border:0;background:transparent;outline:none;font-size:14px">
+<button aria-label="Send" style="width:32px;height:32px;border-radius:6px;border:0;background:#34373D;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B0ADA7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+</div>
+</div>
+</div>
+<aside style="width:300px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:22px 20px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">Drop 2 vs Drop 1</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8FB8BE;border:1px solid #2F4A4E;border-radius:4px;padding:2px 6px">Measured</span></div>
+<div style="background:#161A1C;border:1px solid #283236;border-radius:8px;overflow:hidden;font-size:12.5px">
+<sc-for list="{{facts}}" as="f" hint-placeholder-count="5"><div style="display:flex;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #222A2D"><span style="color:#8D8A85">{{f.k}}</span><span style="font-family:'Geist Mono',monospace;font-size:12px">{{f.v}}</span></div></sc-for>
+</div>
+<div style="font-size:11.5px;color:#8D8A85;line-height:1.55">Core measures these values. Similarity is spectral and rhythmic, not a judgment about whether the drop works.</div>
+</aside>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    function c(k, seed, kept) { return { k: k, w: wf(seed, { n: 100 }), wc: kept ? '#CFCBC4' : '#5A5D64', kb: kept ? '#ECE8E1' : '#24262B', kf: kept ? '#141518' : '#B0ADA7', s: kept ? 'Kept · v7' : 'Not kept', sc: kept ? '#EDEBE7' : '#8D8A85' }; }
+    return {
+      cands: [c('A', 101), c('B', 7, true), c('C', 103), c('D', 104)],
+      song: wf(7, { n: 140 }),
+      facts: [{ k: 'Length', v: '32 bars · 1:00' }, { k: 'Energy (RMS)', v: '−11.8 / −11.6 dB' }, { k: 'Similarity to Drop 1', v: '0.88 · high' }, { k: 'Onset density', v: '7.9 / 7.7 per s' }, { k: 'Low end 40–120 Hz', v: '+0.2 dB' }]
+    };
+  }
+}
+</script>
+</body>
+</html>

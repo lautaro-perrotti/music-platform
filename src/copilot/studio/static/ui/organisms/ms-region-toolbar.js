@@ -1,0 +1,1 @@
+import { define } from '../lib/define.js'; define('ms-region-toolbar', () => `<div class="toolbar"><ms-dimension-toggle label="Full mix"></ms-dimension-toggle><span class="spacer"></span><ms-button size="sm" variant="secondary">Generate variation</ms-button></div>`, `.toolbar{display:flex;align-items:center;gap:10px;padding:10px 0}.spacer{flex:1}`);

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>System health</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="health" advanced="true" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;padding:24px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+<div style="display:flex;align-items:flex-end;gap:12px">
+<div style="flex:1;display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em;display:flex;align-items:center;gap:10px">System health<span style="font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid #34373D;color:#8D8A85">Advanced</span></h1><div style="font-size:12.5px;color:#8D8A85">Most things are ready. One local runtime needs you, and cloud voice needs a key.</div></div>
+<button style="height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Check again</button>
+</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+<section style="background:#17181B;border:1px solid #26292E;border-radius:8px;overflow:hidden">
+<h2 style="margin:0;padding:12px 16px;border-bottom:1px solid #26292E;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">{{g.t}}</h2>
+<sc-for list="{{g.items}}" as="i" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 16px;border-bottom:1px solid #222429">
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:13.5px;font-weight:500">{{i.n}}</span><span style="font-size:12px;color:#8D8A85">{{i.d}}</span></div>
+<span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:4px;font-size:12px;font-weight:500;color:{{i.c}};background:{{i.bg}}"><span style="font-size:11px">{{i.g}}</span>{{i.l}}</span>
+<sc-if value="{{i.act}}" hint-placeholder-val="{{false}}"><button style="height:28px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">{{i.act}}</button></sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+var H={ready:['✓','Ready','#5CC08C'],degraded:['◐','Degraded','#E2BE5A'],cred:['◆','Credential required','#93A7FF'],unavailable:['✕','Unavailable','#EF6A5F'],blocked:['⊘','Blocked','#E2BE5A']};
+function h(n,d,k,act){var s=H[k];return {n:n,d:d,g:s[0],l:s[1],c:s[2],bg:s[2]+'1F',act:act||false};}
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      groups: [
+        { t: 'Core', items: [h('API', 'Responding · 38 ms', 'ready'), h('Database', 'Healthy · last backup 01:00', 'ready'), h('Worker', '2 jobs running · 1 slot free', 'ready'), h('Event stream', 'Live updates connected', 'ready')] },
+        { t: 'Integrations', items: [h('Ableton', 'Live 12 · session verified', 'ready'), h('Analysis', 'Tempo, key, sections, loudness', 'ready'), h('Storage', '212 GB free · artifacts 38 GB', 'ready')] },
+        { t: 'Generation', items: [h('Local GPU', 'Memory nearly full · local jobs will queue', 'degraded'), h('ACE-Step', 'The local generation runtime could not start', 'unavailable', 'Retry'), h('ElevenMusic', 'Cloud · ready', 'ready')] },
+        { t: 'Voice', items: [h('ElevenLabs', 'Cloud voice needs an API key', 'cred', 'Add key'), h('Local voice', 'Waiting for ACE-Step runtime', 'blocked')] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

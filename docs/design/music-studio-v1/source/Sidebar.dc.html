@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<nav aria-label="Main" style="width:212px;height:788px;box-sizing:border-box;background:#141518;border-right:1px solid #26292E;display:flex;flex-direction:column;padding:12px 10px;font-family:Geist,system-ui,sans-serif;color:#EDEBE7">
+<sc-for list="{{top}}" as="it" hint-placeholder-count="1">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:13.5px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+</a>
+</sc-for>
+<div style="padding:16px 10px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Rhythm Ashanti</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{song}}" as="it" hint-placeholder-count="9">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:13.5px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+<sc-if value="{{it.kbd}}" hint-placeholder-val="{{false}}"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#6F6C68">{{it.kbd}}</span></sc-if>
+</a>
+</sc-for>
+</div>
+<div style="padding:16px 10px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Work</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{work}}" as="it" hint-placeholder-count="3">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:13.5px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+<sc-if value="{{it.badge}}" hint-placeholder-val="{{false}}"><span style="min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:#23373A;color:#5EC6D3;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center">{{it.badge}}</span></sc-if>
+<sc-if value="{{it.dot}}" hint-placeholder-val="{{false}}"><span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:#8D8A85"><span style="width:7px;height:7px;border-radius:50%;background:{{it.dot}}"></span>{{it.dotLabel}}</span></sc-if>
+</a>
+</sc-for>
+</div>
+<div style="flex:1"></div>
+<div style="border-top:1px solid #26292E;padding-top:8px;display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{sys}}" as="it" hint-placeholder-count="2">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+</a>
+</sc-for>
+<div style="display:flex;align-items:center;justify-content:space-between;height:36px;padding:0 10px;margin-top:4px">
+<span style="font-size:12.5px;color:#8D8A85">Advanced mode</span>
+<button role="switch" aria-checked="{{advOn}}" aria-label="Advanced mode" style="width:30px;height:18px;border-radius:9px;border:0;padding:2px;background:{{advTrack}};display:flex;justify-content:{{advJustify}};cursor:pointer"><span style="width:14px;height:14px;border-radius:50%;background:#ECE8E1;display:block"></span></button>
+</div>
+</div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["projects","project","chat","create","studio","versions","references","stems","voice","mix","jobs","ableton","activity","health","settings"],"default":"project"},"advanced":{"editor":"boolean","default":false},"$preview":{"width":212,"height":788}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var a = this.props.active || 'project';
+    var adv = this.props.advanced === true || this.props.advanced === 'true';
+    function mk(list) {
+      return list.map(function (it) {
+        var on = it.k === a;
+        return Object.assign({ kbd: false, badge: false, dot: false }, it, {
+          bg: on ? '#24262B' : 'transparent', fg: on ? '#EDEBE7' : '#B0ADA7', ic: on ? '#5EC6D3' : '#8D8A85', fw: on ? '500' : '400'
+        });
+      });
+    }
+    return {
+      top: mk([{ k: 'projects', label: 'All projects', href: 'Projects.dc.html', d: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' }]),
+      song: mk([
+        { k: 'project', label: 'Overview', href: 'ProjectHome.dc.html', d: 'M4 10.5 12 4l8 6.5V20H4z M9.5 20v-5.5h5V20' },
+        { k: 'chat', label: 'Chat', href: 'Chat.dc.html', d: 'M4 5h16v11H9l-5 4z', kbd: '/' },
+        { k: 'create', label: 'Create', href: 'Create.dc.html', d: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M18.5 16v4M16.5 18h4', kbd: 'G' },
+        { k: 'studio', label: 'Studio', href: 'Studio.dc.html', d: 'M3 6h18M3 12h18M3 18h18M8 4v4M15 10v4M11 16v4' },
+        { k: 'versions', label: 'Versions', href: 'Versions.dc.html', d: 'M6 3v18M6 8c6 0 12 1 12 8v5' },
+        { k: 'references', label: 'References', href: 'References.dc.html', d: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M10 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0' },
+        { k: 'stems', label: 'Stems', href: 'Stems.dc.html', d: 'M12 3 3 7.5l9 4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5' },
+        { k: 'voice', label: 'Voice', href: 'Voice.dc.html', d: 'M9 4a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z M5 11a7 7 0 0 0 14 0 M12 18v3' },
+        { k: 'mix', label: 'Mix / Master', href: 'MixMaster.dc.html', d: 'M6 3v18M12 3v18M18 3v18M4 8h4M10 15h4M16 10h4' }
+      ]),
+      work: mk([
+        { k: 'jobs', label: 'Jobs', href: 'Jobs.dc.html', d: 'M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1', badge: '2' },
+        { k: 'ableton', label: 'Ableton', href: 'Ableton.dc.html', d: 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z M12 16v5', dot: '#5CC08C', dotLabel: 'Live' },
+        { k: 'activity', label: 'Activity', href: 'Activity.dc.html', d: 'M3 12h4l3-7 4 14 3-7h4' }
+      ]),
+      sys: mk([
+        { k: 'health', label: 'System health', href: 'SystemHealth.dc.html', d: 'M4 16a8 8 0 1 1 16 0 M12 16l4-5' },
+        { k: 'settings', label: 'Settings', href: 'Providers.dc.html', d: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4' }
+      ]),
+      advOn: adv ? 'true' : 'false', advTrack: adv ? '#5EC6D3' : '#34373D', advJustify: adv ? 'flex-end' : 'flex-start'
+    };
+  }
+}
+</script>
+</body>
+</html>

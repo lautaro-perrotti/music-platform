@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>States</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:1500px;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;padding:56px;display:flex;flex-direction:column;gap:40px;overflow:hidden">
+<div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">System states</div><h1 style="margin:0;font-size:30px;font-weight:600;letter-spacing:-0.02em">Empty, loading, failure, disconnected and review</h1><p style="margin:0;font-size:14px;color:#B0ADA7;max-width:820px;line-height:1.55">States use plain words, show the real stage and offer a next step. There are no illustrations, tracebacks or endless spinners.</p></div>
+
+<section style="display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Empty</h2>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:28px 22px;display:flex;flex-direction:column;gap:10px;min-height:220px">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6F6C68" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"></path></svg>
+<div style="font-size:15px;font-weight:600">Create your first project</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.5">A project is one song. Every version, reference and job for that song stays inside it.</div>
+<button style="margin-top:auto;align-self:flex-start;height:32px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">New project</button>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:28px 22px;display:flex;flex-direction:column;gap:10px;min-height:220px">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6F6C68" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>
+<div style="font-size:15px;font-weight:600">Describe what you want to make</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.5">Try “Funky club house at 128 BPM with warm Rhodes and an elastic bassline.”</div>
+<button style="margin-top:auto;align-self:flex-start;height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Start in Create · G</button>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:28px 22px;display:flex;flex-direction:column;gap:10px;min-height:220px">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6F6C68" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M10 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0"></path></svg>
+<div style="font-size:15px;font-weight:600">No references yet</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.5">Add a track to guide groove, arrangement or sound. You choose what it’s used for.</div>
+<button style="margin-top:auto;align-self:flex-start;height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Add reference</button>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:28px 22px;display:flex;flex-direction:column;gap:10px;min-height:220px">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6F6C68" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z M12 16v5"></path></svg>
+<div style="font-size:15px;font-weight:600">Ableton is not connected</div>
+<div style="font-size:12.5px;color:#8D8A85;line-height:1.5">Music generation still works. Connect when you want to move a version into Live.</div>
+<button style="margin-top:auto;align-self:flex-start;height:32px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Connect Ableton</button>
+</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Loading · stage-based, never fake percentages</h2>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font-size:13px;font-weight:600">Generate 4 versions</div>
+<div style="font-size:12.5px;color:#5CC08C">✓ Preparing provider</div><div style="font-size:12.5px;color:#5EC6D3">● Generating audio · candidate 2</div><div style="font-size:12.5px;color:#8D8A85">○ Validating file</div><div style="font-size:12.5px;color:#8D8A85">○ Saving candidate</div>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<div style="font-size:13px;font-weight:600">Opening project</div>
+<div style="height:14px;width:60%;border-radius:3px;background:#222429"></div><div style="height:48px;border-radius:4px;background:#1D1F23"></div><div style="height:10px;width:40%;border-radius:3px;background:#222429"></div>
+<div style="font-size:11.5px;color:#8D8A85">Skeletons are only used on first load, under 1 s</div>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font-size:13px;font-weight:600">Analyze reference</div>
+<div style="font-size:12.5px;color:#5CC08C">✓ Reading file</div><div style="font-size:12.5px;color:#5CC08C">✓ Tempo and key</div><div style="font-size:12.5px;color:#5EC6D3">● Detecting sections</div><div style="font-size:12.5px;color:#8D8A85">○ Groove and instrumentation</div>
+</div>
+<div style="background:#17181B;border:1px solid #2F4A4E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font-size:13px;font-weight:600">Apply v8 to Ableton</div>
+<div style="font-size:12.5px;color:#5CC08C">✓ Pre-state saved</div><div style="font-size:12.5px;color:#5CC08C">✓ Applying to Ableton · 6 steps</div><div style="font-size:12.5px;color:#5EC6D3">● Verifying Ableton state · 4 of 6</div><div style="font-size:12.5px;color:#8D8A85">○ Keep or roll back</div>
+</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Failure · typed, with a next step</h2>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+<div style="background:#1E1616;border:1px solid #4A2C2A;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="color:#EF6A5F">✕</span><span style="font-size:14px;font-weight:600">ACE-Step unavailable</span></div>
+<div style="font-size:12.5px;color:#C9B5B2;line-height:1.5">The local generation runtime could not start.</div>
+<div style="display:flex;gap:8px"><button style="height:30px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Retry</button><button style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Use another provider</button></div>
+<button style="align-self:flex-start;border:0;background:transparent;color:#8D8A85;font-size:12px;padding:0">Advanced ▸ exit code, runtime log</button>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;gap:12px">
+<span style="width:24px;height:24px;border-radius:50%;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">L</span>
+<div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:13px;line-height:1.5;color:#D6D3CE">I couldn’t generate the adlibs. The voice provider needs an API key. Your lead take is safe.</div>
+<div style="display:flex;gap:8px"><button style="height:28px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">Add key</button><button style="height:28px;padding:0 10px;border-radius:6px;background:transparent;border:1px solid #2B2E34;color:#B0ADA7;font-size:12px">Try local voice</button></div></div>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:4px;font-size:12px;color:#EF6A5F;background:#EF6A5F1F">✕ Failed</span><span style="font-size:13px;font-weight:600">Candidate D</span></div>
+<div style="font-size:12.5px;color:#B0ADA7;line-height:1.5">The file came back shorter than asked (2:10 of 5:30), so it wasn’t saved. A, B and C are fine.</div>
+<div style="display:flex;gap:8px"><button style="height:28px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">Generate D again</button><button style="height:28px;padding:0 10px;border-radius:6px;background:transparent;border:0;color:#8D8A85;font-size:12px">Dismiss</button></div>
+</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Disconnected, in doubt and review required</h2>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+<div style="display:flex;flex-direction:column;gap:10px">
+<div role="status" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#17181B;border:1px solid #34373D;font-size:12.5px"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid #8D8A85"></span><span style="flex:1"><b style="font-weight:600">Ableton disconnected.</b> <span style="color:#8D8A85">Generation and review still work.</span></span><button style="height:26px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">Reconnect</button></div>
+<div role="status" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#1D1B15;border:1px solid #3F3822;font-size:12.5px"><span style="color:#E2BE5A">◐</span><span style="flex:1"><b style="font-weight:600">Ableton degraded.</b> <span style="color:#B0ADA7">Replies are slow, so writes are paused until they recover.</span></span></div>
+</div>
+<div style="border:1px solid #5A3B28;border-radius:8px;background:repeating-linear-gradient(135deg,#1F1813 0 10px,#221A14 10px 20px);padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid #F08A4B;color:#F08A4B;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">?</span><b style="font-size:14px;font-weight:600">In doubt</b></div>
+<div style="font-size:12.5px;color:#D1C3B6;line-height:1.5">An Ableton write may have occurred but could not be verified. Other writes to this project are paused until you inspect it.</div>
+<div style="display:flex;gap:8px"><button style="height:30px;padding:0 12px;border-radius:6px;background:#2A211B;border:1px solid #5A3B28;font-size:12.5px">Inspect</button><button style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Reconcile</button></div>
+</div>
+<div style="background:#181A22;border:1px solid #333A57;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px"><span style="color:#93A7FF">◆</span><b style="font-size:14px;font-weight:600">Review required</b></div>
+<div style="font-size:12.5px;color:#C2C6D6;line-height:1.5">No separation of the “Other” stem was clearly best. Listen to the four and pick one. Nothing is selected automatically.</div>
+<button style="align-self:flex-start;height:30px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Review stems</button>
+</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Notifications · only events that matter</h2>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
+<sc-for list="{{toasts}}" as="t" hint-placeholder-count="6">
+<div role="status" style="background:#1F2126;border:1px solid #34373D;border-radius:8px;box-shadow:0 12px 28px rgba(0,0,0,0.4);padding:12px 14px;display:flex;align-items:center;gap:10px">
+<span style="width:14px;font-size:12px;color:{{t.c}}">{{t.g}}</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-weight:600">{{t.t}}</span><span style="font-size:12px;color:#8D8A85">{{t.s}}</span></div>
+<button style="height:26px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">{{t.a}}</button>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      toasts: [
+        { g: '✓', c: '#5CC08C', t: 'Candidate B ready', s: 'Afro percussion pass', a: 'Play' },
+        { g: '✓', c: '#5CC08C', t: 'Generation complete', s: '4 of 4 candidates', a: 'Compare' },
+        { g: '✕', c: '#EF6A5F', t: 'Job failed', s: 'Generate adlibs · Carabela', a: 'Details' },
+        { g: '✕', c: '#EF6A5F', t: 'Provider unavailable', s: 'ACE-Step · switched to Best available', a: 'Undo' },
+        { g: '○', c: '#8D8A85', t: 'Ableton disconnected', s: 'Generation still works', a: 'Reconnect' },
+        { g: '◆', c: '#93A7FF', t: 'Review required', s: 'Stems · Other', a: 'Review' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
