@@ -58,6 +58,20 @@ runtime visual layer was removed instead of being overridden.
   recent prompt selection works, and version count changes work.
 - Musical writes: `0`.
 
+### References library - SOURCE TRANSPLANT ACTIVE
+
+- Source: `source/References.dc.html`.
+- The references route now uses the source grid of six evidence cards with
+  waveforms, type, duration, rights, analysis state, and intended use.
+- Existing reference records are used when available; the remaining catalog
+  rows are explicit source-shaped mocks so the library composition is complete
+  while the backend grows.
+- Search and type filters are functional. Add reference remains connected to
+  the existing durable action boundary.
+- Browser validation: `http://127.0.0.1:8791/#references`; MIDI filtering was
+  exercised and reduced the grid to the matching card.
+- Musical writes: `0`.
+
 ## Queue
 
 1. Finish Projects comparison and acceptance.
