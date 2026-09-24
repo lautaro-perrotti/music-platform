@@ -72,6 +72,22 @@ runtime visual layer was removed instead of being overridden.
   exercised and reduced the grid to the matching card.
 - Musical writes: `0`.
 
+### Versions - SOURCE TRANSPLANT ACTIVE
+
+- Source: `source/Versions.dc.html`.
+- The versions route now uses the source lineage layout with eight historical
+  rows, branch connectors, waveforms, status badges, compare actions, and the
+  selected-version inspector.
+- Durable versions are used when available; the remaining history is filled
+  with explicit source-shaped mocks so the non-destructive timeline is
+  visible before the backend has a full project history.
+- All/Kept/In Ableton filters are functional. Compare and Apply to Ableton
+  remain routed through existing safe review surfaces; no direct write was
+  introduced.
+- Browser validation: `http://127.0.0.1:8791/#versions` renders the full
+  lineage and inspector.
+- Musical writes: `0`.
+
 ## Queue
 
 1. Finish Projects comparison and acceptance.
