@@ -88,6 +88,21 @@ runtime visual layer was removed instead of being overridden.
   lineage and inspector.
 - Musical writes: `0`.
 
+### Remaining product screens - SOURCE TRANSPLANT ACTIVE
+
+- Results, Compare, Chat, Jobs, Ableton, Mix / Master, Activity, Providers,
+  Stems, Studio, Voice, and System Health now use Claude-source compositions
+  with the existing route and action boundaries preserved.
+- Each screen keeps its product-specific source hierarchy: blind candidate
+  review, A/B comparison, Lucas plan/chat, background jobs, Ableton state,
+  measured mix facts, musical activity, provider routing, stem review hold,
+  timeline editing, voice direction, and environment health.
+- Real workspace data is used where available; missing backend fields are
+  filled with explicit source-shaped mocks, never with a new visual language.
+- Browser route sweep: all 12 routes rendered with visible headings at
+  `http://127.0.0.1:8791/`.
+- Musical writes: `0`.
+
 ## Queue
 
 1. Finish Projects comparison and acceptance.
