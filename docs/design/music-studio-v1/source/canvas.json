@@ -1,76 +1,446 @@
 {
   "v": 3,
-  "createdOnFiles": {"v": 1, "at": "2026-09-24T12:00:00Z"},
-  "title": "Music Studio",
-  "launch": {"view": "canvas"},
-  "pages": [],
+  "attachments": {},
   "boards": {
-    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 2480, "title": "00 · Product system"},
-    "States.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 1500, "title": "00 · Empty, loading, failure, review states"},
-    "Mobile.dc.html": {"x": 3040, "y": 0, "w": 1400, "h": 1060, "title": "00 · Mobile review"},
-    "TopBar.dc.html": {"x": 4520, "y": 0, "w": 1440, "h": 48, "title": "Component · Top bar"},
-    "Sidebar.dc.html": {"x": 4520, "y": 128, "w": 212, "h": 788, "title": "Component · Sidebar", "is_interactive": true},
-    "Player.dc.html": {"x": 4520, "y": 996, "w": 1440, "h": 64, "title": "Component · Global player"},
-
-    "Projects.dc.html": {"x": 0, "y": 2880, "w": 1440, "h": 900, "title": "01 · Projects", "is_interactive": true},
-    "ProjectHome.dc.html": {"x": 1520, "y": 2880, "w": 1440, "h": 900, "title": "02 · Project home", "is_interactive": true},
-    "Create.dc.html": {"x": 3040, "y": 2880, "w": 1440, "h": 900, "title": "06 · Create · simple", "is_interactive": true},
-    "CreateAdvanced.dc.html": {"x": 4560, "y": 2880, "w": 1440, "h": 900, "title": "07 · Create · advanced", "is_interactive": true},
-
-    "Results.dc.html": {"x": 0, "y": 4200, "w": 1440, "h": 900, "title": "08 · Generation results", "is_interactive": true},
-    "Compare.dc.html": {"x": 1520, "y": 4200, "w": 1440, "h": 900, "title": "09 · Candidate compare", "is_interactive": true},
-    "Versions.dc.html": {"x": 3040, "y": 4200, "w": 1440, "h": 900, "title": "12 · Versions", "is_interactive": true},
-    "VersionCompare.dc.html": {"x": 4560, "y": 4200, "w": 1440, "h": 900, "title": "13 · Version compare", "is_interactive": true},
-
-    "Chat.dc.html": {"x": 0, "y": 5520, "w": 1440, "h": 900, "title": "03 · Chat · plan", "is_interactive": true},
-    "ChatRunning.dc.html": {"x": 1520, "y": 5520, "w": 1440, "h": 900, "title": "04 · Chat · generation running", "is_interactive": true},
-    "ChatResult.dc.html": {"x": 3040, "y": 5520, "w": 1440, "h": 900, "title": "05 · Chat · result, critique, next step", "is_interactive": true},
-    "CommandPalette.dc.html": {"x": 4560, "y": 5520, "w": 1440, "h": 900, "title": "Command palette · Ctrl K", "is_interactive": true},
-
-    "Studio.dc.html": {"x": 0, "y": 6840, "w": 1440, "h": 900, "title": "10 · Studio · full timeline", "is_interactive": true},
-    "StudioRegion.dc.html": {"x": 1520, "y": 6840, "w": 1440, "h": 900, "title": "11 · Studio · region selected", "is_interactive": true},
-    "MixMaster.dc.html": {"x": 3040, "y": 6840, "w": 1440, "h": 900, "title": "28 · Mix / Master", "is_interactive": true},
-    "Activity.dc.html": {"x": 4560, "y": 6840, "w": 1440, "h": 900, "title": "27 · Project activity", "is_interactive": true},
-
-    "References.dc.html": {"x": 0, "y": 8160, "w": 1440, "h": 900, "title": "14 · References library", "is_interactive": true},
-    "ReferenceDetail.dc.html": {"x": 1520, "y": 8160, "w": 1440, "h": 900, "title": "15 · Reference detail", "is_interactive": true},
-    "AddReference.dc.html": {"x": 3040, "y": 8160, "w": 1440, "h": 900, "title": "16 · Add reference", "is_interactive": true},
-
-    "Stems.dc.html": {"x": 0, "y": 9480, "w": 1440, "h": 900, "title": "17 · Stems · best per stem", "is_interactive": true},
-    "StemCompare.dc.html": {"x": 1520, "y": 9480, "w": 1440, "h": 900, "title": "18 · Stem compare", "is_interactive": true},
-    "Voice.dc.html": {"x": 3040, "y": 9480, "w": 1440, "h": 900, "title": "19 · Voice studio", "is_interactive": true},
-    "VoiceResults.dc.html": {"x": 4560, "y": 9480, "w": 1440, "h": 900, "title": "20 · Voice results", "is_interactive": true},
-
-    "Jobs.dc.html": {"x": 0, "y": 10800, "w": 1440, "h": 900, "title": "21 · Jobs", "is_interactive": true},
-    "JobDetail.dc.html": {"x": 1520, "y": 10800, "w": 1440, "h": 900, "title": "22 · Job detail", "is_interactive": true},
-    "Ableton.dc.html": {"x": 3040, "y": 10800, "w": 1440, "h": 900, "title": "23 · Ableton status", "is_interactive": true},
-    "ApplyVersion.dc.html": {"x": 4560, "y": 10800, "w": 1440, "h": 900, "title": "24 · Apply version to Ableton", "is_interactive": true},
-
-    "SystemHealth.dc.html": {"x": 0, "y": 12120, "w": 1440, "h": 900, "title": "25 · System health · Advanced", "is_interactive": true},
-    "Providers.dc.html": {"x": 1520, "y": 12120, "w": 1440, "h": 900, "title": "26 · Settings / Providers", "is_interactive": true}
+    "Ableton.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "23 · Ableton status",
+      "w": 1440,
+      "x": 3040,
+      "y": 10800
+    },
+    "Activity.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "27 · Project activity",
+      "w": 1440,
+      "x": 4560,
+      "y": 6840
+    },
+    "AddReference.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "16 · Add reference",
+      "w": 1440,
+      "x": 3040,
+      "y": 8160
+    },
+    "ApplyVersion.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "24 · Apply version to Ableton",
+      "w": 1440,
+      "x": 4560,
+      "y": 10800
+    },
+    "Chat.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "03 · Chat · plan",
+      "w": 1440,
+      "x": 0,
+      "y": 5520
+    },
+    "ChatResult.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "05 · Chat · result, critique, next step",
+      "w": 1440,
+      "x": 3040,
+      "y": 5520
+    },
+    "ChatRunning.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "04 · Chat · generation running",
+      "w": 1440,
+      "x": 1520,
+      "y": 5520
+    },
+    "CommandPalette.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Command palette · Ctrl K",
+      "w": 1440,
+      "x": 4560,
+      "y": 5520
+    },
+    "Compare.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "09 · Candidate compare",
+      "w": 1440,
+      "x": 1520,
+      "y": 4200
+    },
+    "Create.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "06 · Create · simple",
+      "w": 1440,
+      "x": 3040,
+      "y": 2880
+    },
+    "CreateAdvanced.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "07 · Create · advanced",
+      "w": 1440,
+      "x": 4560,
+      "y": 2880
+    },
+    "JobDetail.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "22 · Job detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 10800
+    },
+    "Jobs.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "21 · Jobs",
+      "w": 1440,
+      "x": 0,
+      "y": 10800
+    },
+    "Main.dc.html": {
+      "h": 2480,
+      "title": "00 · Product system",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "MixMaster.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "28 · Mix / Master",
+      "w": 1440,
+      "x": 3040,
+      "y": 6840
+    },
+    "Mobile.dc.html": {
+      "h": 1060,
+      "title": "00 · Mobile review",
+      "w": 1400,
+      "x": 3040,
+      "y": 0
+    },
+    "Player.dc.html": {
+      "h": 64,
+      "title": "Component · Global player",
+      "w": 1440,
+      "x": 4520,
+      "y": 996
+    },
+    "ProjectHome.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "02 · Project home",
+      "w": 1440,
+      "x": 1520,
+      "y": 2880
+    },
+    "Projects.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "01 · Projects",
+      "w": 1440,
+      "x": 0,
+      "y": 2880
+    },
+    "Providers.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "26 · Settings / Providers",
+      "w": 1440,
+      "x": 1520,
+      "y": 12120
+    },
+    "ReferenceDetail.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "15 · Reference detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 8160
+    },
+    "References.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "14 · References library",
+      "w": 1440,
+      "x": 0,
+      "y": 8160
+    },
+    "Results.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "08 · Generation results",
+      "w": 1440,
+      "x": 0,
+      "y": 4200
+    },
+    "Sidebar.dc.html": {
+      "h": 788,
+      "is_interactive": true,
+      "title": "Component · Sidebar",
+      "w": 212,
+      "x": 4520,
+      "y": 128
+    },
+    "States.dc.html": {
+      "h": 1500,
+      "title": "00 · Empty, loading, failure, review states",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "StemCompare.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "18 · Stem compare",
+      "w": 1440,
+      "x": 1520,
+      "y": 9480
+    },
+    "Stems.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "17 · Stems · best per stem",
+      "w": 1440,
+      "x": 0,
+      "y": 9480
+    },
+    "Studio.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "10 · Studio · full timeline",
+      "w": 1440,
+      "x": 0,
+      "y": 6840
+    },
+    "StudioRegion.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "11 · Studio · region selected",
+      "w": 1440,
+      "x": 1520,
+      "y": 6840
+    },
+    "SystemHealth.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "25 · System health · Advanced",
+      "w": 1440,
+      "x": 0,
+      "y": 12120
+    },
+    "TopBar.dc.html": {
+      "h": 48,
+      "title": "Component · Top bar",
+      "w": 1440,
+      "x": 4520,
+      "y": 0
+    },
+    "VersionCompare.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "13 · Version compare",
+      "w": 1440,
+      "x": 4560,
+      "y": 4200
+    },
+    "Versions.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "12 · Versions",
+      "w": 1440,
+      "x": 3040,
+      "y": 4200
+    },
+    "Voice.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "19 · Voice studio",
+      "w": 1440,
+      "x": 3040,
+      "y": 9480
+    },
+    "VoiceResults.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "20 · Voice results",
+      "w": 1440,
+      "x": 4560,
+      "y": 9480
+    },
+    "NewProject.dc.html": {
+      "x": 6080,
+      "y": 2880,
+      "w": 1440,
+      "h": 900,
+      "title": "01b · New project · from an idea (interactive)",
+      "is_interactive": true
+    },
+    "NewProjectAbleton.dc.html": {
+      "x": 7600,
+      "y": 2880,
+      "w": 1440,
+      "h": 900,
+      "title": "01c · New project · from an Ableton set",
+      "is_interactive": true
+    },
+    "ProjectSwitcher.dc.html": {
+      "x": 6040,
+      "y": 0,
+      "w": 1440,
+      "h": 640,
+      "title": "Component · Project switcher (open)",
+      "is_interactive": true
+    },
+    "VersionSwitcher.dc.html": {
+      "x": 6040,
+      "y": 760,
+      "w": 1440,
+      "h": 640,
+      "title": "Component · Version switcher (open)",
+      "is_interactive": true
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-24T12:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "flow": {
+      "fill": "gray",
+      "size": 24,
+      "text": "Clickable flow (Play mode):\nProjects → New project → Create → Generate 4 versions → Results (A playing, B ready) → Compare A/B → Keep B → Chat (kept as v7 + Lucas critique) → “Make the second drop stronger” → Studio region → Generate variation → Versions (v8 new) → Compare v7/v8 → Apply to Ableton → Ableton (verified) → Continue producing.\n\nThe sidebar links every screen.",
+      "w": 520,
+      "x": 4560,
+      "y": 8160
+    },
+    "t0": {
+      "kind": "title1",
+      "maxW": 7480,
+      "text": "System · language, states, mobile, shell components",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t1": {
+      "kind": "title1",
+      "maxW": 9040,
+      "text": "Start · projects, home, create",
+      "w": 240,
+      "x": 0,
+      "y": 2580
+    },
+    "t2": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Generate → compare → keep → version",
+      "w": 240,
+      "x": 0,
+      "y": 3900
+    },
+    "t3": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Lucas · chat as a production surface",
+      "w": 240,
+      "x": 0,
+      "y": 5220
+    },
+    "t4": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Studio · sections, mix, history",
+      "w": 240,
+      "x": 0,
+      "y": 6540
+    },
+    "t5": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "References · what to borrow, and why",
+      "w": 240,
+      "x": 0,
+      "y": 7860
+    },
+    "t6": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Stems and voice",
+      "w": 240,
+      "x": 0,
+      "y": 9180
+    },
+    "t7": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Jobs and Ableton · review, apply, verify",
+      "w": 240,
+      "x": 0,
+      "y": 10500
+    },
+    "t8": {
+      "kind": "title1",
+      "maxW": 5960,
+      "text": "Advanced",
+      "w": 240,
+      "x": 0,
+      "y": 11820
+    }
   },
   "order": [
-    "Main.dc.html", "States.dc.html", "Mobile.dc.html", "TopBar.dc.html", "Sidebar.dc.html", "Player.dc.html",
-    "Projects.dc.html", "ProjectHome.dc.html", "Create.dc.html", "CreateAdvanced.dc.html",
-    "Results.dc.html", "Compare.dc.html", "Versions.dc.html", "VersionCompare.dc.html",
-    "Chat.dc.html", "ChatRunning.dc.html", "ChatResult.dc.html", "CommandPalette.dc.html",
-    "Studio.dc.html", "StudioRegion.dc.html", "MixMaster.dc.html", "Activity.dc.html",
-    "References.dc.html", "ReferenceDetail.dc.html", "AddReference.dc.html",
-    "Stems.dc.html", "StemCompare.dc.html", "Voice.dc.html", "VoiceResults.dc.html",
-    "Jobs.dc.html", "JobDetail.dc.html", "Ableton.dc.html", "ApplyVersion.dc.html",
-    "SystemHealth.dc.html", "Providers.dc.html"
+    "Main.dc.html",
+    "States.dc.html",
+    "Mobile.dc.html",
+    "TopBar.dc.html",
+    "Sidebar.dc.html",
+    "Player.dc.html",
+    "VersionSwitcher.dc.html",
+    "ProjectSwitcher.dc.html",
+    "Projects.dc.html",
+    "ProjectHome.dc.html",
+    "Create.dc.html",
+    "CreateAdvanced.dc.html",
+    "NewProject.dc.html",
+    "NewProjectAbleton.dc.html",
+    "Results.dc.html",
+    "Compare.dc.html",
+    "Versions.dc.html",
+    "VersionCompare.dc.html",
+    "Chat.dc.html",
+    "ChatRunning.dc.html",
+    "ChatResult.dc.html",
+    "CommandPalette.dc.html",
+    "Studio.dc.html",
+    "StudioRegion.dc.html",
+    "MixMaster.dc.html",
+    "Activity.dc.html",
+    "References.dc.html",
+    "ReferenceDetail.dc.html",
+    "AddReference.dc.html",
+    "Stems.dc.html",
+    "StemCompare.dc.html",
+    "Voice.dc.html",
+    "VoiceResults.dc.html",
+    "Jobs.dc.html",
+    "JobDetail.dc.html",
+    "Ableton.dc.html",
+    "ApplyVersion.dc.html",
+    "SystemHealth.dc.html",
+    "Providers.dc.html"
   ],
-  "notes": {
-    "t0": {"x": 0, "y": -300, "text": "System · language, states, mobile, shell components", "kind": "title1", "maxW": 5960},
-    "t1": {"x": 0, "y": 2580, "text": "Start · projects, home, create", "kind": "title1", "maxW": 5960},
-    "t2": {"x": 0, "y": 3900, "text": "Generate → compare → keep → version", "kind": "title1", "maxW": 5960},
-    "t3": {"x": 0, "y": 5220, "text": "Lucas · chat as a production surface", "kind": "title1", "maxW": 5960},
-    "t4": {"x": 0, "y": 6540, "text": "Studio · sections, mix, history", "kind": "title1", "maxW": 5960},
-    "t5": {"x": 0, "y": 7860, "text": "References · what to borrow, and why", "kind": "title1", "maxW": 5960},
-    "t6": {"x": 0, "y": 9180, "text": "Stems and voice", "kind": "title1", "maxW": 5960},
-    "t7": {"x": 0, "y": 10500, "text": "Jobs and Ableton · review, apply, verify", "kind": "title1", "maxW": 5960},
-    "t8": {"x": 0, "y": 11820, "text": "Advanced", "kind": "title1", "maxW": 5960},
-    "flow": {"x": 4560, "y": 8160, "w": 520, "text": "Clickable flow (Play mode):\nProjects → New project → Create → Generate 4 versions → Results (A playing, B ready) → Compare A/B → Keep B → Chat (kept as v7 + Lucas critique) → “Make the second drop stronger” → Studio region → Generate variation → Versions (v8 new) → Compare v7/v8 → Apply to Ableton → Ableton (verified) → Continue producing.\n\nThe sidebar links every screen.", "fill": "gray", "size": "m"}
-  },
-  "designSystems": []
+  "pages": [],
+  "title": "Music Studio"
 }

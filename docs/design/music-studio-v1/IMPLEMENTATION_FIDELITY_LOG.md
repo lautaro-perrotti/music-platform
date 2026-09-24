@@ -43,6 +43,23 @@ runtime visual layer was removed instead of being overridden.
   source layout, waveform, and working navigation/action links.
 - Musical writes: `0`.
 
+### New project and header switchers - SOURCE TRANSPLANT ACTIVE
+
+- Synced the new Claude sources: `NewProject`, `NewProjectAbleton`,
+  `ProjectSwitcher`, and `VersionSwitcher`, plus the updated `Projects`,
+  `TopBar`, `canvas.json`, and `CODEX_PROMPT.md`.
+- `New project` is now a distinct route from `Create`: it supports An idea,
+  Audio, Ableton set, and Empty modes, with source-shaped details and the
+  corresponding CTA. The Ableton mode exposes read-only Core checks and the
+  Working Copy boundary; it does not write to Live.
+- The project switcher is available from the top-bar project name and keeps
+  the active project visibly distinct from recent projects.
+- The version switcher is available from the top-bar version chip and keeps
+  Active distinct from In Ableton.
+- Browser validation: `#new-project`, all four mode routes,
+  `#project-switcher`, and `#version-switcher` rendered successfully.
+- Musical writes: `0`.
+
 ### Create simple - SOURCE TRANSPLANT ACTIVE
 
 - Source: `source/Create.dc.html`.

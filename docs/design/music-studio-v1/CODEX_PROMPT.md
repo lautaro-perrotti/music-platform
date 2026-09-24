@@ -115,7 +115,7 @@ Si en los archivos fuente encontrás más repetición, agregá componentes.
 
 **Organisms**
 
-- `ms-top-bar`
+- `ms-top-bar`: compone `ms-project-switcher` y `ms-version-switcher`, que se abren desde el nombre del proyecto y el chip de versión. Si la versión Active difiere de la que está In Ableton, lo avisa.
 - `ms-sidebar` (prop active, modo avanzado)
 - `ms-player` (global, persistente)
 - `ms-candidate-card` (ready, generating, queued, failed)
@@ -138,6 +138,19 @@ Si en los archivos fuente encontrás más repetición, agregá componentes.
 - `ms-inspector`
 - `ms-provider-card`
 - `ms-health-row`
+- `ms-project-switcher`: dropdown del top bar (`ProjectSwitcher.dc.html`). Tiene búsqueda, el proyecto activo fijado arriba con check y badge Active, recientes con su estado (in doubt, review, failed), "Make active" con ↵, y links a All projects y New project. Atajo P. Evento `ms-project-activate`.
+- `ms-version-switcher`: dropdown del top bar (`VersionSwitcher.dc.html`). Muestra dos conceptos distintos: **Active** (la versión sobre la que trabajás) e **In Ableton** (la última aplicada y verificada). Filas con preview, Compare y Activate, más los links All versions y Compare active with…. Atajo V. Evento `ms-version-activate`.
+- `ms-new-project`: formulario de alta (`NewProject.dc.html`, interactivo). Incluye:
+  - Nombre y línea descriptiva.
+  - "Start from", con 4 opciones: An idea, Audio, Ableton set, Empty.
+  - Un panel que cambia según la opción elegida.
+  - El marco musical: tempo constante, key, compás, duración y vocals. Los campos se bloquean si vienen de Live o del audio.
+  - Referencias con su propósito.
+  - "Direction for Lucas".
+  - Un resumen "What will happen" que cambia con el modo.
+  - Un CTA que cambia con el modo.
+
+  En el modo Ableton muestra los checks de Core: set guardado, tempo constante, handshake y pool de captura. También deja claro que el trabajo se hace sobre la "Working Copy" y que el original nunca se modifica.
 
 **Templates**
 
@@ -148,7 +161,7 @@ Si en los archivos fuente encontrás más repetición, agregá componentes.
 
 **Pages**
 
-Hay 28 pantallas en `pages/`. Cada una solo compone templates y organisms, con los datos de ejemplo sacados de `renderVals()`. El flujo clickeable de `canvas.json` (nota "flow") tiene que funcionar con links entre páginas.
+Hay 28 pantallas en `pages/`, más New project (`NewProject` y `NewProjectAbleton`). En la lista de Projects, el proyecto activo lleva el badge "Active" y los demás tienen la acción "Make active". Cada una solo compone templates y organisms, con los datos de ejemplo sacados de `renderVals()`. El flujo clickeable de `canvas.json` (nota "flow") tiene que funcionar con links entre páginas.
 
 ## Reglas de implementación
 

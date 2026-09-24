@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project switcher</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:640px;position:relative;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px"><dc-import name="TopBar" hint-size="1440px,48px"></dc-import></div>
+<div style="position:absolute;left:0;right:0;top:48px;bottom:0;background:#141518;opacity:0.55"></div>
+<div style="position:absolute;left:228px;top:40px;width:100px;height:2px;background:#5EC6D3;border-radius:1px"></div>
+<div role="listbox" aria-label="Switch project" style="position:absolute;left:220px;top:52px;width:440px;background:#1B1C20;border:1px solid #3A3D44;border-radius:10px;box-shadow:0 20px 48px rgba(0,0,0,0.55);display:flex;flex-direction:column;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border-bottom:1px solid #2B2E34">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM20 20l-4-4"></path></svg>
+<input aria-label="Find a project" placeholder="Find a project…" style="flex:1;border:0;background:transparent;outline:none;font-size:13.5px">
+<span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;border:1px solid #3A3D44;color:#8D8A85">P</span>
+</div>
+<div style="padding:6px">
+<div style="padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Active</div>
+<a role="option" aria-selected="true" href="ProjectHome.dc.html" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#24262B">
+<svg width="120" height="22" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true" style="flex-shrink:0;width:44px"><path d="{{w1}}" fill="#CFCBC4"></path></svg>
+<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">Rhythm Ashanti</span><span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#ECE8E1;color:#141518">Active</span></span><span style="font-size:12px;color:#8D8A85">Afro Groove v7 · 2 jobs running · <span style="color:#5CC08C">●</span> Live</span></span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5EC6D3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+</a>
+<div style="padding:10px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Recent</div>
+<sc-for list="{{recent}}" as="p" hint-placeholder-count="4">
+<a role="option" aria-selected="false" href="ProjectHome.dc.html" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:{{p.bg}}">
+<svg width="44" height="22" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true" style="flex-shrink:0"><path d="{{p.w}}" fill="#6A6D73"></path></svg>
+<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-weight:500">{{p.n}}</span><span style="font-size:12px;color:#8D8A85">{{p.v}}</span></span>
+<sc-if value="{{p.st}}" hint-placeholder-val="{{false}}"><span style="font-size:11.5px;color:{{p.sc}}">{{p.st}}</span></sc-if>
+<sc-if value="{{p.hover}}" hint-placeholder-val="{{false}}"><span style="font-size:11.5px;color:#B0ADA7;border:1px solid #34373D;border-radius:4px;padding:2px 6px">↵ Make active</span></sc-if>
+</a>
+</sc-for>
+</div>
+<div style="display:flex;border-top:1px solid #2B2E34">
+<a href="Projects.dc.html" style="flex:1;height:40px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#B0ADA7;border-right:1px solid #2B2E34">All projects</a>
+<a href="NewProject.dc.html" style="flex:1;height:40px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px">+ New project</a>
+</div>
+</div>
+<div style="position:absolute;left:684px;top:64px;width:320px;font-size:12.5px;color:#B0ADA7;line-height:1.6;display:flex;flex-direction:column;gap:10px">
+<b style="color:#EDEBE7;font-weight:600;font-size:13px">Project switcher</b>
+<span>Opens from the project name, or with <span style="font-family:'Geist Mono',monospace;font-size:11px;border:1px solid #3A3D44;border-radius:4px;padding:0 5px">P</span>. The active project is pinned on top with a check.</span>
+<span>Switching changes what Lucas, the player and Ableton actions point at. Playback stops only if the playing track belongs to the old project. Jobs keep running.</span>
+<span>Problems stay visible here (<span style="color:#F08A4B">? In doubt</span>, <span style="color:#93A7FF">◆ Review</span>) so you don’t miss them when you switch.</span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":640}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.25],[.09,.35],[.095,.62],[.18,.66],[.185,.9],[.27,.92],[.275,.4],[.316,.5],[.361,.7],[.365,1],[.542,.97],[.548,.72],[.813,.7],[.82,.45],[1,.08]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    var R = [['Salt & Copper', 'Live Bass v5 · yesterday', '? In doubt', '#F08A4B', 31], ['Night Market', 'Dub Chords v3 · 2 days ago', '◆ 1 to review', '#93A7FF', 44], ['Carabela', 'Perc Study v9 · Sep 18', '✕ 1 failed', '#EF6A5F', 52], ['Low Tide', 'Sketch v2 · Sep 12', '', '#8D8A85', 63]];
+    return {
+      w1: wf(7, { n: 40 }),
+      recent: R.map(function (r, i) { var hover = i === 1; return { n: r[0], v: r[1], st: hover ? false : (r[2] || false), sc: r[3], w: wf(r[4], { n: 40 }), hover: hover, bg: hover ? '#202227' : 'transparent' }; })
+    };
+  }
+}
+</script>
+</body>
+</html>

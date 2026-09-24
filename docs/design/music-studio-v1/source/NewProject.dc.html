@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New project</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden">
+<div style="height:48px;flex-shrink:0"><dc-import name="TopBar" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:788px;flex-shrink:0">
+<div style="width:212px;flex-shrink:0"><dc-import name="Sidebar" active="projects" hint-size="212px,788px"></dc-import></div>
+<main style="flex:1;min-width:0;display:flex;overflow:hidden">
+<div style="flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+<div style="display:flex;flex-direction:column;gap:3px">
+<div style="font-size:12px;color:#8D8A85"><a href="Projects.dc.html" style="color:#8D8A85">Projects</a> / New</div>
+<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">New project</h1>
+<div style="font-size:12.5px;color:#8D8A85">A project is one song. Nothing is generated and nothing is written to Ableton until you choose to.</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.4fr);gap:12px">
+<label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8D8A85">Song name<input value="Night Drive" style="height:36px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #34373D;font-size:14px;font-weight:500;color:#EDEBE7"></label>
+<label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8D8A85">One line about it · optional<input value="Late-night deep house, dusty keys, rolling bass" style="height:36px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-size:13px;color:#EDEBE7"></label>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:6px">
+<span style="font-size:12px;color:#8D8A85">Start from</span>
+<div role="radiogroup" aria-label="Start from" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<button role="radio" aria-checked="{{t.sel}}" onClick="{{t.pick}}" style="text-align:left;padding:10px 12px;border-radius:8px;background:{{t.bg}};border:1px solid {{t.bd}};display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{t.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><path d="{{t.d}}"></path></svg>
+<span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13.5px;font-weight:500">{{t.l}}</span><span style="font-size:11.5px;color:#8D8A85;line-height:1.35">{{t.s}}</span></span>
+</button>
+</sc-for>
+</div>
+</div>
+
+<section aria-label="Starting point details" style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px 16px;min-height:188px;display:flex;flex-direction:column;gap:10px">
+<sc-if value="{{isIdea}}" hint-placeholder-val="{{true}}">
+<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">Describe the music<textarea rows="3" style="padding:10px 12px;border-radius:6px;background:#1D1F23;border:1px solid #34373D;resize:none;font-size:15px;line-height:1.5;color:#EDEBE7">Deep house at 122 BPM with dusty Rhodes chords, a rolling sub bass and shuffled hats. Late-night, warm, not too busy.</textarea></label>
+<div style="font-size:12px;color:#8D8A85">Next you’ll land in Create with this text, where you choose duration, number of versions and quality.</div>
+</sc-if>
+<sc-if value="{{isAudio}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:6px;background:#141518;border:1px solid #2B2E34">
+<svg width="120" height="28" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"><path d="{{demo}}" fill="#A3A09A"></path></svg>
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-weight:500">night_drive_demo.wav</span><span style="font-size:11.5px;color:#8D8A85">4:58 · 48 kHz · 24-bit · uploaded</span></div>
+<span style="font-size:12px;color:#5CC08C">✓ Ready</span>
+</div>
+<div style="display:flex;gap:16px;align-items:center;font-size:12.5px">
+<span style="color:#8D8A85">What is it?</span>
+<div role="group" aria-label="Audio type" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="true" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:#34373D;font-size:12px">Full mix / demo</button><button aria-pressed="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Single stem</button><button aria-pressed="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Voice memo / idea</button></div>
+<span style="color:#8D8A85">Rights</span>
+<div role="group" aria-label="Rights" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34"><button aria-pressed="true" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:#34373D;font-size:12px">Owned</button><button aria-pressed="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Licensed</button></div>
+</div>
+<div style="display:flex;gap:18px;font-size:12.5px">
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:#5EC6D3;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">✓</span>Becomes v1 “Imported demo”</span>
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:#5EC6D3;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">✓</span>Analyze tempo, key, sections</span>
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #4A4C52"></span>Separate stems too</span>
+</div>
+</sc-if>
+<sc-if value="{{isLive}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:center;gap:10px"><span style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#5CC08C"><span style="width:8px;height:8px;border-radius:50%;background:#5CC08C"></span>Live 12 connected</span><span style="font-size:12px;color:#8D8A85">· set open in Live right now</span><span style="flex:1"></span><button style="height:26px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">Choose another .als…</button></div>
+<div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:12px">
+<div style="padding:10px 12px;border-radius:6px;background:#141518;border:1px solid #2B2E34;display:flex;flex-direction:column;gap:4px">
+<span style="font-size:13.5px;font-weight:600">Night Drive.als</span>
+<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#B0ADA7">122.00 BPM · 4/4 · 11 tracks · 3 locators</span>
+<span style="font-size:11.5px;color:#8D8A85">Saved 2 min ago</span>
+<span style="font-size:12px;color:#B0ADA7;margin-top:4px">Core works on <b style="color:#EDEBE7;font-weight:600">Night Drive - Working Copy</b>. The original is never modified.</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:5px;font-size:12.5px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.06em;color:#8FB8BE">CHECKED BY CORE</span>
+<span><span style="color:#5CC08C">✓</span> Set is saved, with a real file identity</span>
+<span><span style="color:#5CC08C">✓</span> Constant tempo, no tempo automation</span>
+<span><span style="color:#5CC08C">✓</span> Handshake and capabilities OK</span>
+<span><span style="color:#5CC08C">✓</span> Capture pool: 4 sources + Main per pass</span>
+</div>
+</div>
+<div style="display:flex;gap:18px;font-size:12.5px">
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:#5EC6D3;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">✓</span>Read tracks, tempo, locators (read-only)</span>
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:#5EC6D3;color:#141518;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">✓</span>Capture the mix as v1</span>
+<span style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #4A4C52"></span>Capture stems per track</span>
+</div>
+</sc-if>
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;flex-direction:column;gap:6px;padding:6px 0"><span style="font-size:14px;font-weight:500">Just the project</span><span style="font-size:12.5px;color:#8D8A85;line-height:1.5">You get an empty song with its brief and references. Start later from Create, Chat, audio or Ableton, whichever comes first.</span></div>
+</sc-if>
+</section>
+
+<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px">
+<sc-for list="{{frame}}" as="f" hint-placeholder-count="5">
+<label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8D8A85">{{f.l}}<span style="height:34px;padding:0 10px;border-radius:6px;background:{{f.bg}};border:1px {{f.bs}} #2B2E34;display:flex;align-items:center;justify-content:space-between;font-size:13px;color:{{f.fg}}"><span>{{f.v}}</span><span style="font-size:11px;color:#8D8A85">{{f.h}}</span></span></label>
+</sc-for>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+<div style="display:flex;flex-direction:column;gap:6px">
+<span style="font-size:12px;color:#8D8A85">References · optional</span>
+<div style="display:flex;gap:8px;align-items:center">
+<span style="height:38px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="font-weight:500">Kerri Chandler-style groove.mp3</span><span style="color:#8D8A85">Groove · Energy</span><span style="font-size:10px;font-weight:600;letter-spacing:.04em;color:#B0ADA7;border:1px solid #34373D;border-radius:4px;padding:1px 5px">REF ONLY</span></span>
+<a href="AddReference.dc.html" style="height:38px;padding:0 12px;border-radius:6px;border:1px dashed #3A3D44;display:flex;align-items:center;color:#B0ADA7;font-size:12.5px">+ Add</a>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<span style="font-size:12px;color:#8D8A85">Direction for Lucas · optional</span>
+<input value="Keep it hypnotic. Avoid big risers and EDM drops." style="height:38px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;font-size:13px;color:#EDEBE7">
+</div>
+</div>
+<button style="align-self:flex-start;display:flex;align-items:center;gap:6px;border:0;background:transparent;color:#8D8A85;font-size:12px;padding:0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>Advanced · generation preference, local only, storage folder</button>
+</div>
+
+<aside style="width:340px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:22px 20px;display:flex;flex-direction:column;gap:14px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">What will happen</h2>
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="5">
+<div style="display:flex;gap:10px;font-size:13px;line-height:1.45"><span style="width:14px;flex-shrink:0;color:{{s.c}}">{{s.g}}</span><span><span style="color:#EDEBE7">{{s.t}}</span><span style="display:block;font-size:12px;color:#8D8A85">{{s.m}}</span></span></div>
+</sc-for>
+</div>
+<div style="border-top:1px solid #26292E;padding-top:12px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85;line-height:1.5">
+<span>Night Drive becomes the <b style="color:#EDEBE7;font-weight:500">active project</b>. Rhythm Ashanti’s jobs keep running.</span>
+<span>You can change name, brief, frame and references later.</span>
+</div>
+<a href="{{ctaHref}}" style="margin-top:auto;height:40px;border-radius:6px;background:#ECE8E1;color:#141518;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13.5px">{{cta}}</a>
+<a href="Projects.dc.html" style="height:34px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#B0ADA7">Cancel</a>
+</aside>
+</main>
+</div>
+<div style="height:64px;flex-shrink:0"><dc-import name="Player" hint-size="1440px,64px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["idea","audio","ableton","empty"],"default":"idea"},"$preview":{"width":1440,"height":900}}'>
+function rng(s){s=(s*7919)%2147483647||1;return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};}
+var SONG=[[0,.3],[.1,.6],[.3,.7],[.35,.4],[.45,.9],[.7,.9],[.75,.5],[1,.1]];
+function env(p,E){for(var i=1;i<E.length;i++){if(p<=E[i][0]){var a=E[i-1],b=E[i],t=(p-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*t;}}return E[E.length-1][1];}
+function wf(seed,o){o=o||{};var n=o.n||220,E=o.env||SONG,j=o.jag==null?.5:o.jag,r=rng(seed),t=[],b=[];for(var i=0;i<=n;i++){var x=(i/n*1000).toFixed(1),e=env(i/n,E),a=Math.max(1.2,e*((1-j)+j*r())*47);t.push(x+' '+(50-a).toFixed(1));b.unshift(x+' '+(50+a*.9).toFixed(1));}return 'M'+t.join('L')+'L'+b.join('L')+'Z';}
+class Component extends DCLogic {
+  renderVals() {
+    var self = this;
+    var mode = (this.state && this.state.mode) || this.props.mode || 'idea';
+    var T = [
+      ['idea', 'An idea', 'Describe it and generate', 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z'],
+      ['audio', 'Audio', 'Demo, mix, stem or voice memo', 'M12 16V4M7 9l5-5 5 5M4 20h16'],
+      ['ableton', 'Ableton set', 'Attach a Live project', 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z M12 16v5'],
+      ['empty', 'Empty', 'Set it up, start later', 'M5 5h14v14H5z']
+    ];
+    var fromLive = mode === 'ableton', fromAudio = mode === 'audio';
+    function fr(l, v, h, locked) { return { l: l, v: v, h: h, bg: locked ? '#17181B' : '#1D1F23', bs: locked ? 'dashed' : 'solid', fg: locked ? '#B0ADA7' : '#EDEBE7' }; }
+    var frame = fromLive
+      ? [fr('Tempo', '122.00', 'from Live', true), fr('Key', 'Detect', 'after capture', false), fr('Time signature', '4/4', 'from Live', true), fr('Target length', 'Keep', 'from set', true), fr('Vocals', 'Decide later', '', false)]
+      : fromAudio
+      ? [fr('Tempo', 'Detect', 'from audio', true), fr('Key', 'Detect', 'from audio', true), fr('Time signature', '4/4', '', false), fr('Target length', '4:58', 'from audio', true), fr('Vocals', 'Detect', '', false)]
+      : [fr('Tempo', '122', 'BPM · constant', false), fr('Key', 'Let Lucas pick', '', false), fr('Time signature', '4/4', '', false), fr('Target length', '6:00', 'club', false), fr('Vocals', 'Instrumental', '', false)];
+    var OK = '#5CC08C', N = '#8D8A85';
+    var S = {
+      idea: [['✓', 'Create “Night Drive”', 'Brief, frame and direction saved', OK], ['●', 'Analyze 1 reference', 'Runs in the background, about 1 min', '#5EC6D3'], ['→', 'Open Create with your description', 'Nothing is generated until you press Generate', N], ['–', 'Ableton untouched', 'Attach a set any time', N]],
+      audio: [['✓', 'Create “Night Drive”', 'Brief, frame and direction saved', OK], ['✓', 'Import the demo as v1', 'Stored as-is. Never altered.', OK], ['●', 'Analyze tempo, key, sections', 'Measured by Core, confidence shown', '#5EC6D3'], ['–', 'Ableton untouched', 'Attach a set any time', N]],
+      ableton: [['✓', 'Create “Night Drive” and attach it to Live', 'Identity: Night Drive.als, saved', OK], ['✓', 'Create “Night Drive - Working Copy”', 'The original .als is never modified', OK], ['●', 'Read the set (read-only)', 'Tracks, tempo, locators', '#5EC6D3'], ['●', 'Capture the mix as v1', 'Plays about 5:10 plus pre-roll. Routing restored exactly.', '#5EC6D3'], ['–', 'No musical writes', 'Nothing changes in your mix', N]],
+      empty: [['✓', 'Create “Night Drive”', 'Brief, frame and references saved', OK], ['–', 'Nothing else runs', '', N]]
+    };
+    var C = { idea: ['Create and describe the music', 'Create.dc.html'], audio: ['Create and import audio', 'ProjectHome.dc.html'], ableton: ['Create and attach to Live', 'ProjectHome.dc.html'], empty: ['Create project', 'ProjectHome.dc.html'] };
+    return {
+      tiles: T.map(function (t) { var on = t[0] === mode; return { l: t[1], s: t[2], d: t[3], sel: on ? 'true' : 'false', bg: on ? '#1D2527' : '#17181B', bd: on ? '#5EC6D3' : '#2B2E34', ic: on ? '#5EC6D3' : '#8D8A85', pick: function () { self.setState({ mode: t[0] }); } }; }),
+      isIdea: mode === 'idea', isAudio: fromAudio, isLive: fromLive, isEmpty: mode === 'empty',
+      demo: wf(901, { n: 90 }), frame: frame,
+      steps: S[mode].map(function (s) { return { g: s[0], t: s[1], m: s[2], c: s[3] }; }),
+      cta: C[mode][0], ctaHref: C[mode][1]
+    };
+  }
+}
+</script>
+</body>
+</html>
