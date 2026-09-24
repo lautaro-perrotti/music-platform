@@ -128,6 +128,22 @@
       "x": 3040,
       "y": 0
     },
+    "NewProject.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "01b · New project · Empty (default, interactive)",
+      "w": 1440,
+      "x": 6080,
+      "y": 2880
+    },
+    "NewProjectAbleton.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "01e · New project · Ableton selected",
+      "w": 1440,
+      "x": 10640,
+      "y": 2880
+    },
     "Player.dc.html": {
       "h": 64,
       "title": "Component · Global player",
@@ -142,6 +158,14 @@
       "w": 1440,
       "x": 1520,
       "y": 2880
+    },
+    "ProjectSwitcher.dc.html": {
+      "h": 640,
+      "is_interactive": true,
+      "title": "Component · Project switcher (open)",
+      "w": 1440,
+      "x": 6040,
+      "y": 0
     },
     "Projects.dc.html": {
       "h": 900,
@@ -253,6 +277,14 @@
       "x": 4560,
       "y": 4200
     },
+    "VersionSwitcher.dc.html": {
+      "h": 640,
+      "is_interactive": true,
+      "title": "Component · Version switcher (open)",
+      "w": 1440,
+      "x": 6040,
+      "y": 760
+    },
     "Versions.dc.html": {
       "h": 900,
       "is_interactive": true,
@@ -277,36 +309,28 @@
       "x": 4560,
       "y": 9480
     },
-    "NewProject.dc.html": {
-      "x": 6080,
-      "y": 2880,
-      "w": 1440,
-      "h": 900,
-      "title": "01b · New project · from an idea (interactive)",
-      "is_interactive": true
-    },
-    "NewProjectAbleton.dc.html": {
+    "NewProjectIdea.dc.html": {
       "x": 7600,
       "y": 2880,
       "w": 1440,
       "h": 900,
-      "title": "01c · New project · from an Ableton set",
+      "title": "01c · New project · An idea selected",
       "is_interactive": true
     },
-    "ProjectSwitcher.dc.html": {
-      "x": 6040,
-      "y": 0,
+    "NewProjectAudio.dc.html": {
+      "x": 9120,
+      "y": 2880,
       "w": 1440,
-      "h": 640,
-      "title": "Component · Project switcher (open)",
+      "h": 900,
+      "title": "01d · New project · Audio selected",
       "is_interactive": true
     },
-    "VersionSwitcher.dc.html": {
-      "x": 6040,
-      "y": 760,
+    "NewProjectReference.dc.html": {
+      "x": 12160,
+      "y": 2880,
       "w": 1440,
-      "h": 640,
-      "title": "Component · Version switcher (open)",
+      "h": 900,
+      "title": "01f · New project · Reference selected",
       "is_interactive": true
     }
   },
@@ -322,7 +346,7 @@
     "flow": {
       "fill": "gray",
       "size": 24,
-      "text": "Clickable flow (Play mode):\nProjects → New project → Create → Generate 4 versions → Results (A playing, B ready) → Compare A/B → Keep B → Chat (kept as v7 + Lucas critique) → “Make the second drop stronger” → Studio region → Generate variation → Versions (v8 new) → Compare v7/v8 → Apply to Ableton → Ableton (verified) → Continue producing.\n\nThe sidebar links every screen.",
+      "text": "Clickable flow (Play mode):\nProjects → New project (pick “An idea”) → Create project → Create → Generate 4 versions → Results (A playing, B ready) → Compare A/B → Keep B → Chat (kept as v7 + Lucas critique) → “Make the second drop stronger” → Studio region → Generate variation → Versions (v8 new) → Compare v7/v8 → Apply to Ableton → Ableton (verified) → Continue producing.\n\nThe sidebar links every screen.",
       "w": 520,
       "x": 4560,
       "y": 8160
@@ -337,7 +361,7 @@
     },
     "t1": {
       "kind": "title1",
-      "maxW": 9040,
+      "maxW": 13600,
       "text": "Start · projects, home, create",
       "w": 240,
       "x": 0,
@@ -414,7 +438,10 @@
     "Create.dc.html",
     "CreateAdvanced.dc.html",
     "NewProject.dc.html",
+    "NewProjectIdea.dc.html",
+    "NewProjectAudio.dc.html",
     "NewProjectAbleton.dc.html",
+    "NewProjectReference.dc.html",
     "Results.dc.html",
     "Compare.dc.html",
     "Versions.dc.html",

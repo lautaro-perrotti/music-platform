@@ -19,7 +19,7 @@ El diseño completo de la app **Music Studio** está en:
 docs/design/music-studio-v1/source/
 ```
 
-Son 35 archivos `.dc.html` más `canvas.json`. Cada `.dc.html` es un artboard de un editor de diseño. **No es código de producción.** Es la especificación visual que vas a traducir.
+Son 42 archivos `.dc.html` más `canvas.json`. Cada `.dc.html` es un artboard de un editor de diseño. **No es código de producción.** Es la especificación visual que vas a traducir.
 
 La UI existente se sirve desde `src/copilot/studio/static/index.html`. La sirve `src/copilot/studio/server.py`, que es un servidor stdlib de Python sin paso de build. **No introduzcas Node, npm, bundlers ni frameworks.**
 
@@ -140,17 +140,24 @@ Si en los archivos fuente encontrás más repetición, agregá componentes.
 - `ms-health-row`
 - `ms-project-switcher`: dropdown del top bar (`ProjectSwitcher.dc.html`). Tiene búsqueda, el proyecto activo fijado arriba con check y badge Active, recientes con su estado (in doubt, review, failed), "Make active" con ↵, y links a All projects y New project. Atajo P. Evento `ms-project-activate`.
 - `ms-version-switcher`: dropdown del top bar (`VersionSwitcher.dc.html`). Muestra dos conceptos distintos: **Active** (la versión sobre la que trabajás) e **In Ableton** (la última aplicada y verificada). Filas con preview, Compare y Activate, más los links All versions y Compare active with…. Atajo V. Evento `ms-version-activate`.
-- `ms-new-project`: formulario de alta (`NewProject.dc.html`, interactivo). Incluye:
-  - Nombre y línea descriptiva.
-  - "Start from", con 4 opciones: An idea, Audio, Ableton set, Empty.
-  - Un panel que cambia según la opción elegida.
-  - El marco musical: tempo constante, key, compás, duración y vocals. Los campos se bloquean si vienen de Live o del audio.
-  - Referencias con su propósito.
-  - "Direction for Lucas".
-  - Un resumen "What will happen" que cambia con el modo.
-  - Un CTA que cambia con el modo.
+- `ms-new-project`: alta liviana (`NewProject.dc.html` más 4 variantes de estado). **Un Project es un workspace, no una especificación de canción.** Incluye:
+  - Nombre.
+  - Descripción opcional.
+  - "Start from", un radiogroup de 5 opciones: Empty (default), An idea, Audio, Ableton, Reference. Solo define la pantalla siguiente y no es un tipo de proyecto.
+  - Un panel "What will happen" con tres ítems: el proyecto creado, **Next** (lo único que cambia según la opción) y "Ableton: Nothing is changed".
+  - Un CTA fijo, "Create project".
 
-  En el modo Ableton muestra los checks de Core: set guardado, tempo constante, handshake y pool de captura. También deja claro que el trabajo se hace sobre la "Working Copy" y que el original nunca se modifica.
+  Destinos:
+
+  | Opción | Pantalla siguiente |
+  |---|---|
+  | Empty | Project Home |
+  | An idea | Create |
+  | Audio | import de audio |
+  | Ableton | Connect Ableton |
+  | Reference | Add reference |
+
+  Prohibido en este componente: BPM, key, compás, duración, vocals, prompt, dirección para Lucas, provider, generar, analizar o escribir en Ableton. Todo eso pertenece a Create / GenerationBrief.
 
 **Templates**
 
@@ -161,7 +168,7 @@ Si en los archivos fuente encontrás más repetición, agregá componentes.
 
 **Pages**
 
-Hay 28 pantallas en `pages/`, más New project (`NewProject` y `NewProjectAbleton`). En la lista de Projects, el proyecto activo lleva el badge "Active" y los demás tienen la acción "Make active". Cada una solo compone templates y organisms, con los datos de ejemplo sacados de `renderVals()`. El flujo clickeable de `canvas.json` (nota "flow") tiene que funcionar con links entre páginas.
+Hay 28 pantallas en `pages/`, más New project (`NewProject` y sus variantes `NewProjectIdea`, `NewProjectAudio`, `NewProjectAbleton` y `NewProjectReference`, que solo cambian la opción seleccionada). En la lista de Projects, el proyecto activo lleva el badge "Active" y los demás tienen la acción "Make active". Cada una solo compone templates y organisms, con los datos de ejemplo sacados de `renderVals()`. El flujo clickeable de `canvas.json` (nota "flow") tiene que funcionar con links entre páginas.
 
 ## Reglas de implementación
 
@@ -187,11 +194,18 @@ Hay 28 pantallas en `pages/`, más New project (`NewProject` y `NewProjectAbleto
    - Esc: cierra drawer o dialog.
    - No se disparan si el foco está en un input.
 8. **Sin progreso falso.** Si no hay progreso conocido, `ms-stage-list` muestra el stage actual. No hay barras de % inventadas.
-9. **No destructivo.** Ningún componente ofrece "Overwrite" ni "Retry" en in-doubt.
-10. **Responsive.**
+9. **Ableton es bidireccional.** El vocabulario es fijo:
+   - "Capture from Ableton" para Ableton → Music Studio: importar, adjuntar, analizar.
+   - "Apply to Ableton" o "Apply current version to Ableton" para Music Studio → Ableton: audio, stems, clips, arreglos, cambios aprobados, con readback y rollback.
+
+   Nunca uses "Export to Ableton". "Export" queda reservado para descargar archivos.
+
+   El card de Ableton en Project Home muestra "Connected to <Working Copy>" y las dos acciones. Cada versión muestra Compare, Open in Studio y Apply to Ableton. En New Project, la opción Ableton significa "Start from a Live project and keep it connected".
+10. **No destructivo.** Ningún componente ofrece "Overwrite" ni "Retry" en in-doubt.
+11. **Responsive.**
     - A 1280px el sidebar colapsa a 56 y el inspector pasa a overlay.
     - Por debajo de 768 solo existen las vistas de review (ver `Mobile.dc.html`).
-11. **Fidelidad.** Cada organismo y cada página tiene que coincidir visualmente con su `.dc.html`: mismos tamaños, gaps, colores y copy. Si algo del fuente es inconsistente, unificalo hacia el token y anotalo.
+12. **Fidelidad.** Cada organismo y cada página tiene que coincidir visualmente con su `.dc.html`: mismos tamaños, gaps, colores y copy. Si algo del fuente es inconsistente, unificalo hacia el token y anotalo.
 
 ## Catálogo (`ui/catalog.html`)
 

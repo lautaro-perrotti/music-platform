@@ -14,7 +14,7 @@ function shellMain() { return document.querySelector('ms-app-shell .main-slot');
 function navigate(route) { location.hash = route; renderRoute(); }
 function htmlFrame(title, eyebrow, body) { return `<section class="app-page"><div class="intro"><span>${eyebrow}</span><h1>${title}</h1></div><div class="app-content">${body}</div></section>`; }
 function button(label, action, tone = '') { return `<button class="app-native-button ${tone}" data-action="${action}">${label}</button>`; }
-function setMain(markup) { const target = shellMain(); target.innerHTML = markup; wire(target); return target; }
+function setMain(markup) { const target = shellMain(); target.innerHTML = markup; wire(target); normalizeSourceSemantics(); return target; }
 function wire(target) {
   target.querySelectorAll('[data-action]').forEach(node => {
     const action = node.dataset.action;
@@ -358,6 +358,38 @@ async function showVersionSwitcherClaude() {
   setMain(`<main style="flex:1;min-width:0;min-height:calc(100vh - 112px);padding:0;background:#0F1012;color:#EDEBE7;font-family:Geist,system-ui,sans-serif"><div style="position:absolute;left:352px;top:52px;width:460px;background:#1B1C20;border:1px solid #3A3D44;border-radius:10px;box-shadow:0 20px 48px rgba(0,0,0,.55);overflow:hidden"><div style="padding:14px 16px;border-bottom:1px solid #34373D"><div style="display:flex;align-items:center;gap:8px"><b style="font-size:13px">Versions</b><span style="flex:1"></span><kbd style="color:#8D8A85">V</kbd></div><div style="margin-top:4px;font-size:11.5px;color:#8D8A85">Active is what you produce on. In Ableton is what was last verified.</div></div><div style="padding:8px">${versions.map((v,i)=>`<div style="display:flex;align-items:center;gap:9px;padding:10px;border-radius:6px;background:${i===0?'#2A2C32':'transparent'}"><button data-action="ms-play" aria-label="Preview ${esc(v.name)}" style="width:28px;height:28px;border-radius:50%;border:1px solid #34373D;background:transparent;color:#B0ADA7">▶</button><div style="flex:1"><b style="display:block;font-size:13px">${esc(v.name)}</b><small style="color:#8D8A85">${i===0?'Active · in Ableton':'Candidate · reviewable'}</small></div><button data-action="go-version-compare" style="height:28px;padding:0 8px;border-radius:5px;border:1px solid #2B2E34;background:transparent;color:#B0ADA7;font-size:11px">Compare</button><button data-action="activate-version" data-version-id="${v.version_id}" style="height:28px;padding:0 8px;border-radius:5px;border:1px solid #34373D;background:#24262B;color:#EDEBE7;font-size:11px">Activate</button></div>`).join('')}</div><div style="display:flex;border-top:1px solid #34373D"><a href="#versions" data-action="go-versions" style="flex:1;padding:13px;text-align:center;font-size:12.5px">All versions</a><a href="#version-compare" data-action="go-version-compare" style="flex:1;padding:13px;text-align:center;font-size:12.5px;border-left:1px solid #34373D">Compare active with…</a></div></div></main>`);
 }
 
+function showNewProjectSimpleClaude(mode = 'empty') {
+  const options = [['empty','Empty','Create a blank workspace.'],['idea','An idea','Create the project and open Create next.'],['audio','Audio','Create the project and import audio next.'],['ableton','Ableton','Start from a Live project and keep it connected.'],['reference','Reference','Create the project and add references next.']];
+  const active = options.find(item => item[0] === mode) || options[0];
+  const next = { empty:'Open Project Home.', idea:'Open Create.', audio:'Import audio.', ableton:'Connect your Live project.', reference:'Add references.' }[active[0]];
+  setMain(`<main style="flex:1;min-width:0;display:flex;overflow:hidden;background:#0F1012;color:#EDEBE7;font-family:Geist,system-ui,sans-serif"><div style="flex:1;min-width:0;display:flex;justify-content:center;padding:40px"><div style="width:640px;display:flex;flex-direction:column;gap:22px"><div><div style="font-size:12px;color:#8D8A85"><a href="#projects" data-action="go-projects">Projects</a> / New</div><h1 style="margin:6px 0;font-size:22px">New project</h1><div style="font-size:13px;color:#8D8A85;line-height:1.5">Create a flexible workspace. You can generate music, import audio, add references or connect Ableton later.</div></div><label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">Project name<input id="new-project-name" value="Night Drive" style="height:38px;padding:0 12px;border-radius:6px;background:#1D1F23;border:1px solid #34373D;color:#EDEBE7"></label><label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8D8A85">Description · optional<input value="Late-night house exploration" style="height:38px;padding:0 12px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;color:#EDEBE7"></label><div style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:12px;color:#8D8A85">Start from</span><span style="font-size:11.5px;color:#6F6C68">only sets the next screen. You can change course any time.</span></div><div role="radiogroup" aria-label="Start from" style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px">${options.map(item=>`<a href="#new-project/${item[0]}" data-action="new-project-mode" data-mode="${item[0]}" role="radio" aria-checked="${active[0]===item[0]}" style="display:flex;align-items:center;gap:12px;height:52px;padding:0 12px;border-radius:6px;background:${active[0]===item[0]?'#1D2527':'transparent'};border:1px solid ${active[0]===item[0]?'#5EC6D3':'transparent'};text-align:left;text-decoration:none"><span style="width:16px;height:16px;border-radius:50%;border:1.5px solid ${active[0]===item[0]?'#5EC6D3':'#4A4C52'};display:flex;align-items:center;justify-content:center"><span style="width:8px;height:8px;border-radius:50%;background:${active[0]===item[0]?'#5EC6D3':'transparent'}"></span></span><span style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:13.5px;font-weight:500">${item[1]}</span><span style="font-size:12px;color:#8D8A85">${item[2]}</span></span></a>`).join('')}</div></div></div></div><aside style="width:340px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:22px 20px;display:flex;flex-direction:column;gap:14px"><h2 style="margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">What will happen</h2><div style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;gap:10px;font-size:13px"><span style="color:#5CC08C">✓</span><span>Create “Night Drive”<small style="display:block;color:#8D8A85;margin-top:3px">Creates an empty durable workspace.</small></span></div><div style="display:flex;gap:10px;font-size:13px"><span style="color:#5EC6D3">→</span><span>Next<small style="display:block;color:#8D8A85;margin-top:3px">${next}</small></span></div><div style="display:flex;gap:10px;font-size:13px"><span style="color:#8D8A85">–</span><span>Ableton<small style="display:block;color:#8D8A85;margin-top:3px">Nothing is changed.</small></span></div></div><div style="border-top:1px solid #26292E;padding-top:12px;font-size:12px;color:#8D8A85;line-height:1.55">You can add music, audio, references and Ableton later. Nothing is generated or analyzed when the project is created.</div><button data-action="new-project-save" style="margin-top:auto;height:40px;border:0;border-radius:6px;background:#ECE8E1;color:#141518;font-weight:600">Create project</button><button data-action="go-projects" style="height:34px;border:0;background:transparent;color:#B0ADA7">Cancel</button></aside></main>`);
+}
+
+function normalizeSourceSemantics() {
+  const route = (location.hash.slice(1) || 'projects').split('/')[0];
+  const main = shellMain()?.querySelector('main');
+  if (!main) return;
+  const controls = [...main.querySelectorAll('a,button')];
+  const find = text => controls.find(node => node.textContent.trim().startsWith(text));
+  if (route === 'ableton') {
+    const capture = find('Capture'); if (capture) { capture.textContent = 'Capture from Ableton'; capture.dataset.action = 'go-ableton'; }
+    const apply = find('Apply version'); if (apply) apply.textContent = 'Apply current version to Ableton';
+  }
+  if (route === 'home') {
+    const review = find('Review applying');
+    if (review && !main.querySelector('[data-action="ableton-capture"]')) review.outerHTML = `<div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:12px;color:#8D8A85">Connected to <b style="color:#EDEBE7;font-weight:500">${esc(state.project?.name || 'Rhythm Ashanti')} - Working Copy</b></div><a href="#ableton" data-action="go-ableton" style="height:30px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;justify-content:center;font-size:12.5px">↓ Capture from Ableton</a><a href="#apply-version" data-action="go-apply-version" style="height:30px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;justify-content:center;font-size:12.5px">↑ Apply current version to Ableton</a></div>`;
+  }
+  if (route === 'stems') {
+    const exportButton = find('Export stems');
+    if (exportButton && !main.textContent.includes('Apply stems to Ableton')) { exportButton.insertAdjacentHTML('afterend', `<button data-action="ableton-apply" style="height:34px;padding:0 12px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:13px">Apply stems to Ableton</button>`); }
+  }
+  if (route === 'versions') {
+    const compare = find('Compare with v7'); if (compare) compare.textContent = 'Compare';
+    const apply = find('Apply to Ableton'); if (apply) apply.textContent = 'Apply to Ableton';
+    if (compare && !main.textContent.includes('Open in Studio')) compare.insertAdjacentHTML('afterend', `<a href="#studio" data-action="go-studio" style="height:36px;border-radius:6px;background:#24262B;border:1px solid #34373D;display:flex;align-items:center;justify-content:center;font-size:12.5px;margin-top:6px">Open in Studio</a>`);
+  }
+}
+
 async function renderRoute() {
   const routeParts = (location.hash.slice(1) || 'projects').split('/');
   const route = routeParts[0];
@@ -381,8 +413,8 @@ async function renderRoute() {
     if (route === 'activity') return showActivityClaude();
     if (route === 'health') return showHealthClaude();
     if (route === 'providers') return showProvidersClaude();
-    if (route === 'new-project') return showNewProjectClaude(routeArg);
-    if (route === 'new-project-ableton') return showNewProjectClaude('ableton');
+    if (route === 'new-project') return showNewProjectSimpleClaude(routeArg);
+    if (route === 'new-project-ableton') return showNewProjectSimpleClaude('ableton');
     if (route === 'project-switcher') return showProjectSwitcherClaude();
     if (route === 'version-switcher') return showVersionSwitcherClaude();
     if (route === 'add-reference') return showAddReferenceClaude();

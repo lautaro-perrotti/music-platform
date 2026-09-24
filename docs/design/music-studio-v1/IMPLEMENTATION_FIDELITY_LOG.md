@@ -43,6 +43,22 @@ runtime visual layer was removed instead of being overridden.
   source layout, waveform, and working navigation/action links.
 - Musical writes: `0`.
 
+### Ableton direction vocabulary - SOURCE TRANSPLANT ACTIVE
+
+- Synced the latest 42-artboard source update and its New Project variants.
+- New Project is now intentionally identity-only: the five starting points
+  (Empty, An idea, Audio, Ableton, Reference) change only the next screen.
+  It does not collect musical controls, generate, analyze, or write to Live.
+- Ableton language is explicit in the runtime: `Capture from Ableton` for
+  Ableton → Music Studio and `Apply to Ableton` for Music Studio → Ableton.
+- Project Home now exposes the Working Copy connection and both directional
+  actions. Ableton exposes Capture from Ableton and Apply current version to
+  Ableton. Versions expose Compare, Open in Studio, and Apply to Ableton.
+- Stems now separates `Export stems` (download) from `Apply stems to Ableton`
+  (working-copy action boundary).
+- The source rule is recorded in `CODEX_PROMPT.md`; no Ableton runtime writes
+  were introduced by this UI work.
+
 ### New project and header switchers - SOURCE TRANSPLANT ACTIVE
 
 - Synced the new Claude sources: `NewProject`, `NewProjectAbleton`,
