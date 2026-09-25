@@ -73,14 +73,19 @@ class ProductionCompiler:
                 reasons=("PLAN_CONTAINS_UNCERTIFIED_ACTIONS",),
             )
         # The first real creative vertical slice is deliberately the only
-        # compound plan certified here: create a new Copilot MIDI track and
-        # put one editable pattern on it.  This is still one SafeWrite intent
-        # and one durable transaction, not a second writer or a general
-        # multi-action escape hatch.
+        # compound plan certified here: create a new Copilot MIDI track,
+        # optionally load one native instrument, and put one editable pattern
+        # on it. This is still one SafeWrite intent and one durable
+        # transaction, not a general multi-action escape hatch.
         if (
-            len(plan.actions) == 2
+            len(plan.actions) in {2, 3}
             and plan.actions[0].action_type is ProductionActionKind.CREATE_TRACK
-            and plan.actions[1].action_type is ProductionActionKind.CREATE_PATTERN
+            and plan.actions[-1].action_type is ProductionActionKind.CREATE_PATTERN
+            and (
+                len(plan.actions) == 2
+                or plan.actions[1].action_type
+                in {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD}
+            )
         ):
             return self._compile_midi_variation(plan, session=session)
         if len(plan.actions) != 1:
@@ -287,8 +292,10 @@ class ProductionCompiler:
     def _compile_midi_variation(
         self, plan: MusicPlan, *, session: SessionState
     ) -> ProductionCompileResult:
-        """Compile exactly CREATE_TRACK -> CREATE_PATTERN for one variation."""
-        create, pattern = plan.actions
+        """Compile one bounded, audible MIDI variation compound plan."""
+        create = plan.actions[0]
+        device = plan.actions[1] if len(plan.actions) == 3 else None
+        pattern = plan.actions[-1]
         create_validated = validate_create_track_plan(
             plan.model_copy(update={"actions": [create]}), session=session
         )
@@ -314,6 +321,20 @@ class ProductionCompiler:
             return ProductionCompileResult(
                 status="PLAN_REJECTED", reasons=("PATTERN_ROLLBACK_REQUIRED",)
             )
+        if device is not None:
+            device_params = device.params
+            if getattr(device_params, "kind", None) != "device_load":
+                return ProductionCompileResult(
+                    status="PLAN_REJECTED", reasons=("VARIATION_DEVICE_PARAMS_INVALID",)
+                )
+            if not str(getattr(device_params, "device_name", "")).strip():
+                return ProductionCompileResult(
+                    status="PLAN_REJECTED", reasons=("VARIATION_DEVICE_NAME_REQUIRED",)
+                )
+            if not device.rollback or not device.rollback.prepared:
+                return ProductionCompileResult(
+                    status="PLAN_REJECTED", reasons=("VARIATION_DEVICE_ROLLBACK_REQUIRED",)
+                )
 
         track_name = create.params.track_name
         create_id = create.action_id
@@ -338,6 +359,76 @@ class ProductionCompiler:
             session_incarnation_id=session.session_incarnation_id or "",
         )
         notes = [note.model_dump(mode="json") for note in params.notes]
+        targets = [create_target]
+        executions = [
+            MutationExecution(
+                action_id=create_id,
+                action_type="CREATE_TRACK",
+                operation="create_midi_track",
+                arguments={"name": track_name, "index": create.params.index_hint},
+                expected_before={"track_count": len(session.tracks)},
+                expected_after={"track_count": len(session.tracks) + 1},
+                certified=True,
+                rollback=MutationRollback(
+                    inverse_operation="delete_track",
+                    reversibility=RollbackReversibility.INDEPENDENT,
+                    prepared=True,
+                ),
+            )
+        ]
+        if device is not None:
+            device_target = MutationTarget(
+                action_id=device.action_id,
+                ref=dict(pattern_target.ref),
+                name_at_plan=track_name,
+                fingerprint=TargetFingerprint(),
+                locator=None,
+                session_incarnation_id=session.session_incarnation_id or "",
+            )
+            device_params = device.params
+            targets.append(device_target)
+            executions.append(
+                MutationExecution(
+                    action_id=device.action_id,
+                    action_type="LOAD_DEVICE",
+                    operation="load_instrument_or_effect",
+                    arguments={
+                        "uri": device_params.device_uri or device_params.device_name,
+                        "device_name": device_params.device_name,
+                    },
+                    expected_before={"device_count": 0},
+                    expected_after={"device_count": 1},
+                    certified=True,
+                    rollback=MutationRollback(
+                        inverse_operation="delete_device",
+                        depends_on=[create_id],
+                        reversibility=RollbackReversibility.DEPENDENT,
+                        prepared=True,
+                    ),
+                )
+            )
+        executions.append(
+            MutationExecution(
+                action_id=pattern_id,
+                action_type="CREATE_PATTERN",
+                operation="create_pattern",
+                arguments={
+                    "clip_index": int(params.clip_index),
+                    "length_beats": float(params.length_beats),
+                    "notes": notes,
+                },
+                expected_before={"clip_exists": False, "clip_index": int(params.clip_index)},
+                expected_after={"clip_index": int(params.clip_index), "note_count": len(notes)},
+                certified=True,
+                rollback=MutationRollback(
+                    inverse_operation="delete_clip",
+                    depends_on=[create_id],
+                    reversibility=RollbackReversibility.DEPENDENT,
+                    prepared=True,
+                ),
+            )
+        )
+        targets.append(pattern_target)
         intent = MutationIntent(
             plan_id=plan.plan_id,
             kind=KIND_PRODUCER_EXECUTION_V1,
@@ -348,42 +439,8 @@ class ProductionCompiler:
             expected_project_token=session.project_token or "",
             expected_audible_token=session.audible_token or "",
             expected_incarnation_id=session.session_incarnation_id or "",
-            targets=[create_target, pattern_target],
-            executions=[
-                MutationExecution(
-                    action_id=create_id,
-                    action_type="CREATE_TRACK",
-                    operation="create_midi_track",
-                    arguments={"name": track_name, "index": create.params.index_hint},
-                    expected_before={"track_count": len(session.tracks)},
-                    expected_after={"track_count": len(session.tracks) + 1},
-                    certified=True,
-                    rollback=MutationRollback(
-                        inverse_operation="delete_track",
-                        reversibility=RollbackReversibility.INDEPENDENT,
-                        prepared=True,
-                    ),
-                ),
-                MutationExecution(
-                    action_id=pattern_id,
-                    action_type="CREATE_PATTERN",
-                    operation="create_pattern",
-                    arguments={
-                        "clip_index": int(params.clip_index),
-                        "length_beats": float(params.length_beats),
-                        "notes": notes,
-                    },
-                    expected_before={"clip_exists": False, "clip_index": int(params.clip_index)},
-                    expected_after={"clip_index": int(params.clip_index), "note_count": len(notes)},
-                    certified=True,
-                    rollback=MutationRollback(
-                        inverse_operation="delete_clip",
-                        depends_on=[create_id],
-                        reversibility=RollbackReversibility.DEPENDENT,
-                        prepared=True,
-                    ),
-                ),
-            ],
+            targets=targets,
+            executions=executions,
         )
         return ProductionCompileResult(
             status="COMPILED",

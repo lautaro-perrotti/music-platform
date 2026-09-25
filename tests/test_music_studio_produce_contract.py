@@ -83,7 +83,7 @@ def test_real_bridge_compiles_writes_captures_and_rolls_back_owned_material(tmp_
     output = service.produce_generate(project_id, {"scope": "region", "instruction": "Make a bass variation inspired by this section", "variations": 1, "length_bars": 8})
     variation = output["variation"]
     assert output["write_authority"] == "ProductionCompiler->SafeWriteExecutor"
-    assert output["musical_writes"] == 2
+    assert output["musical_writes"] == 3
     assert variation["status"] == "READY"
     assert variation["ownership"]["owner"] == "COPILOT"
     assert variation["preview_url"].startswith("/api/artifacts/")
@@ -108,6 +108,30 @@ def test_disconnected_live_fails_truthfully(tmp_path: Path, monkeypatch: pytest.
     assert service.list_variations(project_id) == {"variations": []}
 
 
+def test_capture_failure_rolls_back_the_new_owned_track(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, project_id = _service(tmp_path)
+    daw = MockAbletonAdapter()
+    daw.session_path = str(tmp_path / "Working Copy.als")
+    daw.session_name = "Working Copy"
+    daw.connect()
+    monkeypatch.setattr(service, "_open_variation_live", lambda: (daw, daw.snapshot()))
+    monkeypatch.setattr(
+        service_module,
+        "preflight_session",
+        lambda *args, **kwargs: {"pass": True, "revision": daw.snapshot().revision, "capture_hosts": {}},
+    )
+    monkeypatch.setattr(
+        service_module,
+        "capture_source_post_mixer_ref",
+        lambda *args, **kwargs: {"ok": False, "signal_status": "CAPTURE_FAILED", "error": "fixture capture failure"},
+    )
+    with pytest.raises(ProduceExecutionBlocked, match="PREVIEW_CAPTURE_FAILED"):
+        service.produce_generate(project_id, {"scope": "region", "instruction": "make a bass variation", "variations": 1, "length_bars": 8})
+    daw.connect()
+    assert [track for track in daw.snapshot().tracks if track.name.startswith("Copilot Variation ")] == []
+    assert service.list_variations(project_id) == {"variations": []}
+
+
 def test_variation_preview_contract_uses_existing_artifact_route(tmp_path: Path) -> None:
     service, project_id = _service(tmp_path)
     record = VariationRecord(
@@ -123,6 +147,9 @@ def test_variation_preview_contract_uses_existing_artifact_route(tmp_path: Path)
 
 def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: Path) -> None:
     service, project_id = _service(tmp_path)
+    service._open_variation_live = lambda: (_ for _ in ()).throw(
+        ProduceExecutionBlocked("ABLETON_SESSION_NOT_READY")
+    )
     handler = type("TestHandler", (StudioHandler,), {"service": service, "static_root": Path(__file__).parents[1] / "src" / "copilot" / "studio" / "static", "log_message": lambda *a: None})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

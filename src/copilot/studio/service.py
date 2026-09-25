@@ -27,6 +27,7 @@ from copilot.runtime.safe_write import build_safe_write_executor
 from copilot.schemas.musicplan import (
     ActionTarget,
     DiagnosisBinding,
+    DeviceLoadActionParams,
     ExpectedEffect,
     ExecutionVerificationSpec,
     MusicPlan,
@@ -499,6 +500,25 @@ class StudioService:
             reason=request.instruction,
             evidence_refs=[f"region:{request.start_qn}:{request.end_qn or request.start_qn + length_beats}"],
         )
+        device = PlanAction(
+            action_id=f"device_{variation_id}",
+            action_type=ProductionActionKind.LOAD_DEVICE,
+            target=ActionTarget(ref=dict(create.target.ref)),
+            params=DeviceLoadActionParams(device_name="Operator", device_uri="Operator"),
+            reason="give the Copilot MIDI variation an audible native instrument",
+            evidence_refs=list(create.evidence_refs),
+            expected_effect=ExpectedEffect(
+                affected_target=f"{track_name}.devices",
+                direction="add",
+                description="load one native Ableton instrument for real preview capture",
+                measurement_to_compare_after="authoritative device readback",
+            ),
+            verification=VerificationSpec(
+                execution=ExecutionVerificationSpec(parameter="track.device", expected_after=1.0, unit="present"),
+                musical=MusicalVerificationSpec(comparison="preview_capture_for_human_review", deferred=True),
+            ),
+            rollback=RollbackSpec(parameter="device", unit="device", restore_value=-1.0, prepared=True),
+        )
         pattern = PlanAction(
             action_id=f"pattern_{variation_id}",
             action_type=ProductionActionKind.CREATE_PATTERN,
@@ -535,7 +555,7 @@ class StudioService:
             project_state_token=session.project_token or session.project_identity or "",
             audible_state_token=session.audible_token or "",
             created_at=utc_now(),
-            actions=[create, pattern],
+            actions=[create, device, pattern],
             notes=["V1 bounded planner: one bass variation only; no N-variation claims."],
             gate={"reference_region": {"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats}},
         )
@@ -613,13 +633,22 @@ class StudioService:
                 )
             live_after = daw.snapshot()
             create_target = next(item for item in compiled.intent.targets if item.action_id == compiled.intent.executions[0].action_id)
-            pattern_step = compiled.intent.executions[1]
+            pattern_step = next(
+                item for item in compiled.intent.executions
+                if item.action_type == "CREATE_PATTERN"
+            )
             track = live_after.track_by_id(create_target.stable_id)
             clip_ref = f"{track.stable_id}:clip:{int(pattern_step.arguments['clip_index'])}"
 
             preflight = preflight_session(daw, lab_track_exclusions=frozenset({"AI Test"}))
             if not preflight.get("pass"):
-                executor._rollback_applied(result, compiled.intent)
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                if rollback_error:
+                    raise ProduceExecutionBlocked(
+                        "VARIATION_ROLLBACK_FAILED",
+                        detail=rollback_error,
+                        evidence={"preflight": preflight, "safe_write": result.to_dict()},
+                    )
                 raise ProduceExecutionBlocked("CAPTURE_PREFLIGHT_NOT_READY", detail="; ".join(preflight.get("missing") or []), evidence={"preflight": preflight})
             capture_root = self.data_dir / "variation_captures" / variation_id
             capture = capture_source_post_mixer_ref(
@@ -634,11 +663,23 @@ class StudioService:
                 dest_root=capture_root,
             )
             if not capture.get("ok") or not capture.get("wav_path"):
-                executor._rollback_applied(result, compiled.intent)
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                if rollback_error:
+                    raise ProduceExecutionBlocked(
+                        "VARIATION_ROLLBACK_FAILED",
+                        detail=rollback_error,
+                        evidence={"capture": capture, "safe_write": result.to_dict()},
+                    )
                 raise ProduceExecutionBlocked("PREVIEW_CAPTURE_FAILED", detail=str(capture.get("error") or "capture returned no WAV"), evidence={"capture": capture})
             wav_path = Path(str(capture["wav_path"]))
             if not wav_path.is_file():
-                executor._rollback_applied(result, compiled.intent)
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                if rollback_error:
+                    raise ProduceExecutionBlocked(
+                        "VARIATION_ROLLBACK_FAILED",
+                        detail=rollback_error,
+                        evidence={"capture": capture, "safe_write": result.to_dict()},
+                    )
                 raise ProduceExecutionBlocked("PREVIEW_ARTIFACT_MISSING", detail=str(wav_path), evidence={"capture": capture})
             preview_job_id = self._create_preview_job(project_id, variation_id)
             artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"

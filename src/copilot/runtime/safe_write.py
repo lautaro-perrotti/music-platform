@@ -636,6 +636,15 @@ class SafeWriteExecutor:
                             created, project_identity=session.project_identity or ""
                         ).model_dump(mode="json")
                         resolved[dependent.action_id] = created
+                        # A newly-created MIDI track may receive a Live default
+                        # device.  Capture that authoritative post-create
+                        # inventory as the baseline for a dependent LOAD_DEVICE
+                        # step; otherwise verification would misclassify the
+                        # default device as an unrelated mutation.
+                        if dependent.action_type == "LOAD_DEVICE":
+                            guards[dependent_target.name_at_plan]["device_ids"] = [
+                                item.stable_id for item in created.devices
+                            ]
             except WriteInDoubt as exc:
                 unknown.append(step.action_id)
                 unknown.extend(not_attempted)
@@ -868,7 +877,7 @@ class SafeWriteExecutor:
                 # created track receives its PersistentObjectRef after write.
                 resolved[target.action_id] = None  # type: ignore[assignment]
                 continue
-            if step is not None and step.action_type == "CREATE_PATTERN":
+            if step is not None and step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"}:
                 dependencies = set(step.rollback.depends_on)
                 if len(dependencies) == 1:
                     dependency = next(iter(dependencies))
@@ -905,7 +914,11 @@ class SafeWriteExecutor:
                 "track_ids": [item.stable_id for item in session.tracks],
                 "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
             }
-        if step.action_type == "CREATE_PATTERN" and session.track_by_name(target_name) is None:
+        if (
+            step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"}
+            and session.track_by_name(target_name) is None
+            and len(step.rollback.depends_on) == 1
+        ):
             return {
                 "track_ids": [item.stable_id for item in session.tracks],
                 "pattern_absent": True,
@@ -966,6 +979,8 @@ class SafeWriteExecutor:
                 continue
             if step.action_type == "LOAD_DEVICE":
                 if track is None:
+                    if len(step.rollback.depends_on) == 1:
+                        continue
                     return (MutationFailure.TARGET_NOT_FOUND, "device target track missing")
                 if len(track.devices) != int(step.expected_before.get("device_count", len(track.devices))):
                     return (MutationFailure.PRECONDITION_FAILED, "device inventory changed before LOAD_DEVICE")
@@ -1791,7 +1806,7 @@ class SafeWriteExecutor:
                         continue
                     unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
                 continue
-            if step.action_type == "CREATE_PATTERN":
+            if step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"} and step.rollback.depends_on:
                 continue
             post = snapshot_guard_state(restored, target.name_at_plan)
             diff = diff_guard_state(
