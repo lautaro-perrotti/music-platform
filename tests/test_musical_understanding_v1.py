@@ -14,8 +14,17 @@ from copilot.audio.musical_understanding_v1 import (
     _periodicity,
     analyze_musical_understanding,
 )
+from copilot.audio.bass_musical_model_v1 import build_bass_musical_model
 from copilot.audio.midi_read_only_v1 import identity_for_als_path
-from copilot.schemas.musical_understanding import MusicalUnderstanding
+from copilot.schemas.musical_understanding import (
+    BassDrumsRelationship,
+    BassPitchEvent,
+    DrumsUnderstanding,
+    MusicalGridPoint,
+    MusicalUnderstanding,
+    PulseStructure,
+    RhythmicStructure,
+)
 
 
 def _write_impulses(path: Path, *, sr: int = 8_000, seconds: float = 4.0) -> None:
@@ -164,3 +173,94 @@ def test_midi_reconciliation_reads_events_from_the_reconciled_als_tree(tmp_path:
     assert diagnostics["clips"] == 1
     assert diagnostics["notes"] == 1
     assert diagnostics["reconciliation"]["status"] == "RESOLVED"
+
+
+def test_bass_musical_model_extracts_symbolic_language_without_collapsing_tonality(
+    tmp_path: Path,
+) -> None:
+    def event(index: int, onset: float, pitch: int) -> BassPitchEvent:
+        grid = MusicalGridPoint(
+            onset_s=onset / 2.0,
+            onset_qn=onset,
+            bar=onset / 4.0 + 1.0,
+            beat_in_bar=(onset % 4.0) + 1.0,
+            subdivision="quarter",
+            nearest_grid_qn=onset,
+            deviation_qn=0.0,
+            deviation_ms=0.0,
+            evidence_refs=["fixture"],
+        )
+        return BassPitchEvent(
+            event_id=f"e{index}",
+            grid=grid,
+            offset_s=0.25,
+            f0_hz=440.0,
+            midi_float=float(pitch),
+            midi_note=pitch,
+            pitch_class=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")[pitch % 12],
+            confidence=1.0,
+            status="RELIABLE",
+            onset_qn=onset,
+            offset_qn=onset + 0.5,
+            duration_qn=0.5,
+            source_kind="ABLETON_MIDI",
+            voiced_fraction=1.0,
+            evidence_refs=["fixture"],
+        )
+
+    bass_events = [event(0, 0.0, 36), event(1, 1.0, 39), event(2, 4.0, 36), event(3, 8.0, 36), event(4, 9.0, 39), event(5, 12.0, 36)]
+    bass = {
+        "status": "SUPPORTED",
+        "source_kind": "ABLETON_MIDI",
+        "source_diagnostics": {},
+        "pitch_events": [item.model_dump(mode="json") for item in bass_events],
+        "pitch_classes": {"C": 0.5, "D#": 0.5},
+        "tonality_status": "INSUFFICIENT_EVIDENCE",
+        "tonality": [],
+        "selected_tonality": None,
+        "scale_degrees": [],
+        "intervals": [],
+        "rhythmic_structure": RhythmicStructure(event_count=6, density_per_bar=1.5).model_dump(mode="json"),
+        "motifs": [],
+        "phrase_structure": [
+            {"phrase_id": "phrase_1", "start_bar": 1.0, "end_bar": 3.0, "structural_label": "A", "event_count": 3},
+            {"phrase_id": "phrase_2", "start_bar": 3.0, "end_bar": 5.0, "structural_label": "A", "event_count": 3},
+        ],
+        "limitations": [],
+    }
+    # Validate the generated bass payload through the public model before use.
+    from copilot.schemas.musical_understanding import BassUnderstanding, MotifPhraseEvidence
+
+    bass["phrase_structure"] = [MotifPhraseEvidence.model_validate(item).model_dump(mode="json") for item in bass["phrase_structure"]]
+    bass_model = BassUnderstanding.model_validate(bass)
+    drums = DrumsUnderstanding(
+        pulse_structure=PulseStructure(),
+        rhythmic_structure=RhythmicStructure(event_count=0, density_per_bar=0.0),
+    )
+    understanding = MusicalUnderstanding(
+        reference_id="fixture-reference",
+        source_analysis_id="fixture-analysis",
+        stem_analysis_id="fixture-stems",
+        tempo_bpm=120.0,
+        timeline={"windows_reused": [{"start_qn": 0.0, "end_qn": 16.0}]},
+        bass=bass_model,
+        drums=drums,
+        relationships={"bass_drums": BassDrumsRelationship(bass_event_count=6, drum_event_count=0, coincidence_count=0, coincidence_ratio=0.0)},
+        provenance={"model_api_calls": 0, "musical_writes": 0},
+    )
+    source = tmp_path / "understanding.json"
+    source.write_text(understanding.model_dump_json(), encoding="utf-8")
+
+    model = build_bass_musical_model(source)
+
+    assert model.event_count == 6
+    assert {row.pitch_class for row in model.pitch_material} == {"C", "D#"}
+    assert model.interval_language.total_intervals == 5
+    assert len(model.rhythmic_cells) == 1
+    assert model.rhythmic_cells[0].occurrence_count == 2
+    assert len(model.motifs) == 1
+    assert model.motifs[0].occurrence_count == 2
+    assert model.selected_tonality is None
+    assert "TONALITY_NOT_COLLAPSED_TO_SINGLE_HYPOTHESIS" in model.limitations
+    assert model.provenance["model_api_calls"] == 0
+    assert model.provenance["musical_writes"] == 0
