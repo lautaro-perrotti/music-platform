@@ -71,8 +71,26 @@ def test_finalization_timeout_when_never_readable(monkeypatch, tmp_path: Path) -
         "copilot.audio.live_capture._exclusive_open_ok",
         lambda p: {"exists": True, "exclusive": False, "error": "winerror=32", "size": 0},
     )
-    with pytest.raises(AudioCaptureError, match="CAPTURE_FINALIZATION_TIMEOUT"):
+    with pytest.raises(AudioCaptureError, match="CAPTURE_FINALIZATION_TIMEOUT") as caught:
         wait_until_wav_shared_readable([missing], timeout_s=0.08, interval_s=0.02)
+    assert caught.value.code == "STAGING_FILE_NOT_SHARED_READABLE"
+    assert caught.value.details["observation_summary"][0]["saw_exists"] is True
+
+
+def test_finalization_distinguishes_file_never_created(monkeypatch, tmp_path: Path) -> None:
+    missing = tmp_path / "never-created.wav"
+    monkeypatch.setattr(
+        "copilot.audio.live_capture.wav_shared_read_ok",
+        lambda p: {"exists": False, "readable": False, "error": None, "size": None},
+    )
+    monkeypatch.setattr(
+        "copilot.audio.live_capture._exclusive_open_ok",
+        lambda p: {"exists": False, "exclusive": True, "error": None, "size": None},
+    )
+    with pytest.raises(AudioCaptureError, match="CAPTURE_FINALIZATION_TIMEOUT") as caught:
+        wait_until_wav_shared_readable([missing], timeout_s=0.08, interval_s=0.02)
+    assert caught.value.code == "STAGING_FILE_NOT_CREATED"
+    assert caught.value.details["observation_summary"][0]["saw_exists"] is False
 
 
 def test_finalization_succeeds_when_shared_readable_even_if_exclusive_held(

@@ -576,13 +576,18 @@ def capture_source_post_mixer(
             },
         }
     except Exception as exc:  # noqa: BLE001
-        journal.record(FAILED, error=str(exc))
+        journal.record(
+            FAILED,
+            error=str(exc),
+            capture_diagnostics=getattr(exc, "details", None),
+        )
         restore = _restore_host_full(daw, host_index, before)
         settled = True
         return {
             "ok": False,
             "signal_status": "CAPTURE_FAILED",
             "error": str(exc),
+            "capture_diagnostics": getattr(exc, "details", None),
             "pass_id": pass_id,
             "journal": str(journal.path),
             "display_name": track.name,

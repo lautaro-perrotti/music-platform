@@ -1007,10 +1007,26 @@ def capture_parallel_pass(
             "mode": stop_post.get("mode"),
         }
         t0 = time.perf_counter()
-        free2 = wait_until_wav_shared_readable(
-            [staging_path(str(rec["staging"])) for rec in recorders],
-            timeout_s=12.0,
-        )
+        try:
+            free2 = wait_until_wav_shared_readable(
+                [staging_path(str(rec["staging"])) for rec in recorders],
+                timeout_s=12.0,
+            )
+        except AudioCaptureError as exc:
+            # Preserve the precise file observation together with the transport
+            # and Rec readbacks.  The caller journals this as diagnostic evidence;
+            # the fail-closed capture result remains unchanged.
+            exc.details.update(
+                {
+                    "record_start_command_sent": True,
+                    "record_start_readback": rec1,
+                    "transport_start": fire_result,
+                    "record_stop_command_sent": True,
+                    "record_stop_readback": rec_stop,
+                    "transport_stop_command_sent": transport_stopped,
+                }
+            )
+            raise
         stop_bd["staging_handle_release"] = {
             "s": time.perf_counter() - t0,
             **{k: free2.get(k) for k in ("ok", "waited_s")},

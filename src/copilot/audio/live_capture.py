@@ -68,9 +68,16 @@ REGION_HIGH_PITCH = 84
 
 
 class AudioCaptureError(DawError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        details: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
+        self.details = dict(details or {})
 
 
 class StageTimer:
@@ -317,6 +324,18 @@ def wait_until_wav_shared_readable(
     """
     deadline = time.time() + timeout_s
     last: list[dict[str, object]] = []
+    observations: dict[str, dict[str, object]] = {
+        str(path): {
+            "path": str(path),
+            "samples": 0,
+            "saw_exists": False,
+            "saw_readable": False,
+            "saw_nonzero": False,
+            "max_size": 0,
+            "last": None,
+        }
+        for path in paths
+    }
     started = time.perf_counter()
     while time.time() < deadline:
         last = []
@@ -326,6 +345,19 @@ def wait_until_wav_shared_readable(
             row["path"] = str(path)
             row["exclusive"] = _exclusive_open_ok(path).get("exclusive")
             last.append(row)
+            summary = observations[str(path)]
+            summary["samples"] = int(summary["samples"]) + 1
+            summary["saw_exists"] = bool(summary["saw_exists"] or row.get("exists"))
+            summary["saw_readable"] = bool(
+                summary["saw_readable"] or row.get("readable")
+            )
+            size = row.get("size")
+            if isinstance(size, (int, float)):
+                summary["max_size"] = max(int(summary["max_size"]), int(size))
+                summary["saw_nonzero"] = bool(
+                    summary["saw_nonzero"] or int(size) > 0
+                )
+            summary["last"] = dict(row)
             if not row.get("exists") or not row.get("readable"):
                 ready = False
         if ready:
@@ -336,16 +368,28 @@ def wait_until_wav_shared_readable(
                 "exclusive_required": False,
             }
         time.sleep(interval_s)
+    summary_rows = list(observations.values())
+    saw_any_file = any(bool(row["saw_exists"]) for row in summary_rows)
+    saw_any_readable = any(bool(row["saw_readable"]) for row in summary_rows)
+    if not saw_any_file:
+        failure_code = "STAGING_FILE_NOT_CREATED"
+    elif not saw_any_readable:
+        failure_code = "STAGING_FILE_NOT_SHARED_READABLE"
+    else:
+        failure_code = "CAPTURE_FINALIZATION_TIMEOUT"
     payload = {
         "ok": False,
         "waited_s": time.perf_counter() - started,
         "rows": last,
+        "observation_summary": summary_rows,
         "timeout_s": timeout_s,
         "exclusive_required": False,
     }
     raise AudioCaptureError(
-        "CAPTURE_FINALIZATION_TIMEOUT",
-        "staging WAV never became shared-readable: " + str(payload),
+        failure_code,
+        "CAPTURE_FINALIZATION_TIMEOUT: staging WAV never became shared-readable: "
+        + str(payload),
+        details={"stage": "staging_finalize", **payload},
     )
 
 
