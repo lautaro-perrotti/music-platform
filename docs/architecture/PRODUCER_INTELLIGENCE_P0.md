@@ -14,6 +14,9 @@ it does not add a second Ableton write path.
 - Producer state is persisted as a compact decision ledger.  It records what
   was observed, decided, attempted, and why the producer stopped.  It is not a
   transaction journal and cannot mutate Ableton.
+- The bounded Alpha coordinator now records session observation, accepted plan,
+  execution outcome, and typed critique outcome in that ledger.  Provider
+  failure ends in `ABSTAINED`; it never becomes an invented musical verdict.
 - Dynamic sections are accepted by name and energy.  No fixed Tech House
   labels are required; genre heuristics remain advisory input.
 

@@ -74,6 +74,17 @@ def test_producer_state_is_atomic_and_identity_scoped(tmp_path):
         store.save(next_state.model_copy(update={"project_identity": "project-b"}))
 
 
+def test_producer_state_resumes_same_project_without_cross_binding(tmp_path):
+    store = ProducerStateStore(tmp_path)
+    first = store.create(session_id="alpha-1", project_identity="project-a")
+    resumed = store.load(first.session_id)
+    assert resumed is not None
+    assert resumed.project_identity == "project-a"
+    assert resumed.events == []
+    with pytest.raises(ValueError, match="IDENTITY_MISMATCH"):
+        store.save(resumed.model_copy(update={"project_identity": "project-b"}))
+
+
 def test_lucas_core_intent_gate_accepts_track_spec_roles():
     from copilot.integration.lucas_core_v1 import constrain_plan_to_lucas_intent
     from copilot.musicplan.tech_house import build_tech_house_plan

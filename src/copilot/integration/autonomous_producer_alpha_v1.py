@@ -7,6 +7,7 @@ SafeWrite, readback, capture, and artifact persistence.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,7 @@ from copilot.integration.lucas_core_v1 import (
 from copilot.integration.mixing_mastering_v1 import capture_and_analyze_master
 from copilot.importing.working_copy_manager_v1 import is_copilot_working_copy
 from copilot.musicplan import build_duplicate_clip_to_arrangement_action
+from copilot.producer.state import ProducerPhase, ProducerState, ProducerStateStore
 from copilot.sample_library.library_v1 import (
     build_sample_set_context,
     index_library,
@@ -488,6 +490,22 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         "strategy_provenance": REAL_LUCAS,
         "lucas_owned_files_modified": 0,
     }
+    producer_state: ProducerState | None = None
+    producer_state_store: ProducerStateStore | None = None
+
+    def persist_producer_state(next_state: ProducerState) -> None:
+        nonlocal producer_state
+        if producer_state_store is None:
+            raise RuntimeError("PRODUCER_STATE_STORE_NOT_READY")
+        producer_state = next_state
+        path = producer_state_store.save(next_state)
+        report["producer_state"] = {
+            "session_id": next_state.session_id,
+            "path": str(path),
+            "phase": next_state.phase.value,
+            "event_count": len(next_state.events),
+        }
+
     daw = AbletonTcpAdapter()
     try:
         daw.connect()
@@ -502,6 +520,26 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             "token": session.project_token,
             "track_count_before": len(session.tracks),
         }
+        state_key = hashlib.sha256(
+            f"autonomous-alpha:{session.project_identity}".encode("utf-8")
+        ).hexdigest()[:20]
+        producer_state_store = ProducerStateStore(evidence / "producer_state")
+        producer_state = producer_state_store.load(state_key)
+        if producer_state is None:
+            producer_state = ProducerState(
+                session_id=state_key,
+                project_identity=session.project_identity,
+            )
+        persist_producer_state(
+            producer_state.record(
+                "SESSION_OBSERVED",
+                phase=ProducerPhase.PLANNING,
+                payload={
+                    "tempo_bpm": session.transport.tempo,
+                    "track_count": len(session.tracks),
+                },
+            )
+        )
 
         project_path = Path(session.project_path)
         reference_path = Path(os.environ["COPILOT_ALPHA_REFERENCE"]) if os.environ.get("COPILOT_ALPHA_REFERENCE") else discover_reference(evidence, project_path=project_path)
@@ -560,6 +598,18 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             report["lucas"]["provider_raw_response"] = planner_provider.last_raw
             raise RealLucasRequired("LUCAS_PLANNER_FELL_BACK_TO_DETERMINISTIC_RECIPE")
         plan = planner_run.plan
+        persist_producer_state(
+            producer_state.record(
+                "PLAN_ACCEPTED",
+                phase=ProducerPhase.EXECUTING,
+                payload={
+                    "plan_id": plan.plan_id,
+                    "action_count": len(plan.actions),
+                    "arrangement_sections": len(planner_run.planner_metadata.get("arrangement") or []),
+                    "track_spec_present": bool(planner_run.planner_metadata.get("track_spec")),
+                },
+            )
+        )
         report.update({
             "reference": {
                 "path": str(reference_path),
@@ -616,6 +666,17 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             "direct_soniq_writes": 0,
             "safe_write_authorities": 1,
         }
+        persist_producer_state(
+            producer_state.record(
+                "EXECUTION_OBSERVED",
+                phase=ProducerPhase.OBSERVING,
+                payload={
+                    "verified": report["execution"]["executable_verified"],
+                    "deferred": report["execution"]["deferred"],
+                    "failed": report["execution"]["failed"],
+                },
+            )
+        )
         if report["execution"]["failed"]:
             report["status"] = "FAILED_EXECUTION"
             return report
@@ -650,6 +711,23 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         )
         report["lucas_feedback"] = critique
         report["critique_provider_limited"] = critique.get("status") != "CRITIQUE_COMPLETE"
+        final_phase = (
+            ProducerPhase.ABSTAINED
+            if report["critique_provider_limited"]
+            else ProducerPhase.COMPLETE
+        )
+        persist_producer_state(
+            producer_state.record(
+                "CRITIQUE_OBSERVED",
+                phase=final_phase,
+                detail=(
+                    "provider unavailable; no musical verdict fabricated"
+                    if report["critique_provider_limited"]
+                    else "typed critique completed"
+                ),
+                payload={"status": critique.get("status")},
+            )
+        )
         if report["critique_provider_limited"]:
             report["status"] = "PRODUCTION_PASS_VERIFIED / REVISION_PROVIDER_LIMITED"
         else:
