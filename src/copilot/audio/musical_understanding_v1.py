@@ -428,6 +428,10 @@ def _midi_notes(
         from copilot.audio.midi_read_only_v1 import (
             _load_als_root,
             _parent_map,
+            _als_device_inventory,
+            _local,
+            _track_locator_name,
+            TRACK_TAGS,
             identity_for_als_path,
             match_als_track,
             read_arrangement_midi,
@@ -459,10 +463,75 @@ def _midi_notes(
             PersistentObjectRef.model_validate(persistent),
         )
         if not matched.get("ok"):
+            root = _load_als_root(als_path)
+            parents = _parent_map(root)
+            candidate_rows: list[dict[str, Any]] = []
+            for track_index, track in enumerate(item for item in root.iter() if _local(item.tag) in TRACK_TAGS):
+                name = _track_locator_name(track)
+                if name != str(source.get("track_name") or persistent.get("name") or ""):
+                    continue
+                names, classes = _als_device_inventory(track)
+                current_read = read_arrangement_midi(
+                    root,
+                    track,
+                    parents,
+                    region_start=float((pack.get("timeline") or {}).get("start_qn") or 0.0),
+                    region_end=float((pack.get("timeline") or {}).get("end_qn") or 0.0),
+                )
+                current_clips = current_read.get("clips") or []
+                current_notes = current_read.get("notes") or []
+                canonical = {
+                    "role": "midi" if _local(track.tag) == "MidiTrack" else "unknown",
+                    "device_names": names,
+                    "device_classes": classes,
+                    "clip_names": [str(clip.get("clip_name") or "") for clip in current_clips],
+                    "arrangement_clip_spans": [
+                        [float(clip["arrangement_start_qn"]), float(clip["arrangement_end_qn"])]
+                        for clip in current_clips
+                    ],
+                    "arrangement_note_count": len(current_notes),
+                }
+                candidate_rows.append({
+                    "track_locator_index": track_index,
+                    "track_type": _local(track.tag),
+                    "track_name": name,
+                    **canonical,
+                    "raw_candidate_digest": hashlib.sha256(
+                        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    ).hexdigest(),
+                })
+            expected = {
+                "role": persistent.get("role"),
+                "device_names": persistent.get("device_names") or [],
+                "device_classes": persistent.get("device_classes") or [],
+                "clip_slots": persistent.get("clip_slots") or [],
+                "clip_names": persistent.get("clip_names") or [],
+                "note_counts": persistent.get("note_counts") or [],
+                "content_fingerprint": persistent.get("content_fingerprint"),
+            }
+            mismatch_fields: list[str] = []
+            if candidate_rows:
+                candidate = candidate_rows[0]
+                if expected["role"] != candidate["role"]:
+                    mismatch_fields.append("role")
+                if expected["device_names"] != candidate["device_names"]:
+                    mismatch_fields.append("device_names")
+                if expected["device_classes"] != candidate["device_classes"]:
+                    mismatch_fields.append("device_classes")
+                if expected["clip_names"] != candidate["clip_names"]:
+                    mismatch_fields.append("clip_names")
+                if expected["note_counts"] != [candidate["arrangement_note_count"]]:
+                    mismatch_fields.append("note_counts_or_clip_scope")
+                if expected["clip_slots"]:
+                    mismatch_fields.append("clip_slots_not_reconciled_to_arrangement_clips")
             return [], ["MIDI_TRACK_IDENTITY_UNRESOLVED", str(matched.get("error"))], {
                 **diagnostics,
                 "status": "TRACK_IDENTITY_UNRESOLVED",
                 "match": {key: value for key, value in matched.items() if key != "element"},
+                "expected_persisted_ref": expected,
+                "current_same_name_candidates": candidate_rows,
+                "mismatch_fields": mismatch_fields,
+                "resolution_rule": "NAME_AND_INDEX_ARE_LOCATORS_ONLY; NO_GUESSING",
             }
         root = _load_als_root(als_path)
         parents = _parent_map(root)
@@ -504,6 +573,7 @@ def analyze_musical_understanding(
     stem_analysis_path: Path | str,
     *,
     midi_pack_path: Path | str | None = None,
+    midi_reconciliation_path: Path | str | None = None,
     output_path: Path | str | None = None,
     report_path: Path | str | None = None,
 ) -> MusicalUnderstanding:
@@ -628,6 +698,20 @@ def analyze_musical_understanding(
             "analyzer_id": "musical-understanding-deterministic-v1",
         },
     )
+    if midi_reconciliation_path is not None:
+        reconciliation = {
+            "schema_version": "midi-source-reconciliation-v1",
+            "status": midi_diagnostics.get("status", "NOT_PROVIDED"),
+            "reference_id": source.reference_id,
+            "source_analysis_id": source.source_analysis_id,
+            "project_identity": midi_diagnostics.get("actual_project_identity"),
+            "diagnostics": midi_diagnostics,
+            "model_api_calls": 0,
+            "musical_writes": 0,
+        }
+        target = Path(midi_reconciliation_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(reconciliation, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_path is not None:
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
