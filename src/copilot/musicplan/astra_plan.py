@@ -70,9 +70,21 @@ def build_astra_prompt(
         "",
         f"User intent: {intent}",
         "",
-        "Decide ONE sample per role AND the arrangement (sections). Return ONLY a JSON object:",
+        "Decide ONE sample per role AND a typed TrackSpec arrangement. Return ONLY a JSON object:",
         """{
   "selections": {"TrackName": <1-based index>, ...},
+  "track_spec": {
+    "title": "<short title>",
+    "intent": "<restatement of the user's musical intent>",
+    "bpm": 127,
+    "key": "<optional key>",
+    "style": "<optional style>",
+    "primary_hook": "<optional primary hook>",
+    "sections": [
+      {"name": "<producer-defined name>", "bars": 8, "energy": 0.25,
+       "active_roles": ["TrackName"], "variation": "", "transition": ""}
+    ]
+  },
   "arrangement": [
     {"name": "<section name>", "bars": <int>, "active": ["TrackName", ...]},
     ...
@@ -88,6 +100,8 @@ def build_astra_prompt(
   ]
 }""",
         "",
+        "TrackSpec rules: sections are producer-defined measurement/planning units, not a fixed genre template;",
+        "each section must declare energy 0..1 and active_roles; use subtraction and variation rather than stacking;",
         "Arrangement rules: 5-8 sections; Kick must be active in at least the backbone sections;",
         "build up (drums/percussion first), reach a DROP, and return subdued at the end (DJ exit);",
         "subtract by omission across sections, never stack everything.",
@@ -227,8 +241,21 @@ def build_plan_from_prompt(
         raw = fn(prompt, timeout_s=timeout_s)
         data = parse_astra_selection(raw)
         selections = data.get("selections", {})
+        track_spec = None
+        track_spec_error = None
         arrangement_raw = data.get("arrangement")
-        arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
+        if data.get("track_spec") is not None:
+            from copilot.producer.track_spec import parse_track_spec
+            from copilot.musicplan.arrangement import ALL_TRACKS
+
+            try:
+                track_spec = parse_track_spec(data["track_spec"])
+                arrangement = track_spec.to_arrangement(known_roles=set(ALL_TRACKS))
+            except Exception as exc:  # noqa: BLE001
+                track_spec_error = str(exc)
+                arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
+        else:
+            arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
         patch_contracts_raw = data.get("patch_contracts")
         patch_contracts = validate_patch_contracts(
             patch_contracts_raw,
@@ -249,6 +276,8 @@ def build_plan_from_prompt(
             "selections": selections,
             "sample_map": sample_map,
             "arrangement": arrangement,
+            "track_spec": track_spec.model_dump(mode="json") if track_spec else None,
+            "track_spec_error": track_spec_error,
             "patch_contracts": patch_contracts,
         }
     except Exception as exc:  # noqa: BLE001

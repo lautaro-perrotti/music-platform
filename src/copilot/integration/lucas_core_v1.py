@@ -301,12 +301,21 @@ def constrain_plan_to_lucas_intent(
     """
     selections = metadata.get("selections")
     arrangement = metadata.get("arrangement")
-    if not isinstance(selections, dict) and not isinstance(arrangement, list):
+    track_spec = metadata.get("track_spec")
+    if (
+        not isinstance(selections, dict)
+        and not isinstance(arrangement, list)
+        and not isinstance(track_spec, dict)
+    ):
         return plan, metadata
     allowed: set[str] = {str(name) for name in (selections or {})}
     for section in arrangement or []:
         if isinstance(section, dict):
             allowed.update(str(name) for name in (section.get("active") or []))
+    track_spec_sections = track_spec.get("sections", []) if isinstance(track_spec, dict) else []
+    for section in track_spec_sections:
+        if isinstance(section, dict):
+            allowed.update(str(name) for name in (section.get("active_roles") or []))
     if not allowed:
         return plan, metadata
 

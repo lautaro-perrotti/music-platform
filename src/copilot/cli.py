@@ -2908,7 +2908,13 @@ def _vibe(evidence: Path, logger, argv: list[str], live: bool = False, leave: bo
     plan._astra_arrangement = astra_arrangement
     plan._astra_patch_contracts = meta.get("patch_contracts") or []
     from copilot.musicplan.arrangement import build_arrangement_mute_actions, TECH_HOUSE_ARRANGEMENT
-    plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity))
+    selected_arrangement = astra_arrangement or TECH_HOUSE_ARRANGEMENT
+    plan.actions.extend(
+        build_arrangement_mute_actions(
+            project_identity=session.project_identity,
+            arrangement=selected_arrangement,
+        )
+    )
     if leave:
         drop = [s for s in TECH_HOUSE_ARRANGEMENT if s.name == "DROP"][0]
         plan.actions.extend(build_arrangement_mute_actions(project_identity=session.project_identity, arrangement=[drop]))
