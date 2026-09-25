@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 import hashlib
 from pathlib import Path
+import tempfile
+from typing import Any, Mapping
 from time import perf_counter
 
 import numpy as np
@@ -34,6 +36,13 @@ def analyze_reference_file(
     reference_state_token: str,
     target_state_token: str,
     tempo_bpm: float,
+    kick_path: Path | str | None = None,
+    bass_path: Path | str | None = None,
+    bar_start: int | None = None,
+    bar_end: int | None = None,
+    reference_id: str | None = None,
+    project_id: str | None = None,
+    source_ref: Mapping[str, Any] | None = None,
     use_cache: bool = True,
 ) -> MusicAnalysisPack:
     """Analyze one reference file and return the complete factual pack.
@@ -41,13 +50,105 @@ def analyze_reference_file(
     This function is deliberately DAW-free. It cannot mutate the target
     project and does not expose raw audio to Astra.
     """
+    if (bar_start is None) != (bar_end is None):
+        raise ValueError("bar_start and bar_end must be provided together")
+    if bar_start is not None:
+        return analyze_reference_region(
+            path,
+            bar_start=bar_start,
+            bar_end=bar_end,
+            reference_state_token=reference_state_token,
+            target_state_token=target_state_token,
+            tempo_bpm=tempo_bpm,
+            reference_id=reference_id,
+            project_id=project_id,
+            source_ref=source_ref,
+            use_cache=use_cache,
+        )
     return analyze_reference_music(
         path,
         reference_state_token=reference_state_token,
         target_state_token=target_state_token,
         tempo_bpm=tempo_bpm,
+        kick_path=kick_path,
+        bass_path=bass_path,
+        reference_id=reference_id,
+        project_id=project_id,
+        source_ref=source_ref,
         use_cache=use_cache,
     )
+
+
+def analyze_reference_region(
+    path: Path | str,
+    *,
+    bar_start: int,
+    bar_end: int,
+    reference_state_token: str,
+    target_state_token: str,
+    tempo_bpm: float,
+    kick_path: Path | str | None = None,
+    bass_path: Path | str | None = None,
+    reference_id: str | None = None,
+    project_id: str | None = None,
+    source_ref: Mapping[str, Any] | None = None,
+    use_cache: bool = True,
+) -> MusicAnalysisPack:
+    """Analyze exactly a 1-based musical bar range without mutating a target.
+
+    The source remains immutable.  A temporary PCM slice lets the frozen
+    FullMix analyzer remain the measurement authority; the resulting pack is
+    rebased to the source timeline and records the parent hash and range.
+    """
+    if bar_start < 1 or bar_end < bar_start:
+        raise ValueError("bar range must be 1-based and end at or after start")
+    if tempo_bpm <= 0:
+        raise ValueError("tempo_bpm must be positive")
+    source = Path(path)
+    data, sample_rate = sf.read(source, always_2d=True, dtype="float32")
+    beats_per_bar = 4.0
+    start_qn = (bar_start - 1) * beats_per_bar
+    end_qn = bar_end * beats_per_bar
+    start_sample = int(round(start_qn * 60.0 / tempo_bpm * sample_rate))
+    end_sample = int(round(end_qn * 60.0 / tempo_bpm * sample_rate))
+    if start_sample < 0 or end_sample > len(data) or end_sample <= start_sample:
+        raise ValueError("requested musical region is outside the reference audio")
+    with tempfile.TemporaryDirectory(prefix="reference-analysis-") as temp_dir:
+        sliced = Path(temp_dir) / "selected-region.wav"
+        sf.write(sliced, data[start_sample:end_sample], sample_rate)
+        pack = analyze_reference_music(
+            sliced,
+            reference_state_token=reference_state_token,
+            target_state_token=target_state_token,
+            tempo_bpm=tempo_bpm,
+            use_cache=False,
+            reference_id=reference_id,
+            project_id=project_id,
+            source_ref=source_ref,
+        )
+    _rebase_pack_to_source(pack, beat_offset=start_qn)
+    pack.mode = "SELECTED_REGION"
+    pack.timeline = _timeline(
+        tempo_bpm=tempo_bpm,
+        duration_s=(end_sample - start_sample) / float(sample_rate),
+        bar_start=bar_start,
+        bar_end=bar_end,
+        start_qn=start_qn,
+        end_qn=end_qn,
+        timing_source="EXPLICIT_MUSICAL_RANGE_WITH_EXTERNAL_TEMPO",
+    )
+    pack.provenance.update({
+        "audio_sha256": _file_sha256(source),
+        "audio_path": str(source.resolve()),
+        "source_region": {"bar_start": bar_start, "bar_end": bar_end, "start_qn": start_qn, "end_qn": end_qn},
+        "temporary_slice": "not persisted",
+    })
+    for window in pack.windows:
+        window.provenance.update(pack.provenance)
+    pack.limitations.append("Selected region is exact in musical QN using the supplied tempo; Ableton warp metadata was not supplied.")
+    if kick_path is not None or bass_path is not None:
+        pack.limitations.append("Selected-region source stems were not sliced; low-end relationship remains unavailable for this request.")
+    return pack
 
 
 def analyze_audio_input(
@@ -61,11 +162,15 @@ def analyze_audio_input(
     typed boundary, so reference WAVs and Ableton captures cannot drift into
     separate musical semantics.
     """
-    pack = analyze_reference_music(
+    pack = analyze_reference_file(
         audio_input.main_path,
         reference_state_token=audio_input.reference_state_token,
         target_state_token=audio_input.target_state_token,
         tempo_bpm=audio_input.tempo_bpm,
+        bar_start=audio_input.bar_start,
+        bar_end=audio_input.bar_end,
+        project_id=audio_input.project_identity,
+        source_ref={"capture_id": audio_input.capture_id, "kind": "PROJECT_CAPTURE"},
         kick_path=audio_input.source_paths.get("kick"),
         bass_path=audio_input.source_paths.get("bass"),
         use_cache=use_cache,
@@ -86,6 +191,9 @@ def analyze_reference_music(
     tempo_bpm: float,
     kick_path: Path | str | None = None,
     bass_path: Path | str | None = None,
+    reference_id: str | None = None,
+    project_id: str | None = None,
+    source_ref: Mapping[str, Any] | None = None,
     use_cache: bool = True,
 ):
     """Run the real MUSIC_ANALYZER_V1 pass over a reference WAV.
@@ -223,6 +331,20 @@ def analyze_reference_music(
             *lowend_limitations,
         ],
     )
+    pack.reference_id = reference_id
+    pack.project_id = project_id
+    pack.source_ref = dict(source_ref or {"kind": "FILE", "path": str(audio_path.resolve())})
+    pack.mode = "WHOLE_TRACK"
+    total_bars = int(np.ceil(total_beats / 4.0))
+    pack.timeline = _timeline(
+        tempo_bpm=tempo_bpm,
+        duration_s=len(samples) / float(sample_rate),
+        bar_start=1,
+        bar_end=max(1, total_bars),
+        start_qn=0.0,
+        end_qn=total_beats,
+        timing_source="EXTERNAL_TEMPO_INPUT",
+    )
     pack.metadata["timings_s"] = {
         "audio_decode_s": decoded_at - started,
         "physical_dsp_fullmix_s": physical_at - decoded_at,
@@ -231,6 +353,91 @@ def analyze_reference_music(
         "total_s": perf_counter() - started,
     }
     return pack
+
+
+def _timeline(*, tempo_bpm: float, duration_s: float, bar_start: int, bar_end: int,
+              start_qn: float, end_qn: float, timing_source: str) -> dict[str, Any]:
+    return {
+        "tempo_bpm": tempo_bpm,
+        "meter": {"numerator": 4, "denominator": 4},
+        "bar_start": bar_start,
+        "bar_end": bar_end,
+        "start_qn": start_qn,
+        "end_qn": end_qn,
+        "start_s": start_qn * 60.0 / tempo_bpm,
+        "end_s": end_qn * 60.0 / tempo_bpm,
+        "duration_s": duration_s,
+        "timing_source": timing_source,
+        "status": "MAPPED_WITH_LIMITATION",
+    }
+
+
+def render_reference_report(pack: MusicAnalysisPack) -> str:
+    """Render a concise human report directly from the typed evidence pack."""
+    timeline = pack.timeline
+    lines = [
+        "REFERENCE",
+        f"Mode: {pack.mode}",
+        f"Tempo: {pack.tempo_bpm:g} BPM",
+        f"Bars: {timeline.get('bar_start', 1)}–{timeline.get('bar_end', 0)}",
+        f"Duration: {timeline.get('duration_s', 0):.2f} s",
+        "",
+    ]
+    for window in pack.windows:
+        start_bar = int(window.start_beat // 4) + 1
+        end_bar = max(start_bar, int(np.ceil(window.end_beat / 4.0)))
+        lines.append(f"Bars {start_bar}–{end_bar}")
+        if window.energy_db is not None:
+            lines.append(f"- measured energy: {window.energy_db:.2f} dB")
+        if window.low_band_energy is not None:
+            lines.append(f"- relative low-band energy: {window.low_band_energy:.4f}")
+        if window.groove.onset_count is not None:
+            lines.append(f"- transient/onset count: {window.groove.onset_count}")
+        if window.section_label:
+            lines.append(f"- measurement-window label: {window.section_label}")
+        lines.append("")
+    lines.append("Probable structure:")
+    if pack.sections:
+        for section in pack.sections:
+            confidence = "unknown" if section.confidence is None else f"{section.confidence:.2f}"
+            lines.append(
+                f"- {section.function or section.name} "
+                f"(bars {int(section.start_beat // 4) + 1}–{max(1, int(np.ceil(section.end_beat / 4.0)))}, "
+                f"confidence {confidence})"
+            )
+    else:
+        lines.append("- UNKNOWN")
+    lines.append("")
+    lines.append("Transitions:")
+    for transition in pack.transitions:
+        delta = "unknown" if transition.energy_delta_db is None else f"{transition.energy_delta_db:.2f} dB"
+        lines.append(f"- {transition.kind} near bar {int(transition.start_beat // 4) + 1} ({delta})")
+    lines.append("")
+    lines.append("Limitations:")
+    lines.extend(f"- {item}" for item in pack.limitations)
+    return "\n".join(lines)
+
+
+def _rebase_pack_to_source(pack: MusicAnalysisPack, *, beat_offset: float) -> None:
+    if not beat_offset:
+        return
+    for window in pack.windows:
+        window.start_beat += beat_offset
+        window.end_beat += beat_offset
+        window.groove.event_locations = [value + beat_offset for value in window.groove.event_locations]
+    for section in pack.sections:
+        section.start_beat += beat_offset
+        section.end_beat += beat_offset
+    for region in pack.structural_regions:
+        region.start_beat += beat_offset
+        region.end_beat += beat_offset
+    for item in pack.source_activity:
+        item.start_beat += beat_offset
+        item.end_beat += beat_offset
+    for transition in pack.transitions:
+        transition.start_beat += beat_offset
+        transition.end_beat += beat_offset
+        transition.event_locations = [value + beat_offset for value in transition.event_locations]
 
 
 def _file_sha256(path: Path) -> str:

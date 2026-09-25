@@ -2,11 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import hashlib
 
 from copilot.audio.music_analyzer import (
     analyze_audio_input,
     analyze_reference_file,
     analyze_reference_music,
+    render_reference_report,
 )
 from copilot.schemas.music_analysis import AudioAnalysisInput
 
@@ -132,3 +134,45 @@ def test_audio_analysis_input_is_the_shared_project_and_reference_boundary(tmp_p
     assert pack.provenance["project_identity"] == "project-boundary"
     assert pack.provenance["capture_id"] == "capture-boundary"
     assert pack.no_write is True
+
+
+def test_selected_region_uses_exact_musical_bars_and_preserves_source(tmp_path: Path):
+    sample_rate = 12000
+    tempo = 120.0
+    # 20 bars at 120 BPM = 40 seconds; request bars 5-12 (8 bars).
+    seconds = 40.0
+    time = np.arange(int(sample_rate * seconds)) / sample_rate
+    signal = (0.2 * np.sin(2 * np.pi * 110.0 * time)).astype(np.float32)
+    path = tmp_path / "selected-reference.wav"
+    sf.write(path, signal, sample_rate)
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    pack = analyze_reference_file(
+        path,
+        reference_state_token="reference:selected",
+        target_state_token="target:selected",
+        tempo_bpm=tempo,
+        bar_start=5,
+        bar_end=12,
+        reference_id="ref-selected",
+        project_id="project-selected",
+        source_ref={"stable_id": "audio-ref-1"},
+        use_cache=False,
+    )
+
+    assert pack.mode == "SELECTED_REGION"
+    assert pack.reference_id == "ref-selected"
+    assert pack.project_id == "project-selected"
+    assert pack.timeline["bar_start"] == 5
+    assert pack.timeline["bar_end"] == 12
+    assert pack.timeline["start_qn"] == 16.0
+    assert pack.timeline["end_qn"] == 48.0
+    assert pack.windows[0].start_beat == 16.0
+    assert pack.windows[-1].end_beat == 48.0
+    assert pack.provenance["source_region"] == {"bar_start": 5, "bar_end": 12, "start_qn": 16.0, "end_qn": 48.0}
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert pack.no_write is True
+    report = render_reference_report(pack)
+    assert "REFERENCE" in report
+    assert "Bars 5–12" in report
+    assert "Limitations:" in report

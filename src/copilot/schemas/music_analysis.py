@@ -21,6 +21,9 @@ class AudioAnalysisInput(BaseModel):
     reference_state_token: str
     target_state_token: str
     tempo_bpm: float = Field(gt=0)
+    mode: str = "WHOLE_TRACK"
+    bar_start: int | None = Field(default=None, ge=1)
+    bar_end: int | None = Field(default=None, ge=1)
     source_paths: dict[str, Path] = Field(default_factory=dict)
     project_identity: str | None = None
     capture_id: str | None = None
@@ -29,6 +32,16 @@ class AudioAnalysisInput(BaseModel):
     def distinct_state_tokens(self) -> "AudioAnalysisInput":
         if self.reference_state_token == self.target_state_token:
             raise ValueError("reference and target state tokens must remain distinct")
+        if (self.bar_start is None) != (self.bar_end is None):
+            raise ValueError("bar_start and bar_end must be provided together")
+        if self.bar_start is not None and self.bar_end < self.bar_start:
+            raise ValueError("bar_end must be at or after bar_start")
+        if self.mode not in {"WHOLE_TRACK", "SELECTED_REGION"}:
+            raise ValueError("unsupported reference analysis mode")
+        if self.mode == "SELECTED_REGION" and self.bar_start is None:
+            raise ValueError("selected-region input requires bar_start and bar_end")
+        if self.mode == "WHOLE_TRACK" and self.bar_start is not None:
+            raise ValueError("whole-track input cannot include a bar range")
         return self
 
 
@@ -194,6 +207,11 @@ class MusicAnalysisPack(BaseModel):
 
     schema_version: str = "music-analysis-v1"
     tokens: ReferenceStateTokens
+    reference_id: str | None = None
+    project_id: str | None = None
+    source_ref: dict[str, Any] = Field(default_factory=dict)
+    mode: str = "WHOLE_TRACK"
+    timeline: dict[str, Any] = Field(default_factory=dict)
     tempo_bpm: float = Field(gt=0)
     window_bars: int = Field(default=32, ge=1)
     windows: list[MusicAnalysisWindow] = Field(default_factory=list)
