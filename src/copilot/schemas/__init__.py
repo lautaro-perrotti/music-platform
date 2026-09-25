@@ -9,6 +9,7 @@ from copilot.schemas.session import (
     TransportState,
 )
 from copilot.schemas.transaction import AgentTransaction, TransactionAction, TransactionStatus
+from copilot.schemas.musical_understanding import MusicalUnderstanding
 
 __all__ = [
     "AgentTransaction",
@@ -24,4 +25,5 @@ __all__ = [
     "TransactionAction",
     "TransactionStatus",
     "TransportState",
+    "MusicalUnderstanding",
 ]
