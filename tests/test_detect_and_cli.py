@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from copilot.cli import main
 from copilot.daw.detect import detect_ableton
 from copilot.daw.install_remote_script import install_remote_script
@@ -33,6 +35,9 @@ def test_install_script_status_matches_detection() -> None:
 
 
 def test_cli_probe_never_uses_mock(capsys) -> None:
+    detection = detect_ableton()
+    if detection.found and detection.port_open:
+        pytest.skip("Live is active; this test requires the environment-down probe")
     code = main(["probe"])
     captured = json.loads(capsys.readouterr().out)
     assert code == 2
@@ -41,12 +46,14 @@ def test_cli_probe_never_uses_mock(capsys) -> None:
         "MANUAL_CONFIGURATION_REQUIRED",
     }
     assert captured.get("backend") != "mock"
-    detection = detect_ableton()
     if detection.found and not detection.port_open:
         assert captured["status"] == "MANUAL_CONFIGURATION_REQUIRED"
 
 
 def test_cli_slice1_never_falls_back_to_mock(capsys) -> None:
+    detection = detect_ableton()
+    if detection.found and detection.port_open:
+        pytest.skip("Live is active; slice1 environment test requires Live down")
     code = main(["slice1"])
     captured = json.loads(capsys.readouterr().out)
     assert code == 2
