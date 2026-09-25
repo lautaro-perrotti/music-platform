@@ -33,7 +33,19 @@ class BassPitchEvent(BaseModel):
     pitch_class: str | None = None
     confidence: float = Field(ge=0, le=1)
     status: str = "RELIABLE"
+    onset_qn: float | None = Field(default=None, ge=0)
+    offset_qn: float | None = Field(default=None, ge=0)
+    duration_qn: float | None = Field(default=None, ge=0)
+    source_kind: str = "AUDIO_PYIN"
+    voiced_fraction: float | None = Field(default=None, ge=0, le=1)
     evidence_refs: list[str] = Field(default_factory=list)
+
+
+# Normalized symbolic note evidence is intentionally the same wire shape as
+# the existing pitch-event representation.  Keeping the alias preserves the
+# previously emitted musical-understanding artifact while making the source
+# boundary explicit for MIDI and audio-derived notes.
+BassNoteEvidence = BassPitchEvent
 
 
 class TonalityHypothesis(BaseModel):
@@ -92,7 +104,9 @@ class MotifPhraseEvidence(BaseModel):
 
 class BassUnderstanding(BaseModel):
     status: str = "SUPPORTED"
-    pitch_events: list[BassPitchEvent] = Field(default_factory=list)
+    source_kind: str = "AUDIO_PYIN"
+    source_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    pitch_events: list[BassNoteEvidence] = Field(default_factory=list)
     pitch_classes: dict[str, float] = Field(default_factory=dict)
     tonality_status: str = "INSUFFICIENT_EVIDENCE"
     tonality: list[TonalityHypothesis] = Field(default_factory=list)
@@ -163,4 +177,3 @@ class MusicalUnderstanding(BaseModel):
         if self.raw_audio_included:
             raise ValueError("raw audio cannot be embedded in musical understanding")
         return self
-

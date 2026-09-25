@@ -44,6 +44,11 @@ MODE_INTERVALS = {
     "phrygian": (0, 1, 3, 5, 7, 8, 10),
 }
 GRID_STEPS = ((1.0, "quarter"), (0.5, "eighth"), (0.25, "sixteenth"))
+# pYIN's voiced-probability is retained as evidence, not treated as a
+# categorical truth.  0.50 is the minimum majority-confidence boundary;
+# voiced_fraction is an independent guard against a single-frame estimate.
+AUDIO_RELIABLE_PITCH_CONFIDENCE = 0.50
+AUDIO_RELIABLE_VOICED_FRACTION = 0.25
 
 
 def _sha256(path: Path) -> str:
@@ -87,81 +92,147 @@ def _optional_pyin() -> tuple[Any | None, str | None]:
         return None, f"PITCH_PROVIDER_UNAVAILABLE:{type(exc).__name__}"
 
 
-def _pitch_events(path: Path, tempo_bpm: float, evidence_prefix: str) -> tuple[list[BassPitchEvent], list[str], dict[str, float]]:
+def _pyin_track(path: Path) -> tuple[Any, np.ndarray, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, str | None]:
     librosa, unavailable = _optional_pyin()
     if librosa is None:
-        return [], [unavailable or "PITCH_PROVIDER_UNAVAILABLE"], {}
+        return None, np.asarray([]), 0, np.asarray([]), np.asarray([]), np.asarray([]), np.asarray([]), 0, unavailable or "PITCH_PROVIDER_UNAVAILABLE"
+    y, sr = librosa.load(path, sr=None, mono=True)
+    if len(y) < 2048 or not np.any(np.abs(y) > 1e-7):
+        return librosa, y, sr, np.asarray([]), np.asarray([]), np.asarray([]), np.asarray([]), 0, "BASS_SIGNAL_INSUFFICIENT"
+    hop = 256
+    f0, voiced, probability = librosa.pyin(
+        y,
+        fmin=float(librosa.note_to_hz("C1")),
+        fmax=float(librosa.note_to_hz("C5")),
+        sr=sr,
+        frame_length=4096,
+        hop_length=hop,
+        fill_na=np.nan,
+    )
+    times = librosa.times_like(f0, sr=sr, hop_length=hop)
+    return (
+        librosa,
+        y,
+        sr,
+        np.asarray(times, dtype=np.float64),
+        np.asarray(f0, dtype=np.float64),
+        np.asarray(voiced, dtype=bool),
+        np.asarray(probability, dtype=np.float64),
+        hop,
+        None,
+    )
+
+
+def _pitch_events(path: Path, tempo_bpm: float, evidence_prefix: str) -> tuple[list[BassPitchEvent], list[str], dict[str, float], dict[str, Any]]:
     try:
-        y, sr = librosa.load(path, sr=None, mono=True)
-        if len(y) < 2048 or not np.any(np.abs(y) > 1e-7):
-            return [], ["BASS_SIGNAL_INSUFFICIENT"], {}
-        hop = 256
-        f0, voiced, probability = librosa.pyin(
-            y,
-            fmin=float(librosa.note_to_hz("C1")),
-            fmax=float(librosa.note_to_hz("C5")),
-            sr=sr,
-            frame_length=4096,
-            hop_length=hop,
-            fill_na=np.nan,
-        )
-        times = librosa.times_like(f0, sr=sr, hop_length=hop)
-        probability = np.asarray(probability, dtype=np.float64)
-        f0 = np.asarray(f0, dtype=np.float64)
-        voiced = np.asarray(voiced, dtype=bool)
-        valid = voiced & np.isfinite(f0) & (probability >= 0.62)
-        events: list[BassPitchEvent] = []
+        librosa, y, sr, times, f0, voiced, probability, hop, initial_error = _pyin_track(path)
+        if initial_error:
+            return [], [initial_error], {}, {"status": initial_error}
+        old_valid = voiced & np.isfinite(f0) & (probability >= 0.62)
+        old_runs = 0
+        old_duration_passes = 0
         i = 0
-        while i < len(valid):
-            if not valid[i]:
+        while i < len(old_valid):
+            if not old_valid[i]:
                 i += 1
                 continue
-            j = i + 1
-            while j < len(valid) and valid[j]:
-                j += 1
-            start = float(max(0.0, times[i] - hop / (2.0 * sr)))
-            end = float(min(len(y) / sr, times[j - 1] + hop / (2.0 * sr)))
-            if end - start >= 0.06:
-                values = f0[i:j]
-                midi_values = 69.0 + 12.0 * np.log2(values / 440.0)
-                midi = float(np.median(midi_values))
-                f0_hz = float(np.median(values))
-                confidence = float(np.clip(np.median(probability[i:j]), 0.0, 1.0))
-                unstable = float(np.std(midi_values)) > 0.5
-                note = int(round(midi)) if not unstable else None
-                pc = PITCH_CLASSES[note % 12] if note is not None else None
-                status = "UNKNOWN" if unstable or confidence < 0.70 else "RELIABLE"
-                events.append(
-                    BassPitchEvent(
-                        event_id=f"{evidence_prefix}:bass:{len(events):04d}",
-                        grid=_grid_point(start, tempo_bpm, evidence=f"{evidence_prefix}:pitch"),
-                        offset_s=max(0.001, end - start),
-                        f0_hz=f0_hz,
-                        midi_float=midi,
-                        midi_note=note,
-                        pitch_class=pc,
-                        confidence=confidence,
-                        status=status,
-                        evidence_refs=[f"{evidence_prefix}:pyin", f"{evidence_prefix}:voicing"],
-                    )
+            old_runs += 1
+            run_start = i
+            i += 1
+            while i < len(old_valid) and old_valid[i]:
+                i += 1
+            run_start_s = max(0.0, float(times[run_start] - hop / (2.0 * sr)))
+            run_end_s = min(float(len(y) / sr), float(times[i - 1] + hop / (2.0 * sr)))
+            if run_end_s - run_start_s >= 0.06:
+                old_duration_passes += 1
+        envelope = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
+        onset_frames = librosa.onset.onset_detect(
+            onset_envelope=envelope,
+            sr=sr,
+            hop_length=hop,
+            units="frames",
+            backtrack=False,
+            delta=0.20,
+            wait=max(1, int(round(0.12 * sr / hop))),
+        )
+        onset_times = [float(times[min(int(frame), len(times) - 1)]) for frame in onset_frames]
+        events: list[BassPitchEvent] = []
+        low_confidence_regions = 0
+        unstable_regions = 0
+        for index, onset in enumerate(onset_times):
+            next_onset = onset_times[index + 1] if index + 1 < len(onset_times) else onset + 0.75
+            region_start = min(float(len(y) / sr), onset + 0.025)
+            region_end = min(float(len(y) / sr), max(region_start + 0.04, next_onset - 0.025), onset + 0.75)
+            region = (times >= region_start) & (times < region_end)
+            voiced_region = region & voiced & np.isfinite(f0)
+            stable_region = voiced_region & (probability >= 0.40)
+            if int(np.count_nonzero(stable_region)) < 2:
+                continue
+            values = f0[stable_region]
+            midi_values = 69.0 + 12.0 * np.log2(values / 440.0)
+            midi = float(np.median(midi_values))
+            f0_hz = float(np.median(values))
+            confidence = float(np.clip(np.median(probability[stable_region]), 0.0, 1.0))
+            voiced_fraction = float(np.count_nonzero(stable_region) / max(1, np.count_nonzero(region)))
+            unstable = float(np.std(midi_values)) > 0.5
+            note = int(round(midi)) if not unstable else None
+            pc = PITCH_CLASSES[note % 12] if note is not None else None
+            if unstable:
+                unstable_regions += 1
+            if confidence < AUDIO_RELIABLE_PITCH_CONFIDENCE or voiced_fraction < AUDIO_RELIABLE_VOICED_FRACTION:
+                low_confidence_regions += 1
+            status = "UNKNOWN" if unstable or confidence < AUDIO_RELIABLE_PITCH_CONFIDENCE or voiced_fraction < AUDIO_RELIABLE_VOICED_FRACTION else "RELIABLE"
+            onset_qn = onset * tempo_bpm / 60.0
+            offset_qn = region_end * tempo_bpm / 60.0
+            events.append(
+                BassPitchEvent(
+                    event_id=f"{evidence_prefix}:bass:{len(events):04d}",
+                    grid=_grid_point(onset, tempo_bpm, evidence=f"{evidence_prefix}:onset"),
+                    offset_s=max(0.001, region_end - onset),
+                    f0_hz=f0_hz,
+                    midi_float=midi,
+                    midi_note=note,
+                    pitch_class=pc,
+                    confidence=confidence,
+                    status=status,
+                    onset_qn=float(onset_qn),
+                    offset_qn=float(offset_qn),
+                    duration_qn=float(max(0.0, offset_qn - onset_qn)),
+                    source_kind="AUDIO_PYIN_ONSET_CONDITIONED",
+                    voiced_fraction=voiced_fraction,
+                    evidence_refs=[f"{evidence_prefix}:onset", f"{evidence_prefix}:pyin", f"{evidence_prefix}:voicing"],
                 )
-            i = j
+            )
         if not events:
-            return [], ["NO_STABLE_BASS_PITCH_EVENTS"], {}
+            return [], ["NO_ONSET_CONDITIONED_BASS_PITCH_EVENTS"], {}, {
+                "pyin_voiced_runs_total": old_runs,
+                "onset_candidates": len(onset_times),
+            }
         reliable = [event for event in events if event.status == "RELIABLE" and event.pitch_class]
         histogram: dict[str, float] = {pc: 0.0 for pc in PITCH_CLASSES}
-        total = sum(event.offset_s * event.confidence for event in reliable)
+        total = sum((event.duration_qn or 0.0) * event.confidence for event in reliable)
         if total > 0:
             for event in reliable:
-                histogram[event.pitch_class or "C"] += event.offset_s * event.confidence / total
+                histogram[event.pitch_class or "C"] += (event.duration_qn or 0.0) * event.confidence / total
         limits = []
         if any(event.status == "UNKNOWN" for event in events):
-            limits.append("UNSTABLE_PITCH_FRAMES_REPORTED_AS_UNKNOWN")
+            limits.append("UNSTABLE_OR_LOW_CONFIDENCE_ONSET_REGIONS_REPORTED_AS_UNKNOWN")
         if not reliable:
             limits.append("NO_RELIABLE_BASS_PITCH_EVENTS")
-        return events, limits, histogram
+        diagnostics = {
+            "old_contiguous_pyin_runs": old_runs,
+            "old_runs_that_met_060s_duration_gate": old_duration_passes,
+            "onset_candidates": len(onset_times),
+            "onset_regions_with_pitch": len(events),
+            "low_confidence_regions": low_confidence_regions,
+            "unstable_regions": unstable_regions,
+            "segmentation_change": "ONSET_CONDITIONED_REGIONS",
+            "onset_parameters": {"delta": 0.20, "minimum_separation_s": 0.12, "attack_exclusion_s": 0.025},
+            "diagnosis": "Previous continuous-run segmentation discarded short pYIN runs before note onsets could be represented; onset-conditioned regions now preserve them as distinct UNKNOWN or reliable candidates.",
+        }
+        return events, limits, histogram, diagnostics
     except Exception as exc:  # pragma: no cover - provider/runtime dependent
-        return [], [f"PITCH_ANALYSIS_FAILED:{type(exc).__name__}:{exc}"], {}
+        return [], [f"PITCH_ANALYSIS_FAILED:{type(exc).__name__}:{exc}"], {}, {"status": "FAILED"}
 
 
 def _periodicity(onsets_qn: list[float], *, evidence: str) -> list[PeriodicityCandidate]:
@@ -344,13 +415,99 @@ def _build_drums(path: Path, tempo_bpm: float, total_bars: float, evidence: str)
     ), [event.grid.onset_s for event in events]
 
 
+def _midi_notes(
+    midi_pack_path: Path | None,
+    *,
+    tempo_bpm: float,
+    evidence_prefix: str,
+) -> tuple[list[BassPitchEvent], list[str], dict[str, Any]]:
+    """Read exact notes only when the persisted ALS identity reconciles."""
+    if midi_pack_path is None:
+        return [], ["MIDI_SOURCE_NOT_PROVIDED"], {"status": "NOT_PROVIDED"}
+    try:
+        from copilot.audio.midi_read_only_v1 import (
+            _load_als_root,
+            _parent_map,
+            identity_for_als_path,
+            match_als_track,
+            read_arrangement_midi,
+        )
+        from copilot.daw.object_ref import PersistentObjectRef
+
+        pack = json.loads(midi_pack_path.read_text(encoding="utf-8"))
+        source = pack.get("source_ref") or {}
+        als_path = Path(str(source.get("project_path") or ""))
+        expected_identity = str(source.get("project_identity") or "")
+        diagnostics: dict[str, Any] = {
+            "pack_path": str(midi_pack_path),
+            "als_path": str(als_path),
+            "expected_project_identity": expected_identity,
+            "track_name_locator": source.get("track_name"),
+            "track_index_locator": source.get("track_index"),
+        }
+        if not als_path.is_file():
+            return [], ["MIDI_ALS_NOT_FOUND"], {**diagnostics, "status": "NOT_FOUND"}
+        actual_identity = identity_for_als_path(als_path)
+        diagnostics["actual_project_identity"] = actual_identity
+        if actual_identity != expected_identity:
+            return [], ["MIDI_PROJECT_IDENTITY_MISMATCH"], {**diagnostics, "status": "PROJECT_MISMATCH"}
+        persistent = source.get("persistent_track_ref")
+        if not isinstance(persistent, dict):
+            return [], ["MIDI_PERSISTED_TRACK_REF_MISSING"], {**diagnostics, "status": "TRACK_REF_MISSING"}
+        matched = match_als_track(
+            _load_als_root(als_path),
+            PersistentObjectRef.model_validate(persistent),
+        )
+        if not matched.get("ok"):
+            return [], ["MIDI_TRACK_IDENTITY_UNRESOLVED", str(matched.get("error"))], {
+                **diagnostics,
+                "status": "TRACK_IDENTITY_UNRESOLVED",
+                "match": {key: value for key, value in matched.items() if key != "element"},
+            }
+        root = _load_als_root(als_path)
+        parents = _parent_map(root)
+        start_qn = float((pack.get("timeline") or {}).get("start_qn") or 0.0)
+        end_qn = float((pack.get("timeline") or {}).get("end_qn") or 0.0)
+        read = read_arrangement_midi(root, matched["element"], parents, region_start=start_qn, region_end=end_qn)
+        events: list[BassPitchEvent] = []
+        for idx, note in enumerate(read.get("notes") or []):
+            if note.get("muted") or note.get("pitch") is None:
+                continue
+            onset_qn = float(note["arrangement_start_qn"]) - start_qn
+            duration_qn = float(note["duration_qn"])
+            onset_s = onset_qn * 60.0 / tempo_bpm
+            pitch = int(note["pitch"])
+            events.append(BassPitchEvent(
+                event_id=f"{evidence_prefix}:midi:{idx:04d}",
+                grid=_grid_point(onset_s, tempo_bpm, evidence=f"{evidence_prefix}:midi"),
+                offset_s=max(0.001, duration_qn * 60.0 / tempo_bpm),
+                f0_hz=float(440.0 * 2.0 ** ((pitch - 69) / 12.0)),
+                midi_float=float(pitch),
+                midi_note=pitch,
+                pitch_class=PITCH_CLASSES[pitch % 12],
+                confidence=1.0,
+                status="RELIABLE",
+                onset_qn=onset_qn,
+                offset_qn=onset_qn + duration_qn,
+                duration_qn=duration_qn,
+                source_kind="ABLETON_MIDI",
+                voiced_fraction=1.0,
+                evidence_refs=[f"{evidence_prefix}:midi_readback", str(note.get("clip_identity") or "")],
+            ))
+        diagnostics.update({"status": "READ", "clips": len(read.get("clips") or []), "notes": len(events)})
+        return events, [], diagnostics
+    except Exception as exc:  # pragma: no cover - external artifact dependent
+        return [], [f"MIDI_READ_FAILED:{type(exc).__name__}:{exc}"], {"status": "FAILED"}
+
+
 def analyze_musical_understanding(
     stem_analysis_path: Path | str,
     *,
+    midi_pack_path: Path | str | None = None,
     output_path: Path | str | None = None,
     report_path: Path | str | None = None,
 ) -> MusicalUnderstanding:
-    """Analyze the cached BASS and DRUMS artifacts without external calls/writes."""
+    """Analyze cached BASS/DRUMS and prefer reconciled MIDI without writes."""
     stem_path = Path(stem_analysis_path)
     source = StemReferenceAnalysis.model_validate_json(stem_path.read_text(encoding="utf-8"))
     bass_artifact = source.stems.get("BASS").artifact if source.stems.get("BASS") else None
@@ -362,13 +519,39 @@ def analyze_musical_understanding(
     if not bass_path.exists() or not drums_path.exists():
         raise FileNotFoundError("cached BASS/DRUMS artifacts are not available")
     total_bars = float(source.timeline.get("windows_reused", [{"end_qn": 0}])[0].get("end_qn", 0.0)) / 4.0
-    bass_events, bass_limits, histogram = _pitch_events(bass_path, source.tempo_bpm, source.reference_id)
+    midi_events, midi_limits, midi_diagnostics = _midi_notes(
+        Path(midi_pack_path) if midi_pack_path is not None else None,
+        tempo_bpm=source.tempo_bpm,
+        evidence_prefix=source.reference_id,
+    )
+    if midi_diagnostics.get("status") == "READ":
+        bass_events = midi_events
+        bass_limits = midi_limits
+        pitch_diagnostics = midi_diagnostics
+        bass_source_kind = "ABLETON_MIDI"
+    else:
+        pitch_result = _pitch_events(bass_path, source.tempo_bpm, source.reference_id)
+        if len(pitch_result) == 3:  # compatibility with test/provider stubs
+            bass_events, bass_limits, histogram = pitch_result
+            pitch_diagnostics = {}
+        else:
+            bass_events, bass_limits, histogram, pitch_diagnostics = pitch_result
+        bass_limits = [*midi_limits, *bass_limits]
+        pitch_diagnostics = {"midi": midi_diagnostics, "audio": pitch_diagnostics}
+        bass_source_kind = "AUDIO_PYIN_ONSET_CONDITIONED"
     bass_rhythm = _rhythm(
         bass_events,
         total_bars=total_bars,
         tempo_bpm=source.tempo_bpm,
         evidence=f"{source.reference_id}:bass",
     )
+    if bass_source_kind == "ABLETON_MIDI":
+        histogram = {pc: 0.0 for pc in PITCH_CLASSES}
+        reliable_midi = [event for event in bass_events if event.pitch_class]
+        total = sum((event.duration_qn or 0.0) for event in reliable_midi)
+        if total > 0:
+            for event in reliable_midi:
+                histogram[event.pitch_class or "C"] += (event.duration_qn or 0.0) / total
     tonality_status, tonality, selected, degrees = _tonality(histogram, bass_events, f"{source.reference_id}:tonality")
     if tonality_status == "INSUFFICIENT_EVIDENCE":
         bass_limits.append("TONALITY_NOT_COLLAPSED_TO_A_SINGLE_KEY")
@@ -398,6 +581,8 @@ def analyze_musical_understanding(
     )
     bass = BassUnderstanding(
         status="SUPPORTED" if any(event.status == "RELIABLE" for event in bass_events) else "INSUFFICIENT_EVIDENCE",
+        source_kind=bass_source_kind,
+        source_diagnostics=pitch_diagnostics,
         pitch_events=bass_events,
         pitch_classes=histogram,
         tonality_status=tonality_status,
@@ -432,9 +617,11 @@ def analyze_musical_understanding(
             "source_stem_analysis": str(stem_path),
             "bass_path": str(bass_path),
             "drums_path": str(drums_path),
+            "midi_pack_path": str(midi_pack_path) if midi_pack_path is not None else None,
+            "source_kind": bass_source_kind,
             "bass_sha256": _sha256(bass_path),
             "drums_sha256": _sha256(drums_path),
-            "pitch_provider": "librosa.pyin" if librosa_version else "unavailable",
+            "pitch_provider": "ableton-midi-read-only-v1" if bass_source_kind == "ABLETON_MIDI" else ("librosa.pyin+librosa.onset" if librosa_version else "unavailable"),
             "librosa_version": librosa_version,
             "model_api_calls": 0,
             "musical_writes": 0,
@@ -463,11 +650,19 @@ def render_musical_understanding_report(result: MusicalUnderstanding) -> str:
         "",
         "BASS",
         f"status: {result.bass.status}",
+        f"source_kind: {result.bass.source_kind}",
         f"pitch_events: {len(result.bass.pitch_events)} reliable: {sum(e.status == 'RELIABLE' for e in result.bass.pitch_events)}",
         f"tonality: {result.bass.tonality_status} ({key_text})",
         f"intervals: {len(result.bass.intervals)}",
         f"rhythm_events: {result.bass.rhythmic_structure.event_count}",
         f"phrases: {[(p.structural_label, p.event_count) for p in result.bass.phrase_structure]}",
+        "note_table:",
+        "bar beat | qn | duration_qn | midi | pitch_class | confidence | source",
+        *[
+            f"{event.grid.bar:g} {event.grid.beat_in_bar:g} | {event.onset_qn if event.onset_qn is not None else event.grid.onset_qn:.3f} | {event.duration_qn if event.duration_qn is not None else 0.0:.3f} | {event.midi_note if event.status == 'RELIABLE' and event.midi_note is not None else 'UNKNOWN'} | {event.pitch_class if event.status == 'RELIABLE' and event.pitch_class else 'UNKNOWN'} | {event.confidence:.3f} | {event.source_kind} | {event.status}"
+            for event in result.bass.pitch_events
+        ],
+        f"source_diagnostics: {result.bass.source_diagnostics}",
         "",
         "DRUMS",
         f"status: {result.drums.status}",
