@@ -516,6 +516,146 @@ def match_als_track(
     }
 
 
+def reconcile_midi_source(
+    root: ET.Element,
+    *,
+    track_name: str,
+    track_index: int | None,
+    role: str,
+    arrangement_clips: list[dict[str, Any]],
+    region_start: float,
+    region_end: float,
+) -> dict[str, Any]:
+    """Reconcile a read-only MIDI source after a stale runtime fingerprint.
+
+    ``PersistentObjectRef`` remains the authority for mutation and the strict
+    ``match_als_track`` path remains unchanged.  This narrower bridge exists
+    for historical MIDI evidence captured from a Live snapshot whose device
+    inventory/session clip slots are not represented identically in the raw
+    ``.als`` XML.  It requires project identity to have already matched at the
+    caller and uses independent arrangement evidence as the second anchor:
+
+    * exactly one same-name MIDI track;
+    * the persisted track index agrees as a locator;
+    * at least one persisted arrangement clip matches by name and exact span;
+    * the current track has an arrangement MIDI clip in the requested region.
+
+    Name or index alone can never resolve this function.  Multiple same-name
+    candidates remain ambiguous, and a stale fingerprint is reported rather
+    than silently treated as a fresh identity.
+    """
+    candidates = [
+        (index, track)
+        for index, track in enumerate(
+            item for item in root.iter() if _local(item.tag) in TRACK_TAGS
+        )
+        if _track_locator_name(track) == track_name
+    ]
+    if not candidates:
+        return {
+            "ok": False,
+            "status": "TARGET_NOT_FOUND",
+            "error": "TARGET_NOT_FOUND",
+            "reason": "no same-name track exists for arrangement reconciliation",
+        }
+    if len(candidates) > 1:
+        return {
+            "ok": False,
+            "status": "TARGET_AMBIGUOUS",
+            "error": "TARGET_AMBIGUOUS",
+            "matches": len(candidates),
+            "locator_names": [
+                _track_locator_name(track) for _, track in candidates
+            ],
+        }
+
+    candidate_index, candidate = candidates[0]
+    if role not in MIDI_CAPABLE_ROLES or _local(candidate.tag) not in MIDI_CAPABLE_ALS:
+        return {
+            "ok": False,
+            "status": "TARGET_NOT_FOUND",
+            "error": "TARGET_NOT_FOUND",
+            "reason": "same-name candidate is not a MIDI track",
+            "track_type": _local(candidate.tag),
+        }
+    if track_index is None or candidate_index != int(track_index):
+        return {
+            "ok": False,
+            "status": "IDENTITY_STALE_UNRECOVERABLE",
+            "error": "IDENTITY_STALE_UNRECOVERABLE",
+            "reason": "same-name candidate does not retain the persisted locator index",
+            "persisted_track_index": track_index,
+            "current_track_index": candidate_index,
+        }
+
+    parents = _parent_map(root)
+    current_read = read_arrangement_midi(
+        root,
+        candidate,
+        parents,
+        region_start=region_start,
+        region_end=region_end,
+    )
+    current_clips = current_read.get("clips") or []
+    expected_clips = [
+        row
+        for row in arrangement_clips
+        if str(row.get("name") or "") == track_name
+        and _overlap(
+            float(row.get("start_time") or 0.0),
+            float(row.get("end_time") or 0.0),
+            region_start,
+            region_end,
+        )
+        > 0
+    ]
+    clip_matches: list[dict[str, Any]] = []
+    for expected in expected_clips:
+        expected_start = float(expected.get("start_time") or 0.0)
+        expected_end = float(expected.get("end_time") or 0.0)
+        for current in current_clips:
+            if (
+                str(current.get("clip_name") or "") == track_name
+                and abs(float(current["arrangement_start_qn"]) - expected_start) <= 1e-6
+                and abs(float(current["arrangement_end_qn"]) - expected_end) <= 1e-6
+            ):
+                clip_matches.append(
+                    {
+                        "expected": {
+                            "name": track_name,
+                            "start_qn": expected_start,
+                            "end_qn": expected_end,
+                        },
+                        "current": current,
+                    }
+                )
+    if not clip_matches:
+        return {
+            "ok": False,
+            "status": "IDENTITY_STALE_UNRECOVERABLE",
+            "error": "IDENTITY_STALE_UNRECOVERABLE",
+            "reason": "persisted arrangement evidence does not match current MIDI clips",
+            "current_clips": current_clips,
+            "expected_arrangement_clips": expected_clips,
+        }
+
+    return {
+        "ok": True,
+        "status": "RESOLVED",
+        "track_type": _local(candidate.tag),
+        "locator_name": _track_locator_name(candidate),
+        "track_index": candidate_index,
+        "element": candidate,
+        "parents": parents,
+        "midi_capable": True,
+        "used_display_name": False,
+        "identity_from": "PROJECT_IDENTITY+UNIQUE_TRACK_LOCATOR+ARRANGEMENT_CLIP_EVIDENCE",
+        "fingerprint_status": "STALE_OR_REPRESENTATION_MISMATCH",
+        "clip_matches": clip_matches,
+        "current_arrangement_note_count": len(current_read.get("notes") or []),
+    }
+
+
 def _keytrack_pitch(keytrack: ET.Element) -> int | None:
     for child in list(keytrack):
         if _local(child.tag) == "MidiKey" and child.attrib.get("Value") is not None:

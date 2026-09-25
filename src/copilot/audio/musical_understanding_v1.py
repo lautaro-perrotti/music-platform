@@ -434,6 +434,7 @@ def _midi_notes(
             TRACK_TAGS,
             identity_for_als_path,
             match_als_track,
+            reconcile_midi_source,
             read_arrangement_midi,
         )
         from copilot.daw.object_ref import PersistentObjectRef
@@ -458,12 +459,12 @@ def _midi_notes(
         persistent = source.get("persistent_track_ref")
         if not isinstance(persistent, dict):
             return [], ["MIDI_PERSISTED_TRACK_REF_MISSING"], {**diagnostics, "status": "TRACK_REF_MISSING"}
+        root = _load_als_root(als_path)
         matched = match_als_track(
-            _load_als_root(als_path),
+            root,
             PersistentObjectRef.model_validate(persistent),
         )
         if not matched.get("ok"):
-            root = _load_als_root(als_path)
             parents = _parent_map(root)
             candidate_rows: list[dict[str, Any]] = []
             for track_index, track in enumerate(item for item in root.iter() if _local(item.tag) in TRACK_TAGS):
@@ -524,16 +525,39 @@ def _midi_notes(
                     mismatch_fields.append("note_counts_or_clip_scope")
                 if expected["clip_slots"]:
                     mismatch_fields.append("clip_slots_not_reconciled_to_arrangement_clips")
-            return [], ["MIDI_TRACK_IDENTITY_UNRESOLVED", str(matched.get("error"))], {
-                **diagnostics,
-                "status": "TRACK_IDENTITY_UNRESOLVED",
-                "match": {key: value for key, value in matched.items() if key != "element"},
-                "expected_persisted_ref": expected,
-                "current_same_name_candidates": candidate_rows,
-                "mismatch_fields": mismatch_fields,
-                "resolution_rule": "NAME_AND_INDEX_ARE_LOCATORS_ONLY; NO_GUESSING",
-            }
-        root = _load_als_root(als_path)
+            start_qn = float((pack.get("timeline") or {}).get("start_qn") or 0.0)
+            end_qn = float((pack.get("timeline") or {}).get("end_qn") or 0.0)
+            reconciled = reconcile_midi_source(
+                root,
+                track_name=str(source.get("track_name") or persistent.get("name") or ""),
+                track_index=(
+                    int(source["track_index"])
+                    if source.get("track_index") is not None
+                    else None
+                ),
+                role=str(persistent.get("role") or ""),
+                arrangement_clips=list(source.get("arrangement_clips") or []),
+                region_start=start_qn,
+                region_end=end_qn,
+            )
+            if reconciled.get("ok"):
+                matched = reconciled
+                diagnostics["reconciliation"] = {
+                    key: value
+                    for key, value in reconciled.items()
+                    if key not in {"element", "parents"}
+                }
+            else:
+                return [], ["MIDI_TRACK_IDENTITY_UNRESOLVED", str(matched.get("error"))], {
+                    **diagnostics,
+                    "status": "TRACK_IDENTITY_UNRESOLVED",
+                    "match": {key: value for key, value in matched.items() if key != "element"},
+                    "expected_persisted_ref": expected,
+                    "current_same_name_candidates": candidate_rows,
+                    "mismatch_fields": mismatch_fields,
+                    "reconciliation": reconciled,
+                    "resolution_rule": "NAME_AND_INDEX_ARE_LOCATORS_ONLY; NO_GUESSING",
+                }
         parents = _parent_map(root)
         start_qn = float((pack.get("timeline") or {}).get("start_qn") or 0.0)
         end_qn = float((pack.get("timeline") or {}).get("end_qn") or 0.0)

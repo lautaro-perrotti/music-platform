@@ -28,10 +28,17 @@ perceptual source purity; that remains a separate human-review concern.
 
 When an ALS reference is supplied, the MIDI path is accepted only after the
 persisted project and track identity reconcile. A display-name/index match is
-not sufficient. The current Rose Bass artifact records the exact ALS path but
-its persisted device fingerprint no longer matches that file, so this run
-reports `MIDI_TRACK_IDENTITY_UNRESOLVED` and uses the audio fallback rather
-than guessing the track.
+not sufficient. For the Rose Bass artifact, the project identity, unique track
+locator, and persisted arrangement clip span reconcile even though the old
+device/session fingerprint is stale across the runtime snapshot and raw ALS
+representations. The dedicated read-only reconciliation path records that
+staleness explicitly and then reads the authoritative arrangement MIDI.
+
+The real Rose Bass comparison produced 73 authoritative MIDI notes versus 13
+audio candidates, with 3 audio notes previously marked reliable. At a ±0.15 QN
+onset tolerance, only 2 audio candidates matched MIDI attacks; 71 attacks were
+missed and 11 candidates were false positives. This is evidence about the
+audio transcription, not a musical quality judgment.
 
 Real artifact paths used for the first run are persisted outside the repo in
 the existing runtime project under `stem_reference_v1/`.

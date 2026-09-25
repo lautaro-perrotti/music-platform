@@ -21,6 +21,7 @@ from copilot.audio.midi_read_only_v1 import (
     load_persisted_ref,
     match_als_track,
     project_mismatch_still_fails_closed,
+    reconcile_midi_source,
 )
 from copilot.daw.object_ref import PersistentObjectRef, ResolveStatus, ref_from_track, resolve_track
 from copilot.daw.state_tokens import attach_tokens
@@ -591,6 +592,88 @@ def test_persistent_object_ref_ignores_display_name_decoy(tmp_path: Path) -> Non
     notes = [item["value"] for item in report["pack"]["items"] if item["name"] == "midi_note"]
     assert notes[0]["pitch"] == 65
     assert notes[0]["arrangement_start_qn"] == 36.0
+
+
+def test_midi_source_reconciliation_uses_arrangement_evidence_when_fingerprint_is_stale(
+    tmp_path: Path,
+) -> None:
+    als = _write_als(
+        tmp_path / "song.als",
+        _decoy_and_target_tracks(
+            clips=_midi_clip_xml(
+                clip_id="1",
+                name="Rose Bass",
+                start=160.0,
+                end=192.0,
+                loop_on=False,
+                loop_start=0.0,
+                loop_end=32.0,
+                start_relative=0.0,
+                notes=_note_xml(36, 0.0, 1.0),
+            ),
+            target_name="Rose Bass",
+        ),
+    )
+    from copilot.audio.midi_read_only_v1 import _load_als_root
+
+    root = _load_als_root(als)
+    resolved = reconcile_midi_source(
+        root,
+        track_name="Rose Bass",
+        track_index=1,
+        role="midi",
+        arrangement_clips=[
+            {"name": "Rose Bass", "start_time": 160.0, "end_time": 192.0}
+        ],
+        region_start=160.0,
+        region_end=192.0,
+    )
+    assert resolved["ok"] is True
+    assert resolved["status"] == "RESOLVED"
+    assert resolved["identity_from"] == (
+        "PROJECT_IDENTITY+UNIQUE_TRACK_LOCATOR+ARRANGEMENT_CLIP_EVIDENCE"
+    )
+    assert resolved["fingerprint_status"] == "STALE_OR_REPRESENTATION_MISMATCH"
+    assert resolved["current_arrangement_note_count"] == 1
+
+
+def test_midi_source_reconciliation_stays_ambiguous_for_duplicate_names(tmp_path: Path) -> None:
+    tracks = _decoy_and_target_tracks(
+        clips=_midi_clip_xml(
+            clip_id="1",
+            name="Rose Bass",
+            start=160.0,
+            end=192.0,
+            loop_on=False,
+            loop_start=0.0,
+            loop_end=32.0,
+            start_relative=0.0,
+            notes=_note_xml(36, 0.0, 1.0),
+        ),
+        target_name="Rose Bass",
+    )
+    tracks += _track_xml(
+        tag="MidiTrack",
+        locator_name="Rose Bass",
+        device_name="another",
+        clips="",
+    )
+    als = _write_als(tmp_path / "song.als", tracks)
+    from copilot.audio.midi_read_only_v1 import _load_als_root
+
+    resolved = reconcile_midi_source(
+        _load_als_root(als),
+        track_name="Rose Bass",
+        track_index=1,
+        role="midi",
+        arrangement_clips=[
+            {"name": "Rose Bass", "start_time": 160.0, "end_time": 192.0}
+        ],
+        region_start=160.0,
+        region_end=192.0,
+    )
+    assert resolved["ok"] is False
+    assert resolved["status"] == "TARGET_AMBIGUOUS"
 
 
 def test_actual_project_mismatch_still_fails_closed(tmp_path: Path) -> None:
