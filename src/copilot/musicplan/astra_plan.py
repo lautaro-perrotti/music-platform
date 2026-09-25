@@ -253,12 +253,20 @@ def build_plan_from_prompt(
                 translation = translate_planner_payload(data, provider=provider)
                 track_spec = translation.track_spec
                 track_spec_audit = translation.audit.model_dump(mode="json")
-                arrangement = track_spec.to_arrangement(known_roles=set(ALL_TRACKS))
+                from copilot.musicplan.arrangement_engine import build_arrangement_engine_plan
+
+                arrangement_plan = build_arrangement_engine_plan(
+                    track_spec.sections,
+                    known_roles=set(ALL_TRACKS),
+                )
+                arrangement = arrangement_plan.to_sections()
             except Exception as exc:  # noqa: BLE001
                 track_spec_error = str(exc)
                 arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
+                arrangement_plan = None
         else:
             arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
+            arrangement_plan = None
         patch_contracts_raw = data.get("patch_contracts")
         patch_contracts = validate_patch_contracts(
             patch_contracts_raw,
@@ -282,6 +290,7 @@ def build_plan_from_prompt(
             "track_spec": track_spec.model_dump(mode="json") if track_spec else None,
             "track_spec_error": track_spec_error,
             "track_spec_audit": track_spec_audit,
+            "arrangement_plan": arrangement_plan.model_dump(mode="json") if arrangement_plan else None,
             "patch_contracts": patch_contracts,
         }
     except Exception as exc:  # noqa: BLE001
