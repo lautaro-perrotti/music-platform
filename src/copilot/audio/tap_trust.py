@@ -208,6 +208,12 @@ def reserve_capture_dests(
     root: Path | None = None,
 ) -> dict[str, Path]:
     root = root or capture_dir()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise AudioCaptureError(
+            "CANNOT_CREATE_OUTPUT", f"cannot create capture destination {root}: {exc}"
+        ) from exc
     stagings = [str(rec["staging"]) for rec in recorders]
     if len(set(stagings)) != len(stagings):
         raise AudioCaptureError(

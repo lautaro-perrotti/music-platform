@@ -398,6 +398,13 @@ def capture_source_post_mixer(
     dest_root: Path,
 ) -> dict[str, Any]:
     """CAPTURE_SOURCE_POST_MIXER — temporary OFF_MIX_GRAPH, restore guaranteed."""
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise AudioCaptureError(
+            "CANNOT_CREATE_OUTPUT",
+            f"cannot create capture destination {dest_root}: {exc}",
+        ) from exc
     attach_tokens(session)
     project_identity = session.project_identity or session.project_token or ""
     ref = ref_from_track(track, project_identity=project_identity)

@@ -298,9 +298,13 @@ def find_canonical_tap_uri(daw: AbletonTcpAdapter) -> str | None:
                 uri = item.get("uri")
                 if uri:
                     found.append((_normalized_tap_name(item), str(uri)))
-    for name, uri in found:
-        if name == DEVICE_NAME:
-            return uri
+    # Live caches compiled Max devices by browser URI.  Prefer the versioned
+    # alias so an already-instantiated legacy URI cannot keep running an old
+    # patcher after the User Library bytes were refreshed.
+    for preferred in (DEVICE_ALIAS_V4, DEVICE_NAME):
+        for name, uri in found:
+            if name == preferred:
+                return uri
     return found[0][1] if found else None
 
 

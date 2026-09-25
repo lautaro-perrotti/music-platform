@@ -258,6 +258,40 @@ def tap_has_slot(daw: AbletonTcpAdapter, track_index: int) -> bool:
     return any(name.lower() == "slot" for name in tap_parameter_names(daw, track_index))
 
 
+def tap_requires_refresh(
+    daw: AbletonTcpAdapter,
+    track_index: int,
+    device_index: int,
+) -> dict[str, object]:
+    """Detect an instantiated legacy tap that cannot use the current writer.
+
+    The current checked-in artifact is the cache-busting V4 device: it exposes
+    source slots through 8 and advertises TapProtocol 4.  A Live set can keep
+    an older compiled V3 instance after the User Library has been provisioned;
+    parameter readback alone then looks healthy while its writer still points
+    at the old patcher/path.
+    """
+    params = daw.get_device_parameters(track_index, int(device_index))
+    slot_max: float | None = None
+    protocol: float | None = None
+    for item in params.get("parameters") or []:
+        name = str(item.get("name") or "").lower()
+        if name == "slot" and item.get("max") is not None:
+            slot_max = float(item["max"])
+        elif name == "tapprotocol" and item.get("value") is not None:
+            protocol = float(item["value"])
+    stale = (slot_max is not None and slot_max < 8.0) or (
+        protocol is not None and protocol < 4.0
+    )
+    return {
+        "stale": stale,
+        "slot_max": slot_max,
+        "tap_protocol": protocol,
+        "required_slot_max": 8,
+        "required_tap_protocol": 4,
+    }
+
+
 def tap_protocol_version(daw: AbletonTcpAdapter, track_index: int) -> int | None:
     device = find_tap(daw, track_index)
     if device is None:
@@ -724,11 +758,20 @@ def count_copilot_taps(daw: AbletonTcpAdapter) -> dict[str, object]:
 
 def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     existing = find_master_tap(daw)
+    replaced_stale = False
     if existing is not None:
-        return {"already_loaded": True, "device": existing}
+        freshness = tap_requires_refresh(daw, MASTER_INDEX, int(existing["index"]))
+        if not freshness["stale"]:
+            return {"already_loaded": True, "device": existing, "freshness": freshness}
+        replaced_stale = True
     install_audio_tap_device()
     uri = _find_tap_uri(daw)
     if not uri:
+        if replaced_stale:
+            raise AudioCaptureError(
+                "TAP_REFRESH_BLOCKED",
+                "stale Copilot Audio Tap found but no current browser URI is available",
+            )
         if find_master_tap(daw) is None:
             raise AudioCaptureError(
                 "TAP_MISSING",
@@ -736,12 +779,20 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
                 "Drop devices/Copilot Audio Tap.amxd onto Master once.",
             )
         return {"already_loaded": True, "device": find_master_tap(daw)}
+    if replaced_stale and existing is not None:
+        # Do not destroy a working tap until the replacement URI is known.
+        daw.delete_device(MASTER_INDEX, int(existing["index"]))
     loaded = daw.load_instrument_or_effect(MASTER_INDEX, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(MASTER_INDEX, uri)
     devices = wait_for_tap_readback(daw, MASTER_INDEX)
     device = devices[0]
-    return {"already_loaded": False, "device": device, "load": loaded}
+    return {
+        "already_loaded": False,
+        "device": device,
+        "load": loaded,
+        "replaced_stale": replaced_stale,
+    }
 
 
 def _find_tap_uri(daw: AbletonTcpAdapter) -> str | None:

@@ -108,15 +108,34 @@ def ensure_named_audio_track(
 
 
 def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, object]:
-    from copilot.audio.live_capture import _find_tap_uri, install_audio_tap_device, tap_has_slot
+    from copilot.audio.live_capture import (
+        _find_tap_uri,
+        install_audio_tap_device,
+        tap_has_slot,
+        tap_requires_refresh,
+    )
 
     existing = find_tap(daw, track_index)
+    replaced_stale = False
     if existing is not None and tap_has_slot(daw, track_index):
-        return {"already_loaded": True, "device": existing, "has_slot": True}
+        freshness = tap_requires_refresh(daw, track_index, int(existing["index"]))
+        if not freshness["stale"]:
+            return {
+                "already_loaded": True,
+                "device": existing,
+                "has_slot": True,
+                "freshness": freshness,
+            }
+        replaced_stale = True
     install_audio_tap_device()
     time.sleep(0.4)
     uri = _find_tap_uri(daw)
     if not uri:
+        if replaced_stale:
+            raise AudioCaptureError(
+                "TAP_REFRESH_BLOCKED",
+                f"stale Copilot Audio Tap on track {track_index} but no current browser URI is available",
+            )
         if existing is not None:
             return {"already_loaded": True, "device": existing, "has_slot": False}
         raise AudioCaptureError(
@@ -125,6 +144,9 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
             "cannot load it. Drop the updated devices/Copilot Audio Tap.amxd "
             "onto this audio track.",
         )
+    if replaced_stale and existing is not None:
+        # Do not destroy a working tap until the replacement URI is known.
+        daw.delete_device(track_index, int(existing["index"]))
     loaded = daw.load_instrument_or_effect(track_index, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(track_index, uri)
@@ -189,7 +211,13 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
             if "slot" in names:
                 slotted = device
                 break
-    return {"already_loaded": False, "device": slotted, "has_slot": True, "load": loaded}
+    return {
+        "already_loaded": False,
+        "device": slotted,
+        "has_slot": True,
+        "load": loaded,
+        "replaced_stale": replaced_stale,
+    }
 
 
 def route_host_post_mixer(
@@ -702,6 +730,13 @@ def _finalize_staging(
         capture_id = analysis_path.stem.removeprefix("capture_")
     else:
         analysis_path = Path(dest_path)
+        try:
+            analysis_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise AudioCaptureError(
+                "CANNOT_CREATE_OUTPUT",
+                f"cannot create capture destination {analysis_path.parent}: {exc}",
+            ) from exc
         if analysis_path.exists():
             raise AudioCaptureError("CAPTURE_PATH_COLLISION", str(analysis_path))
         capture_id = capture_id or analysis_path.stem.removeprefix("capture_")
