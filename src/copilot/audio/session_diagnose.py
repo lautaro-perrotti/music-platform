@@ -30,6 +30,7 @@ BASS_TARGET = "Sub Sub Bass"
 WORKING_COPY_CANDIDATE = default_working_copy_candidate()
 REAL_KICK_NAMES = (KICK_PAD,)
 REAL_BASS_NAMES = (BASS_TARGET,)
+SUPPORTED_TAP_PROTOCOLS = frozenset({EXPECTED_TAP_PROTOCOL, 4})
 EXPECTED_SLOTS = {
     "MASTER": 0,
     CAPTURE_HOST: 1,
@@ -211,9 +212,9 @@ def preflight_session(
     if master_tap is None:
         missing.append("Master tap not in inventory")
     else:
-        if int(master_tap.get("tap_protocol") or -1) != EXPECTED_TAP_PROTOCOL:
+        if int(master_tap.get("tap_protocol") or -1) not in SUPPORTED_TAP_PROTOCOLS:
             missing.append(
-                f"Master TapProtocol={master_tap.get('tap_protocol')} expected {EXPECTED_TAP_PROTOCOL}"
+                f"Master TapProtocol={master_tap.get('tap_protocol')} expected one of {sorted(SUPPORTED_TAP_PROTOCOLS)}"
             )
         if int(master_tap.get("slot") if master_tap.get("slot") is not None else -1) != 0:
             missing.append(f"Master tap Slot={master_tap.get('slot')} expected 0")
@@ -244,9 +245,9 @@ def preflight_session(
         if row is None:
             missing.append(f"{CAPTURE_HOST} has no Copilot Audio Tap")
         else:
-            if int(row.get("tap_protocol") or -1) != EXPECTED_TAP_PROTOCOL:
+            if int(row.get("tap_protocol") or -1) not in SUPPORTED_TAP_PROTOCOLS:
                 missing.append(
-                    f"{CAPTURE_HOST} TapProtocol={row.get('tap_protocol')} expected {EXPECTED_TAP_PROTOCOL}"
+                    f"{CAPTURE_HOST} TapProtocol={row.get('tap_protocol')} expected one of {sorted(SUPPORTED_TAP_PROTOCOLS)}"
                 )
             if int(row.get("slot") if row.get("slot") is not None else -1) != 1:
                 missing.append(f"{CAPTURE_HOST} Slot={row.get('slot')} expected 1")
@@ -288,9 +289,9 @@ def preflight_session(
         if row is None:
             missing.append(f"{CAPTURE_BASS} has no Copilot Audio Tap")
         else:
-            if int(row.get("tap_protocol") or -1) != EXPECTED_TAP_PROTOCOL:
+            if int(row.get("tap_protocol") or -1) not in SUPPORTED_TAP_PROTOCOLS:
                 missing.append(
-                    f"{CAPTURE_BASS} TapProtocol={row.get('tap_protocol')} expected {EXPECTED_TAP_PROTOCOL}"
+                    f"{CAPTURE_BASS} TapProtocol={row.get('tap_protocol')} expected one of {sorted(SUPPORTED_TAP_PROTOCOLS)}"
                 )
             if int(row.get("slot") if row.get("slot") is not None else -1) != 2:
                 missing.append(f"{CAPTURE_BASS} Slot={row.get('slot')} expected 2")

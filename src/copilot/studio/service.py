@@ -683,7 +683,11 @@ class StudioService:
                 raise ProduceExecutionBlocked("PREVIEW_ARTIFACT_MISSING", detail=str(wav_path), evidence={"capture": capture})
             preview_job_id = self._create_preview_job(project_id, variation_id)
             artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"
-            relative = Path("variation_captures") / variation_id / wav_path.name
+            # Browser-served artifacts must live below StudioStore.artifacts_root.
+            # The capture itself remains in the run directory, while the
+            # persisted/served copy is kept inside the store's safe artifact
+            # boundary.
+            relative = Path("artifacts") / "variation_captures" / variation_id / wav_path.name
             destination = self.data_dir / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             if wav_path.resolve() != destination.resolve():
