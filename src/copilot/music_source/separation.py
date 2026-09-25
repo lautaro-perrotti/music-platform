@@ -185,6 +185,13 @@ class BSRoFormerInferProvider:
             ]
             if request.model_dir:
                 command.extend(["--models_dir", str(request.model_dir)])
+            # The provider CLI defaults to auto device selection, but making
+            # the selected device observable/configurable is important on
+            # workers where CPU checkpoint loading can exhaust host memory
+            # before CUDA is selected.  No machine-specific path is involved.
+            device = os.environ.get("BS_ROFORMER_DEVICE")
+            if device:
+                command.extend(["--device", device])
             try:
                 completed = subprocess.run(
                     command,
@@ -265,4 +272,159 @@ class BSRoFormerInferProvider:
             latency_s=perf_counter() - started,
             command=command,
             provenance=[BS_ROFORMER_SOURCE, BS_ROFORMER_MODEL_SOURCE],
+        )
+
+
+DEMUCS_PROVIDER_ID = "demucs-infer"
+DEMUCS_MODEL_ID = "htdemucs_ft"
+
+
+class DemucsInferProvider:
+    """Run an already-installed local Demucs inference runtime."""
+
+    provider_id = DEMUCS_PROVIDER_ID
+
+    def __init__(self, *, executable: str | None = None, repo_dir: Path | None = None) -> None:
+        self.executable = executable or os.environ.get("DEMUCS_INFER_BIN") or shutil.which("demucs-infer")
+        self.repo_dir = repo_dir or (
+            Path(os.environ["DEMUCS_MODEL_REPO"]) if os.environ.get("DEMUCS_MODEL_REPO") else None
+        )
+
+    def describe(self) -> SeparatorDescriptor:
+        return SeparatorDescriptor(
+            provider_id=self.provider_id,
+            model_id=DEMUCS_MODEL_ID,
+            runtime="demucs-infer-cli",
+            source="https://github.com/openmirlab/demucs-infer",
+            model_source="local-runtime-repository",
+            output_stems=["vocals", "drums", "bass", "other"],
+            quality_tier="SPECIALIST_UNBENCHMARKED",
+            license="RUNTIME_AND_CHECKPOINT_TERMS_FROM_UPSTREAM",
+        )
+
+    def health(self) -> str:
+        return "CONFIGURED" if self.executable and self.repo_dir and self.repo_dir.is_dir() else "UNAVAILABLE"
+
+    def separate(self, request: SeparationRequest) -> SeparationBatch:
+        model_id = request.model_id or DEMUCS_MODEL_ID
+        if not request.source.immutable_path.is_file():
+            return SeparationBatch(
+                batch_id=request.request_id,
+                status=SeparationStatus.SOURCE_ASSET_REQUIRED,
+                provider=self.provider_id,
+                model_id=model_id,
+                source_asset_id=request.source.source_asset_id,
+                failures=[{"code": "IMMUTABLE_SOURCE_MISSING"}],
+            )
+        if not self.executable or not self.repo_dir or not self.repo_dir.is_dir():
+            return SeparationBatch(
+                batch_id=request.request_id,
+                status=SeparationStatus.PROVIDER_UNAVAILABLE,
+                provider=self.provider_id,
+                model_id=model_id,
+                source_asset_id=request.source.source_asset_id,
+                failures=[{"code": "DEMUCS_INFER_RUNTIME_OR_REPOSITORY_MISSING"}],
+                provenance=["https://github.com/openmirlab/demucs-infer"],
+            )
+
+        request.output_dir.mkdir(parents=True, exist_ok=True)
+        run_output_dir = request.output_dir / request.request_id
+        run_output_dir.mkdir(parents=True, exist_ok=True)
+        started = perf_counter()
+        with tempfile.TemporaryDirectory(prefix="copilot-demucs-") as input_dir_name:
+            input_dir = Path(input_dir_name)
+            input_copy = input_dir / request.source.immutable_path.name
+            shutil.copy2(request.source.immutable_path, input_copy)
+            command = [
+                self.executable,
+                "-n", model_id,
+                "--repo", str(self.repo_dir),
+                "-o", str(run_output_dir),
+                "--float32",
+                "-j", "1",
+            ]
+            device = os.environ.get("DEMUCS_DEVICE")
+            if device:
+                command.extend(["-d", device])
+            command.append(str(input_copy))
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=request.timeout_s,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                return SeparationBatch(
+                    batch_id=request.request_id,
+                    status=SeparationStatus.INFERENCE_FAILED,
+                    provider=self.provider_id,
+                    model_id=model_id,
+                    source_asset_id=request.source.source_asset_id,
+                    failures=[{"code": type(exc).__name__, "error": str(exc)}],
+                    latency_s=perf_counter() - started,
+                    command=command,
+                )
+
+        if completed.returncode != 0:
+            return SeparationBatch(
+                batch_id=request.request_id,
+                status=SeparationStatus.INFERENCE_FAILED,
+                provider=self.provider_id,
+                model_id=model_id,
+                source_asset_id=request.source.source_asset_id,
+                failures=[
+                    {
+                        "code": "SEPARATOR_PROCESS_FAILED",
+                        "returncode": completed.returncode,
+                        "stderr": completed.stderr[-4000:],
+                    }
+                ],
+                latency_s=perf_counter() - started,
+                command=command,
+            )
+
+        output_root = run_output_dir / model_id / input_copy.stem
+        stems: list[SeparatedStem] = []
+        for path in sorted(output_root.glob("*.wav")):
+            try:
+                info = sf.info(path)
+                samples, _ = sf.read(path, always_2d=True, dtype="float32")
+            except (OSError, RuntimeError, ValueError):
+                continue
+            stems.append(
+                SeparatedStem(
+                    stem_id=f"{request.request_id}:{path.stem}",
+                    role=path.stem.casefold(),
+                    path=path,
+                    sha256=BSRoFormerInferProvider._sha256(path),
+                    bytes=path.stat().st_size,
+                    duration_s=float(info.duration),
+                    sample_rate=int(info.samplerate),
+                    channels=int(info.channels),
+                    non_silent=bool(samples.size and (samples * samples).mean() > 1e-10),
+                )
+            )
+        if not stems:
+            return SeparationBatch(
+                batch_id=request.request_id,
+                status=SeparationStatus.INFERENCE_FAILED,
+                provider=self.provider_id,
+                model_id=model_id,
+                source_asset_id=request.source.source_asset_id,
+                failures=[{"code": "NO_VALID_STEMS_RETURNED", "output_root": str(output_root)}],
+                latency_s=perf_counter() - started,
+                command=command,
+            )
+        return SeparationBatch(
+            batch_id=request.request_id,
+            status=SeparationStatus.SEPARATED,
+            provider=self.provider_id,
+            model_id=model_id,
+            source_asset_id=request.source.source_asset_id,
+            stems=stems,
+            latency_s=perf_counter() - started,
+            command=command,
+            provenance=["https://github.com/openmirlab/demucs-infer", "LOCAL_MODEL_REPOSITORY"],
         )

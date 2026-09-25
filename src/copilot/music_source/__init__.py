@@ -10,6 +10,7 @@ from copilot.music_source.ingestion import (
 )
 from copilot.music_source.separation import (
     BSRoFormerInferProvider,
+    DemucsInferProvider,
     SeparationBatch,
     SeparationRequest,
     SeparationStatus,
@@ -34,6 +35,16 @@ from copilot.music_source.benchmark import (
     build_stem_candidate_set,
     validate_stem_file,
 )
+from copilot.music_source.stem_reference import (
+    STEM_REFERENCE_ANALYSIS_VERSION,
+    STEM_ROLES,
+    StemReferenceAnalysis,
+    StemReferenceArtifact,
+    StemReferenceObservation,
+    StemReferenceRoleAnalysis,
+    render_stem_reference_report,
+    run_stem_reference_pipeline,
+)
 
 __all__ = [
     "ExternalSourceCandidate",
@@ -43,6 +54,7 @@ __all__ = [
     "discover_external_source",
     "ingest_external_source",
     "BSRoFormerInferProvider",
+    "DemucsInferProvider",
     "SeparationBatch",
     "SeparationRequest",
     "SeparationStatus",
@@ -64,4 +76,12 @@ __all__ = [
     "build_blind_bundle",
     "build_stem_candidate_set",
     "validate_stem_file",
+    "STEM_REFERENCE_ANALYSIS_VERSION",
+    "STEM_ROLES",
+    "StemReferenceAnalysis",
+    "StemReferenceArtifact",
+    "StemReferenceObservation",
+    "StemReferenceRoleAnalysis",
+    "render_stem_reference_report",
+    "run_stem_reference_pipeline",
 ]

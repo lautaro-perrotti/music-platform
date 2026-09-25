@@ -7,6 +7,7 @@ import soundfile as sf
 
 from copilot.music_source import (
     BSRoFormerInferProvider,
+    DemucsInferProvider,
     SeparationRequest,
     SeparationStatus,
     SourceDiscoveryStatus,
@@ -85,3 +86,9 @@ def test_separator_does_not_claim_success_for_missing_source(tmp_path: Path):
         )
     )
     assert result.status is SeparationStatus.SOURCE_ASSET_REQUIRED
+
+
+def test_demucs_provider_is_replaceable_and_fails_closed_when_unconfigured(tmp_path: Path):
+    provider = DemucsInferProvider(executable="", repo_dir=tmp_path / "missing-repo")
+    assert provider.describe().output_stems == ["vocals", "drums", "bass", "other"]
+    assert provider.health() == "UNAVAILABLE"
