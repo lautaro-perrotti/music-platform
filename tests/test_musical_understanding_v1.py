@@ -15,11 +15,14 @@ from copilot.audio.musical_understanding_v1 import (
     analyze_musical_understanding,
 )
 from copilot.audio.bass_musical_model_v1 import build_bass_musical_model
+from copilot.audio.harmonic_understanding_v1 import build_harmonic_understanding
 from copilot.audio.midi_read_only_v1 import identity_for_als_path
 from copilot.schemas.musical_understanding import (
     BassDrumsRelationship,
     BassPitchEvent,
+    BassUnderstanding,
     DrumsUnderstanding,
+    MotifPhraseEvidence,
     MusicalGridPoint,
     MusicalUnderstanding,
     PulseStructure,
@@ -264,3 +267,85 @@ def test_bass_musical_model_extracts_symbolic_language_without_collapsing_tonali
     assert "TONALITY_NOT_COLLAPSED_TO_SINGLE_HYPOTHESIS" in model.limitations
     assert model.provenance["model_api_calls"] == 0
     assert model.provenance["musical_writes"] == 0
+
+
+def test_harmonic_understanding_fuses_other_chroma_and_abstains_without_it(tmp_path: Path) -> None:
+    def event(index: int, onset: float, pitch: int) -> BassPitchEvent:
+        grid = MusicalGridPoint(
+            onset_s=onset / 2.0,
+            onset_qn=onset,
+            bar=onset / 4.0 + 1.0,
+            beat_in_bar=(onset % 4.0) + 1.0,
+            subdivision="quarter",
+            nearest_grid_qn=onset,
+            deviation_qn=0.0,
+            deviation_ms=0.0,
+            evidence_refs=["fixture"],
+        )
+        return BassPitchEvent(
+            event_id=f"harmonic-e{index}",
+            grid=grid,
+            offset_s=0.5,
+            f0_hz=440.0,
+            midi_float=float(pitch),
+            midi_note=pitch,
+            pitch_class=("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")[pitch % 12],
+            confidence=1.0,
+            status="RELIABLE",
+            onset_qn=onset,
+            offset_qn=onset + 1.0,
+            duration_qn=1.0,
+            source_kind="ABLETON_MIDI",
+            voiced_fraction=1.0,
+            evidence_refs=["fixture"],
+        )
+
+    bass_events = [event(0, 0.0, 36), event(1, 4.0, 36), event(2, 8.0, 36), event(3, 12.0, 36)]
+    bass = BassUnderstanding(
+        source_kind="ABLETON_MIDI",
+        pitch_events=bass_events,
+        pitch_classes={"C": 1.0},
+        rhythmic_structure=RhythmicStructure(event_count=4, density_per_bar=1.0),
+        phrase_structure=[MotifPhraseEvidence(phrase_id="phrase_1", start_bar=1.0, end_bar=5.0, event_count=4)],
+    )
+    drums = DrumsUnderstanding(
+        pulse_structure=PulseStructure(),
+        rhythmic_structure=RhythmicStructure(event_count=0, density_per_bar=0.0),
+    )
+    understanding = MusicalUnderstanding(
+        reference_id="harmonic-fixture",
+        source_analysis_id="harmonic-analysis",
+        stem_analysis_id="harmonic-stems",
+        tempo_bpm=120.0,
+        timeline={"windows_reused": [{"start_qn": 0.0, "end_qn": 16.0}]},
+        bass=bass,
+        drums=drums,
+        relationships={"bass_drums": BassDrumsRelationship(bass_event_count=4, drum_event_count=0, coincidence_count=0, coincidence_ratio=0.0)},
+        provenance={"model_api_calls": 0, "musical_writes": 0},
+    )
+    understanding_path = tmp_path / "understanding.json"
+    understanding_path.write_text(understanding.model_dump_json(), encoding="utf-8")
+    bass_model_path = tmp_path / "bass-model.json"
+    build_bass_musical_model(understanding_path, output_path=bass_model_path)
+
+    sample_rate = 8_000
+    duration = 8.0
+    times = np.arange(int(sample_rate * duration), dtype=np.float64) / sample_rate
+    other = sum(np.sin(2 * np.pi * frequency * times) for frequency in (261.63, 329.63, 392.00)) * 0.2
+    other_path = tmp_path / "other.wav"
+    sf.write(other_path, other.astype(np.float32), sample_rate)
+
+    fused = build_harmonic_understanding(bass_model_path, understanding_path, other_stem_path=other_path)
+    assert fused.source_kind == "OTHER_STEM_CHROMA_PLUS_AUTHORITATIVE_BASS"
+    assert fused.windows[0].selected is not None
+    assert fused.windows[0].selected.label == "C"
+    assert fused.windows[0].status == "SUPPORTED"
+    assert any(item.role == "ROOT" for item in fused.bass_harmony_relationships)
+    assert fused.provenance["model_api_calls"] == 0
+    assert fused.provenance["musical_writes"] == 0
+
+    bass_only = build_harmonic_understanding(bass_model_path, understanding_path)
+    assert bass_only.source_kind == "AUTHORITATIVE_BASS_ONLY"
+    assert bass_only.selected_tonality is None
+    assert all(item.selected is None for item in bass_only.windows)
+    assert "HARMONIC_AUDIO_SOURCE_NOT_PROVIDED" in bass_only.limitations

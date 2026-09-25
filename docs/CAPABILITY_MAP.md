@@ -33,6 +33,8 @@ reproducible bug.
 | `MUSIC_ANALYZER_V1` | VERIFIED / FROZEN | Real WAV and real Ableton captured-project analysis produce persisted read-only evidence through `AudioAnalysisInput`; staging-WAV finalization, provenance, and terminal restoration passed. Scope limitations remain explicit in the pack. |
 | `DEEP_CAUSAL_V2` | VERIFIED / FROZEN | Facts → observed events → read-only SessionState signal graph → candidate hypotheses → before/during/after evaluation. Real controlled-working-copy validation generated 8 events, 88 candidates and preserved unresolved alternatives with zero writes. |
 | `ADVANCED_PERCEPTION_V1` | VERIFIED / FROZEN | Local Analyzer plus real optional LAION CLAP audio/text embeddings and EvidenceGraph fusion are read-only. Semantic-ear remains an explicit unavailable limitation. |
+| `BASS_MUSICAL_MODEL_V1` | VERIFIED / FROZEN | Deterministic symbolic model over reconciled authoritative MIDI: pitch material, intervals, rhythmic cells, motifs, phrases, and explicit bass-only tonal abstention. No writes or model calls. |
+| `HARMONIC_UNDERSTANDING_V1` | IMPLEMENTED / READ-ONLY | Fuses authoritative bass MIDI with optional OTHER/MUSIC-stem chroma into ranked chord hypotheses, harmonic rhythm, tonal candidates, and bass-role relationships. Stem purity is not promoted to ground truth; ambiguous windows and global tonality abstain. |
 
 ## Runtime / agent
 

@@ -116,6 +116,19 @@ real audio-to-audio and audio-to-text comparison, caching, and
 reported as a limitation; the non-semantic embedding stub is never counted
 as semantic perception.
 
+`BASS_MUSICAL_MODEL_V1` is now a deterministic symbolic layer over the
+reconciled Rose Bass MIDI: 73 authoritative events, interval language,
+rhythmic cells, repeated/transformed motifs, and phrase-level structure. Its
+bass-only tonal result remains `INSUFFICIENT_EVIDENCE` by design.
+
+`HARMONIC_UNDERSTANDING_V1` adds a read-only fusion of that MIDI with the
+cached `OTHER` stem's measured chroma. It produces ranked four-bar chord
+hypotheses, harmonic-rhythm segments, tonal candidates, and 73 bass-to-chord
+relationship records. The real Rose Bass artifact produced 7/8 supported
+windows but kept global tonality at `INSUFFICIENT_EVIDENCE`; the `OTHER` stem
+is explicitly treated as a technical separation artifact, not proof of source
+purity. No LLM/API calls, Ableton access, or musical writes occur.
+
 `LUCAS_CORE_INTEGRATION_V1` is now `VERIFIED / FROZEN`. The existing Lucas
 planner (`build_plan_from_prompt`), sample library, and advisory critique
 (`critique_track`) connect through typed Core contexts, explicit action
