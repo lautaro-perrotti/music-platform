@@ -21,6 +21,12 @@ from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.object_ref import ref_from_track
 from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready
 from copilot.daw.state_tokens import attach_tokens
+from copilot.integration.reference_variation_v1 import (
+    ReferenceVariationError,
+    build_reference_bound_bass_notes,
+    load_astra_interpretation,
+    load_reference_pack,
+)
 from copilot.musicplan import build_create_track_action
 from copilot.runtime.production_compiler import ProductionCompiler
 from copilot.runtime.safe_write import build_safe_write_executor
@@ -457,6 +463,8 @@ class StudioService:
             length_bars=int(payload["length_bars"]) if payload.get("length_bars") not in (None, "", "auto", "AUTO") else None,
             start_qn=start_qn,
             end_qn=float(end_qn) if end_qn not in (None, "") else None,
+            reference_analysis_path=str(payload["reference_analysis_path"]) if payload.get("reference_analysis_path") else None,
+            astra_interpretation_path=str(payload["astra_interpretation_path"]) if payload.get("astra_interpretation_path") else None,
         )
         if request.scope not in {"TRACK", "REGION"}:
             raise ValueError("PRODUCE_SCOPE_INVALID")
@@ -493,6 +501,23 @@ class StudioService:
         bars = request.length_bars or 8
         length_beats = float(bars * 4)
         track_name = f"Copilot Variation {variation_id[-8:]}"
+        reference_features: dict[str, Any] | None = None
+        astra_evidence: dict[str, Any] | None = None
+        if request.reference_analysis_path:
+            try:
+                reference_pack = load_reference_pack(request.reference_analysis_path)
+                if not request.astra_interpretation_path:
+                    raise ReferenceVariationError("ASTRA_INTERPRETATION_REQUIRED_FOR_REFERENCE_VARIATION")
+                astra_evidence = load_astra_interpretation(request.astra_interpretation_path)
+                notes, reference_features = build_reference_bound_bass_notes(
+                    reference_pack,
+                    length_beats=length_beats,
+                    transformation_seed=variation_id,
+                )
+            except ReferenceVariationError:
+                raise
+        else:
+            notes = self._bass_notes(length_beats)
         create = build_create_track_action(
             project_identity=session.project_identity,
             track_name=track_name,
@@ -526,7 +551,7 @@ class StudioService:
             params=PatternActionParams(
                 clip_index=0,
                 length_beats=length_beats,
-                notes=self._bass_notes(length_beats),
+                notes=notes,
             ),
             reason=request.instruction,
             evidence_refs=list(create.evidence_refs),
@@ -556,8 +581,14 @@ class StudioService:
             audible_state_token=session.audible_token or "",
             created_at=utc_now(),
             actions=[create, device, pattern],
-            notes=["V1 bounded planner: one bass variation only; no N-variation claims."],
-            gate={"reference_region": {"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats}},
+            notes=[
+                "V1 bounded planner: one bass variation only; no N-variation claims.",
+                *(["Reference-bound: generated from measured reference rhythm/register; source notes are not copied."] if reference_features else []),
+            ],
+            gate={
+                "reference_region": {"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats},
+                **({"reference_features": reference_features, "astra_interpretation": astra_evidence} if reference_features else {}),
+            },
         )
 
     def _open_variation_live(self) -> tuple[AbletonTcpAdapter, Any]:

@@ -143,3 +143,5 @@ class ProduceRequest(BaseModel):
     length_bars: int | None = None  # 8 | 16 | 32 | None == Auto
     start_qn: float = 0.0
     end_qn: float | None = None
+    reference_analysis_path: str | None = None
+    astra_interpretation_path: str | None = None
