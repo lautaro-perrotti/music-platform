@@ -5,7 +5,11 @@ import json
 import pytest
 
 from copilot.producer.state import ProducerPhase, ProducerStateStore
-from copilot.producer.track_spec import parse_track_spec, track_spec_from_planner_payload
+from copilot.producer.track_spec import (
+    parse_track_spec,
+    track_spec_from_planner_payload,
+    translate_planner_payload,
+)
 
 
 def _payload() -> dict:
@@ -40,6 +44,24 @@ def test_track_spec_accepts_json_fences_and_planner_wrapper():
     spec = track_spec_from_planner_payload(json.loads(json.dumps({"track_spec": _payload()})))
     assert spec is not None
     assert parse_track_spec(raw.split("\n", 1)[1].rsplit("\n", 1)[0]).title == "Night Shift"
+
+
+def test_prompt_translation_is_strict_and_records_provider_provenance():
+    class Provider:
+        identity = "test-provider"
+        version = "model-v1"
+
+    result = translate_planner_payload({"track_spec": _payload()}, provider=Provider())
+    assert result.track_spec.title == "Night Shift"
+    assert result.audit.status == "ACCEPTED"
+    assert result.audit.provider == "test-provider"
+    assert result.audit.provider_version == "model-v1"
+    assert result.audit.strict_parse is True
+
+
+def test_prompt_translation_does_not_invent_missing_track_spec():
+    with pytest.raises(ValueError, match="TRACK_SPEC_MISSING"):
+        translate_planner_payload({"arrangement": []})
 
 
 def test_track_spec_rejects_duration_mismatch_and_unknown_roles():

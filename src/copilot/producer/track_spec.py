@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 TRACK_SPEC_SCHEMA_VERSION = "track-spec-v1"
+PROMPT_TRANSLATION_SCHEMA_VERSION = "prompt-to-track-spec-v1"
 
 
 class SectionSpec(BaseModel):
@@ -107,6 +108,28 @@ class TrackSpec(BaseModel):
         ]
 
 
+class PromptTranslationAudit(BaseModel):
+    """Provenance for the prompt -> TrackSpec boundary.
+
+    This is planning provenance only.  It does not certify any Ableton state
+    and it never turns provider output into a measurement claim.
+    """
+
+    schema_version: str = PROMPT_TRANSLATION_SCHEMA_VERSION
+    status: str = "ACCEPTED"
+    provider: str = "unknown"
+    provider_version: str = "unknown"
+    source_field: str = "track_spec"
+    strict_parse: bool = True
+
+
+class PromptTranslationResult(BaseModel):
+    """Accepted musical intent after strict prompt translation."""
+
+    track_spec: TrackSpec
+    audit: PromptTranslationAudit
+
+
 def _decode_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S | re.I)
@@ -140,3 +163,33 @@ def track_spec_from_planner_payload(payload: dict[str, Any]) -> TrackSpec | None
     if candidate is None:
         return None
     return parse_track_spec(candidate)
+
+
+def translate_planner_payload(
+    payload: dict[str, Any],
+    *,
+    provider: Any = None,
+) -> PromptTranslationResult:
+    """Accept the planner's prompt translation through one strict boundary.
+
+    The planner may still return selections, patch contracts, or legacy
+    arrangement data alongside ``track_spec``.  This function deliberately
+    consumes only the typed musical-intent contract and refuses to invent one
+    when the provider omitted it.
+    """
+
+    if not isinstance(payload, dict):
+        raise ValueError("PROMPT_TRANSLATION_PAYLOAD_MUST_BE_OBJECT")
+    candidate = payload.get("track_spec")
+    if candidate is None:
+        raise ValueError("PROMPT_TRANSLATION_TRACK_SPEC_MISSING")
+    spec = parse_track_spec(candidate)
+    identity = str(getattr(provider, "identity", "unknown") or "unknown")
+    version = str(getattr(provider, "version", "unknown") or "unknown")
+    return PromptTranslationResult(
+        track_spec=spec,
+        audit=PromptTranslationAudit(
+            provider=identity,
+            provider_version=version,
+        ),
+    )
