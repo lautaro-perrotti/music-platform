@@ -46,9 +46,14 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     assert '"files_valid": true' in audit
     assert '"browser_paths_valid": true' in audit
     html = (output / "harmonic_sanity_check_v1.html").read_text(encoding="utf-8")
-    assert "EXPORT REVIEW JSON" in html
+    assert "Exportar evaluación" in html
     assert "localStorage" in html
     assert "UNKNOWN_SHOULD_RESOLVE" in html
-    assert "Bass ↔ harmony" in html
+    assert "¿Por qué se eligió este acorde?" in html
+    assert "Contexto completo" in html
+    assert "Correcto / razonable" in html
+    assert 'data-verdict="ACCEPT"' in html
+    assert "human_verdict: item.verdict || 'PENDING'" in html
+    assert "lang='es'" in html
     assert "PENDING" in html
     assert (output / "harmonic_sanity_check_v1.html").is_file()
