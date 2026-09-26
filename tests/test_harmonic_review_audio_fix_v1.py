@@ -38,6 +38,9 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     assert context.available is True
     assert context.has_signal is True
     assert context.audible_level is True
+    assert context.channel_balanced is True
+    assert context.channel_balance_db == pytest.approx(0.0, abs=0.01)
+    assert context.channel_mode in {"MONO_DUPLICATED_FOR_REVIEW", "CENTERED_MONO_DUPLICATED_FOR_REVIEW"}
     assert context.peak_dbfs == pytest.approx(-3.0, abs=0.01)
     audit = (output / "harmonic_review_audio_audit_v1.json").read_text(encoding="utf-8")
     assert '"files_valid": true' in audit

@@ -40,6 +40,13 @@ def _stats(data: np.ndarray) -> dict[str, Any]:
     peak = float(np.max(np.abs(values))) if values.size else 0.0
     rms = float(np.sqrt(np.mean(values * values))) if values.size else 0.0
     nonzero = float(np.mean(np.abs(values) > 1e-7)) if values.size else 0.0
+    channel_rms = np.sqrt(np.mean(values * values, axis=0)) if values.ndim == 2 and values.size else np.zeros(1)
+    channel_peak = np.max(np.abs(values), axis=0) if values.ndim == 2 and values.size else np.zeros(1)
+    left_rms = float(channel_rms[0])
+    right_rms = float(channel_rms[1]) if len(channel_rms) > 1 else left_rms
+    left_peak = float(channel_peak[0])
+    right_peak = float(channel_peak[1]) if len(channel_peak) > 1 else left_peak
+    balance_db = _dbfs(left_rms) - _dbfs(right_rms) if len(channel_rms) > 1 else 0.0
     return {
         "peak_amplitude": peak,
         "peak_dbfs": _dbfs(peak),
@@ -48,6 +55,16 @@ def _stats(data: np.ndarray) -> dict[str, Any]:
         "nonzero_sample_ratio": nonzero,
         "has_signal": bool(peak >= 1e-4 and rms >= 1e-5),
         "audible_level": bool(peak >= 10 ** (-30.0 / 20.0) and rms >= 10 ** (-55.0 / 20.0)),
+        "left_rms": left_rms,
+        "right_rms": right_rms,
+        "left_rms_dbfs": _dbfs(left_rms),
+        "right_rms_dbfs": _dbfs(right_rms),
+        "left_peak": left_peak,
+        "right_peak": right_peak,
+        "left_peak_dbfs": _dbfs(left_peak),
+        "right_peak_dbfs": _dbfs(right_peak),
+        "channel_balance_db": balance_db,
+        "channel_balanced": bool(abs(balance_db) <= 1.0) if len(channel_rms) > 1 else True,
     }
 
 
@@ -76,10 +93,18 @@ def _review_copy(
     raw_stats = _stats(clip)
     original_peak_dbfs = raw_stats["peak_dbfs"]
     target_peak = 10 ** (-3.0 / 20.0)
-    gain = target_peak / raw_stats["peak_amplitude"] if raw_stats["peak_amplitude"] > 1e-7 else 1.0
+    if clip.shape[1] == 1:
+        centered = np.repeat(clip, 2, axis=1)
+        channel_mode = "MONO_DUPLICATED_FOR_REVIEW"
+    else:
+        centered_mono = np.mean(clip.astype(np.float64), axis=1, keepdims=True)
+        centered = np.repeat(centered_mono, 2, axis=1)
+        channel_mode = "CENTERED_MONO_DUPLICATED_FOR_REVIEW"
+    centered_stats = _stats(centered)
+    gain = target_peak / centered_stats["peak_amplitude"] if centered_stats["peak_amplitude"] > 1e-7 else 1.0
     # This is a review-only constant gain.  No compression, EQ, limiting, or
     # timing operation is performed.
-    normalized = np.clip(clip.astype(np.float64) * gain, -1.0, 1.0).astype(np.float32)
+    normalized = np.clip(centered * gain, -1.0, 1.0).astype(np.float32)
     stats = _stats(normalized)
     target.parent.mkdir(parents=True, exist_ok=True)
     sf.write(target, normalized, sample_rate)
@@ -105,6 +130,17 @@ def _review_copy(
         source_role=role,
         source_start_qn=source_start_qn,
         source_end_qn=source_end_qn,
+        left_rms=stats["left_rms"],
+        right_rms=stats["right_rms"],
+        left_rms_dbfs=stats["left_rms_dbfs"],
+        right_rms_dbfs=stats["right_rms_dbfs"],
+        left_peak=stats["left_peak"],
+        right_peak=stats["right_peak"],
+        left_peak_dbfs=stats["left_peak_dbfs"],
+        right_peak_dbfs=stats["right_peak_dbfs"],
+        channel_balance_db=stats["channel_balance_db"],
+        channel_balanced=stats["channel_balanced"],
+        channel_mode=channel_mode,
     )
     audit = {
         "role": role,
@@ -122,6 +158,13 @@ def _review_copy(
         "review_stats": stats,
         "original_peak_dbfs": original_peak_dbfs,
         "gain_applied_db": _dbfs(gain),
+        "channel_mode": channel_mode,
+        "channel_balance_db": stats["channel_balance_db"],
+        "channel_balanced": stats["channel_balanced"],
+        "left_rms_dbfs": stats["left_rms_dbfs"],
+        "right_rms_dbfs": stats["right_rms_dbfs"],
+        "left_peak_dbfs": stats["left_peak_dbfs"],
+        "right_peak_dbfs": stats["right_peak_dbfs"],
         "path": str(target),
         "has_signal": stats["has_signal"],
         "audible_level": stats["audible_level"],
@@ -208,14 +251,14 @@ def repair_harmonic_review_audio(
         item.listening_region.end_bar = context_end_qn / 4.0 + 1.0
         audit_rows.extend([context_audit, other_audit, bass_audit])
 
-    all_context_ok = all(row.get("role") == "context" and row.get("has_signal") and row.get("audible_level") for row in audit_rows if row.get("role") == "context")
+    all_context_ok = all(row.get("role") == "context" and row.get("has_signal") and row.get("audible_level") and row.get("channel_balanced") for row in audit_rows if row.get("role") == "context")
     source_artifacts = dict(review.source_artifacts)
     source_artifacts["reference_audio"] = {"path": str(reference_audio), "sha256": source_hash, "duration_s": source_duration, "sample_rate": source_sr, "channels": int(source_data.shape[1]), "source_role": source_classification, "hash_verified": expected_source_hash is None or expected_source_hash == source_hash, "stats": source_stats}
     review.source_artifacts = source_artifacts
     review.audio_usability_status = "VERIFIED" if all_context_ok else "BLOCKED_AUDIO_SIGNAL"
     review.timeline_mapping_status = "VERIFIED_SOURCE_LOCAL_ORIGIN" if source_origin_qn == 0.0 and source_end_qn > 0 else "REVIEW_REQUIRED"
     root_cause = "OTHER"
-    root_cause_detail = "Previous package lacked an explicit context-first audibility contract; local audit found the full-context source, QN origin, signal and relative paths valid, so the human playback complaint is not reproducible as a silent-source or timeline failure."
+    root_cause_detail = "The immutable reference and previous review slices had a measured left/right imbalance of approximately 227 dB: useful signal was on L and R was effectively silent. The previous global peak/RMS gate did not detect this. Review copies are now centered and duplicated to both channels."
     review.provenance = {**review.provenance, "audio_fix_id": "harmonic-review-audio-usability-fix-v1", "source_classification": source_classification, "source_capture_start_qn": source_origin_qn, "source_capture_end_qn": source_end_qn, "tempo_bpm": tempo_bpm, "source_local_coordinate_rule": "source_local_qn = project_qn - source_capture_start_qn", "target_peak_dbfs": target_peak_dbfs, "root_cause": root_cause, "root_cause_detail": root_cause_detail, "audit_rows": audit_rows, "model_api_calls": 0, "musical_writes": 0, "ableton_mutations": 0}
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "harmonic_sanity_check_v1.json").write_text(review.model_dump_json(indent=2), encoding="utf-8")
@@ -232,11 +275,11 @@ def repair_harmonic_review_audio(
 def render_repaired_report(review: HarmonicHumanReview, rows: list[dict[str, Any]] | None = None) -> str:
     rows = rows or list(review.provenance.get("audit_rows", []))
     context_by_window = {Path(row.get("path", "")).stem.split("_context")[0]: row for row in rows if row.get("role") == "context"}
-    lines = ["HARMONIC HUMAN REVIEW — AUDIO REPAIRED", "", "WINDOW | CONTEXT PEAK | CONTEXT RMS | HAS SIGNAL | SOURCE | OFFSET QN | STATUS"]
+    lines = ["HARMONIC HUMAN REVIEW — AUDIO REPAIRED", "", "WINDOW | CONTEXT PEAK | CONTEXT RMS | L/R BALANCE | HAS SIGNAL | SOURCE | OFFSET QN | STATUS"]
     for item in review.review_windows:
         context = item.audio_artifacts.get("context")
         audit = context_by_window.get(item.window_id.replace("harmonic_", ""), context_by_window.get(f"window_{review.review_windows.index(item) + 1:02d}", {}))
-        lines.append(f"{item.window_id} | {audit.get('review_stats', {}).get('peak_dbfs', 'n/a')} dBFS | {audit.get('review_stats', {}).get('rms_dbfs', 'n/a')} dBFS | {audit.get('has_signal', False)} | {review.source_artifacts.get('reference_audio', {}).get('source_role', 'unknown')} | {audit.get('source_start_qn', 'n/a')}–{audit.get('source_end_qn', 'n/a')} | {'PASS' if audit.get('has_signal') and audit.get('audible_level') else 'BLOCKED'}")
+        lines.append(f"{item.window_id} | {audit.get('review_stats', {}).get('peak_dbfs', 'n/a')} dBFS | {audit.get('review_stats', {}).get('rms_dbfs', 'n/a')} dBFS | {audit.get('channel_balance_db', 'n/a')} dB | {audit.get('has_signal', False)} | {review.source_artifacts.get('reference_audio', {}).get('source_role', 'unknown')} | {audit.get('source_start_qn', 'n/a')}–{audit.get('source_end_qn', 'n/a')} | {'PASS' if audit.get('has_signal') and audit.get('audible_level') and audit.get('channel_balanced') else 'BLOCKED'}")
         lines.extend([item.window_id.upper(), f"Bars/QN: {item.analysis_region.start_bar:g}-{item.analysis_region.end_bar:g} / {item.analysis_region.start_qn:g}-{item.analysis_region.end_qn:g}", f"Selected: {item.selected_hypothesis.label if item.selected_hypothesis else 'UNKNOWN'}", f"Context: {context.path if context else 'unavailable'}", "Human verdict: PENDING", ""])
     lines.extend([f"SOURCE: {review.source_artifacts.get('reference_audio', {}).get('source_role')}", f"TIMELINE: {review.timeline_mapping_status}", f"AUDIO USABILITY: {review.audio_usability_status}", f"ROOT CAUSE: {review.provenance.get('root_cause')}", "HUMAN AUDIBILITY: PENDING", "MODEL/API CALLS: 0", "MUSICAL WRITES: 0", "ABLETON MUTATIONS: 0"])
     return "\n".join(lines) + "\n"

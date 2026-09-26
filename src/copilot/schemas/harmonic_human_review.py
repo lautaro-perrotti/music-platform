@@ -57,6 +57,17 @@ class ReviewAudioArtifact(BaseModel):
     source_role: str | None = None
     source_start_qn: float | None = None
     source_end_qn: float | None = None
+    left_rms: float | None = Field(default=None, ge=0)
+    right_rms: float | None = Field(default=None, ge=0)
+    left_rms_dbfs: float | None = None
+    right_rms_dbfs: float | None = None
+    left_peak: float | None = Field(default=None, ge=0)
+    right_peak: float | None = Field(default=None, ge=0)
+    left_peak_dbfs: float | None = None
+    right_peak_dbfs: float | None = None
+    channel_balance_db: float | None = None
+    channel_balanced: bool | None = None
+    channel_mode: str | None = None
 
 
 class HarmonicAlternative(BaseModel):
