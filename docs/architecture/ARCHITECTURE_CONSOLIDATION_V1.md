@@ -31,14 +31,15 @@ authoritative readback / preview / human decision
 
 The current implementation already has a coherent execution boundary. The
 consolidation gap is above that boundary: several valid musical artifacts are
-not yet presented as one canonical product-facing model.
+now projected through a thin canonical product-facing view, while the domain
+artifacts remain authoritative for their own facts and inferences.
 
 ## Factual inventory
 
 | Component | Purpose | Input | Output | Authority / state | Consumers | Product role | Overlap |
 |---|---|---|---|---|---|---|---|
 | `ReferenceAnalysisPack` | Factual full-mix/reference analysis: energy, spectrum, structure candidates, groove/chroma/timbre facts and evidence refs | `AudioAnalysisInput`, observations, captured or file WAVs | `copilot.schemas.reference_analysis.ReferenceAnalysisPack` / analyzer evidence | Derived, read-only, stateless builder | `music_analyzer`, Astra context builders and downstream evidence consumers | Internal perception artifact | Overlaps with other perception artifacts only at the evidence boundary; it does not contain symbolic bass/harmony truth |
-| `MusicAnalysisPack` | Current shared evidence handoff for local/reference/project audio analysis | `AudioAnalysisInput`, `ReferenceAnalysisPack`, DSP observations, source evidence | `copilot.schemas.music_analysis.MusicAnalysisPack` | Derived, read-only, stateless pack | `producer_planner_v1`, reference-variation integration, Evidence/Astra paths | Product-facing analysis handoff | Current broadest factual pack; not a replacement for symbolic MIDI-derived artifacts |
+| `MusicAnalysisPack` | Current shared evidence handoff for local/reference/project audio analysis | `AudioAnalysisInput`, `ReferenceAnalysisPack`, DSP observations, source evidence | `copilot.schemas.music_analysis.MusicAnalysisPack` | Derived, read-only, stateless pack | Canonical view, reference-variation integration and Evidence/Astra paths | Internal evidence source; exposed through the canonical view | Current broadest factual pack; not a replacement for symbolic MIDI-derived artifacts |
 | `StemReferenceAnalysis` | Source/separation pipeline metadata, alignment, stems and technical separation observations | Immutable source WAV, separation provider/cache, timeline metadata | `copilot.music_source.stem_reference.StemReferenceAnalysis` | Derived, read-only, persisted | `musical_understanding_v1`, stem review and benchmark flows | Internal source-analysis artifact | Can be confused with `MusicAnalysisPack`; its job is source/stem provenance, not the canonical musical model |
 | `MusicalUnderstanding` | Deterministic symbolic/audio musical extraction: note candidates, rhythm, phrases, pitch material, drums and tonal hypotheses | Stem/reference audio, `StemReferenceAnalysis`, optional authoritative MIDI | `copilot.schemas.musical_understanding.MusicalUnderstanding` | Derived, read-only, stateless analysis result | `BassMusicalModel`, harmonic analysis and comparison tests | Internal perception artifact | Its pitch/rhythm fields overlap conceptually with the broad pack but have different evidence granularity |
 | `BassNoteEvidence` | Typed bass-note evidence alias (`BassPitchEvent`) | MIDI/audio note extraction | Individual note events with onset, duration, pitch, confidence/evidence | Derived facts; no independent authority | `MusicalUnderstanding`, `BassMusicalModel`, harmonic analysis | Internal evidence primitive | Not a competing model; should remain a leaf evidence type |
@@ -124,11 +125,12 @@ The vertical slice already proves real reference → plan → SafeWrite → MIDI
 preview. Its next architectural improvement should consume a canonical
 music-model view, not add another interpretation/track-spec/variation schema.
 
-## Recommended consolidation boundary
+## Implemented consolidation boundary
 
 Do not introduce a second orchestrator or rewrite existing artifacts. The
-lowest-risk consolidation is a **thin aggregate read model** above existing
-artifacts:
+lowest-risk consolidation is the implemented **thin aggregate read model** in
+`copilot.schemas.canonical_music_model` and
+`copilot.music_model.canonical_view`:
 
 ```text
 CanonicalMusicModelView
@@ -142,11 +144,14 @@ CanonicalMusicModelView
 └── confidence / limitations
 ```
 
-It should reference or embed existing verified artifacts rather than duplicate
-their algorithms. It should be read-only and should not be required before the
-current system can keep running. A later implementation milestone can add this
-view, migrate one consumer at a time, and prove parity against the existing
-artifacts.
+It references existing verified artifacts and projects only the fields needed
+by the first producer consumer. It does not run analyzers, recalculate audio
+facts, or select between conflicting hypotheses. It is read-only and is not a
+new source of truth.
+
+The first migrated consumer is `build_astra_producer_planner_context`: it now
+receives `music_model` instead of the raw `reference_analysis` payload. A
+token mismatch is rejected closed before the context is built.
 
 ## Explicit non-actions in this checkpoint
 
@@ -168,7 +173,8 @@ SAFEWRITE_SEMANTICS_CHANGED       = NO
 VERIFIED_MODULES_DELETED           = NO
 LLM/API_CALLS                      = 0
 ABLETON_MUSICAL_WRITES             = 0
-ARCHITECTURAL_REFACTOR             = NOT STARTED
-NEXT JUSTIFIED MILESTONE           = THIN CANONICAL MUSIC MODEL VIEW
+ARCHITECTURAL_REFACTOR             = THIN VIEW ONLY
+FIRST CONSUMER MIGRATED             = ASTRA_PRODUCER_PLANNER_CONTEXT
+NEXT JUSTIFIED MILESTONE             = HUMAN HARMONIC SANITY CHECK / THEN SECOND CONSUMER
 ```
 

@@ -37,6 +37,7 @@ reproducible bug.
 | `HARMONIC_UNDERSTANDING_V1` | IMPLEMENTED / READ-ONLY | Fuses authoritative bass MIDI with optional OTHER/MUSIC-stem chroma into ranked chord hypotheses, harmonic rhythm, tonal candidates, and bass-role relationships. Stem purity is not promoted to ground truth; ambiguous windows and global tonality abstain. |
 | `HARMONIC_HUMAN_REVIEW_PACKAGE_V1` | READY / AWAITING HUMAN | Reuses the exact harmonic artifact, verifies source hashes, produces 8 deterministic master/OTHER/BASS listening windows plus typed evidence and static review files. All verdicts remain `PENDING`; no musical correctness is self-certified. |
 | `HARMONIC_REVIEW_AUDIO_USABILITY_FIX_V1` | VERIFIED / HUMAN AUDIBILITY PENDING | Context-first review copies use the full reference source, verified QN-origin mapping, deterministic -3 dBFS constant gain, per-file signal audit, and valid local HTML paths. Human playback remains the next boundary. |
+| `CANONICAL_MUSIC_MODEL_VIEW_V1` | IMPLEMENTED / READ-ONLY | Thin provenance-preserving view over existing evidence/domain artifacts. First consumer is the Astra producer-planner context; no analyzer, SafeWrite, State Trust, or Ableton semantics changed. |
 
 ## Runtime / agent
 
