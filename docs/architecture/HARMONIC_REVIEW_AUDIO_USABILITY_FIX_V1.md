@@ -15,7 +15,12 @@ The repaired package:
 - applies only constant review gain to target approximately `-3 dBFS` peak;
 - audits peak, RMS, dBFS, nonzero ratio, signal, and audibility for every
   context/OTHER/BASS copy;
-- verifies relative paths referenced by the static HTML.
+- verifies relative paths referenced by the static HTML;
+- renders the persisted harmonic evidence, bass MIDI, bass↔harmony
+  relationships, contradictions and limitations in the static review page;
+- keeps verdicts and notes in browser-local storage only and exports a
+  separate `harmonic_human_review_verdicts.json` draft without modifying the
+  analysis artifact.
 
 `HUMAN_AUDIBILITY` intentionally remains `PENDING`: valid files and signal
 statistics do not equal a human listening verdict.

@@ -285,7 +285,7 @@ def render_repaired_report(review: HarmonicHumanReview, rows: list[dict[str, Any
     return "\n".join(lines) + "\n"
 
 
-def render_repaired_html(review: HarmonicHumanReview) -> str:
+def _render_legacy_repaired_html(review: HarmonicHumanReview) -> str:
     blocks: list[str] = []
     for item in review.review_windows:
         def player(role: str) -> str:
@@ -297,6 +297,121 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         runner = item.alternatives[0].label if item.alternatives else "NONE"
         blocks.append(f'''<section><h2>{html.escape(item.window_id)} · bars {item.analysis_region.start_bar:g}–{item.analysis_region.end_bar:g}</h2><p>Analysis: QN {item.analysis_region.start_qn:g}–{item.analysis_region.end_qn:g}</p><p>Listening context: QN {item.listening_region.start_qn:g}–{item.listening_region.end_qn:g}</p><h3>1. FULL CONTEXT</h3>{player("context")}<h3>2. OTHER</h3>{player("other")}<h3>3. BASS</h3>{player("bass")}<p><b>Selected:</b> {html.escape(selected)} · <b>Runner-up:</b> {html.escape(runner)} · <b>Human verdict:</b> PENDING</p><p>Pitch classes: {html.escape(', '.join(item.observed_pitch_classes) or 'none')}</p></section>''')
     return "<!doctype html><meta charset='utf-8'><title>Harmonic Human Review — Repaired Audio</title><style>body{font:15px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.2rem;color:#b9c4ff}</style><h1>Harmonic Human Review</h1><p>Context-first listening package. All verdicts are PENDING. Musical correctness is not self-certified.</p>" + "".join(blocks) + "<p>MODEL/API CALLS: 0 · MUSICAL WRITES: 0 · ABLETON MUTATIONS: 0</p>"
+
+
+def render_repaired_html(review: HarmonicHumanReview) -> str:
+    """Render the static human-review page with local-only verdict storage."""
+
+    review_payload = {
+        "analysis_artifact_id": review.analysis_artifact_id,
+        "reference_id": review.reference_id,
+        "source_hash": review.source_hash,
+        "windows": [
+            {"window_id": item.window_id, "human_verdict": item.human_verdict, "human_notes": item.human_notes}
+            for item in review.review_windows
+        ],
+    }
+    embedded_json = json.dumps(review_payload, ensure_ascii=False, separators=(",", ":"))
+    embedded_json = embedded_json.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+    def block(value: Any) -> str:
+        return html.escape(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+
+    def region(value: Any) -> str:
+        return f"bars {value.start_bar:g}–{value.end_bar:g} · QN {value.start_qn:g}–{value.end_qn:g} · seconds {value.start_seconds:.3f}–{value.end_seconds:.3f}"
+
+    def player(item: Any, role: str) -> str:
+        artifact = item.audio_artifacts.get(role)
+        if not artifact or not artifact.available or not artifact.filename:
+            return "<em>unavailable</em>"
+        if artifact.peak_dbfs is not None and artifact.rms_dbfs is not None and artifact.channel_balance_db is not None:
+            stats = f"peak {artifact.peak_dbfs:.2f} dBFS · RMS {artifact.rms_dbfs:.2f} dBFS · L/R {artifact.channel_balance_db:.2f} dB"
+        else:
+            stats = "technical stats unavailable"
+        return f'<audio controls preload="none" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>'
+
+    blocks: list[str] = []
+    for item in review.review_windows:
+        selected = item.selected_hypothesis.label if item.selected_hypothesis else "UNKNOWN"
+        runner = item.alternatives[0] if item.alternatives else None
+        selected_payload = item.selected_hypothesis.model_dump(mode="json") if item.selected_hypothesis else None
+        runner_payload = runner.model_dump(mode="json") if runner else None
+        contradictions = list(item.selected_hypothesis.contradictions if item.selected_hypothesis else [])
+        contradictions.extend(c for alternative in item.alternatives for c in alternative.contradictions if c not in contradictions)
+        verdicts = ("ACCEPT", "PLAUSIBLE_AMBIGUOUS", "WRONG", "UNKNOWN_CORRECT", "UNKNOWN_SHOULD_RESOLVE")
+        verdict_buttons = "".join(
+            f'<button type="button" class="verdict" data-window="{html.escape(item.window_id)}" data-verdict="{verdict}">{verdict}</button>'
+            for verdict in verdicts
+        )
+        blocks.append(
+            f'''<section class="window" data-window-section="{html.escape(item.window_id)}">
+<h2>{html.escape(item.window_id)} · bars {item.analysis_region.start_bar:g}–{item.analysis_region.end_bar:g}</h2>
+<p><b>Analysis region:</b> {html.escape(region(item.analysis_region))}</p>
+<p><b>Listening context:</b> {html.escape(region(item.listening_region))}</p>
+<h3>1. FULL CONTEXT</h3>{player(item, "context")}
+<h3>2. OTHER</h3>{player(item, "other")}
+<h3>3. BASS</h3>{player(item, "bass")}
+<div class="hypothesis"><b>Selected hypothesis:</b> {html.escape(selected)}<br>
+<b>Confidence:</b> {item.selected_hypothesis.confidence if item.selected_hypothesis else 'n/a'} ·
+<b>Score delta:</b> {item.selected_runner_up_score_delta if item.selected_runner_up_score_delta is not None else 'n/a'}<br>
+<b>Runner-up:</b> {html.escape(runner.label if runner else 'NONE')} · <b>Confidence:</b> {runner.confidence if runner else 'n/a'}</div>
+<h3>Evidence</h3>
+<p><b>Observed pitch classes:</b> {html.escape(', '.join(item.observed_pitch_classes) or 'none')}</p>
+<details open><summary>Authoritative bass MIDI</summary><pre>{block(item.bass_events)}</pre></details>
+<details open><summary>Bass ↔ harmony</summary><pre>{block(item.bass_harmony.model_dump(mode="json"))}</pre></details>
+<details open><summary>Selected hypothesis / support</summary><pre>{block(selected_payload)}</pre></details>
+<details><summary>Runner-up hypothesis</summary><pre>{block(runner_payload)}</pre></details>
+<details><summary>Contradictions</summary><pre>{block(contradictions)}</pre></details>
+<details><summary>Evidence refs</summary><pre>{block(item.evidence_refs)}</pre></details>
+<details><summary>Limitations</summary><pre>{block(item.limitations)}</pre></details>
+<h3>Human verdict</h3><div class="verdicts">{verdict_buttons}</div>
+<p class="current-verdict" data-current-verdict="{html.escape(item.window_id)}">PENDING</p>
+<label>Human notes<textarea data-notes="{html.escape(item.window_id)}" rows="3" placeholder="Optional listening note"></textarea></label>
+</section>'''
+        )
+
+    source = review.source_artifacts.get("reference_audio", {})
+    global_tonality = {
+        "status": review.global_tonality_status,
+        "candidates": [item.model_dump(mode="json") for item in review.global_tonality_candidates],
+        "limitations": review.global_tonality_limitations,
+    }
+    header = (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Harmonic Human Review — Repaired Audio</title>"
+        "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}</style></head><body>"
+        f'<script type="application/json" id="review-data">{embedded_json}</script><h1>Harmonic Human Review</h1>'
+        "<p>Context-first listening package. Musical correctness is not self-certified.</p>"
+        "<div class='toolbar'><button type='button' id='export-review'>EXPORT REVIEW JSON</button> <button type='button' id='clear-review'>CLEAR LOCAL REVIEW</button> <span class='status' id='save-status'>All verdicts start PENDING.</span></div>"
+        "<section><h2>Package status</h2>"
+        f"<p><b>Audio usability:</b> {html.escape(review.audio_usability_status)} · <b>Timeline:</b> {html.escape(review.timeline_mapping_status)} · <b>Human audibility:</b> PENDING</p>"
+        f"<p><b>Source:</b> {html.escape(str(source.get('source_role', 'unknown')))} · <b>Hash:</b> {html.escape(str(review.source_hash))}</p>"
+        f"<details><summary>Full-context source audit</summary><pre>{block(source)}</pre></details>"
+        f"<details open><summary>Global tonality: {html.escape(review.global_tonality_status)}</summary><pre>{block(global_tonality)}</pre></details></section>"
+    )
+    footer = '''<p>MODEL/API CALLS: 0 · MUSICAL WRITES: 0 · ABLETON MUTATIONS: 0</p>
+<script>
+const REVIEW_DATA = JSON.parse(document.getElementById('review-data').textContent);
+const STORAGE_KEY = 'harmonic-human-review:' + REVIEW_DATA.analysis_artifact_id + ':' + REVIEW_DATA.source_hash;
+let reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: item.human_verdict || 'PENDING', notes: item.human_notes || ''}]));
+function setStatus(message) { document.getElementById('save-status').textContent = message; }
+function persist() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reviewState)); setStatus('Saved locally in this browser.'); } catch (error) { setStatus('Browser localStorage unavailable; use EXPORT REVIEW JSON.'); } }
+function restore() { try { const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); if (saved && typeof saved === 'object') reviewState = Object.assign(reviewState, saved); } catch (error) { setStatus('Local draft unavailable; all verdicts remain in memory.'); } }
+function renderState() {
+  document.querySelectorAll('.verdict').forEach((button) => { const current = reviewState[button.dataset.window]?.verdict || 'PENDING'; button.classList.toggle('active', button.dataset.verdict === current); });
+  document.querySelectorAll('.current-verdict').forEach((label) => { label.textContent = reviewState[label.dataset.currentVerdict]?.verdict || 'PENDING'; });
+  document.querySelectorAll('textarea[data-notes]').forEach((field) => { field.value = reviewState[field.dataset.notes]?.notes || ''; });
+}
+function exportReview() {
+  const payload = {analysis_artifact_id: REVIEW_DATA.analysis_artifact_id, reference_id: REVIEW_DATA.reference_id, source_hash: REVIEW_DATA.source_hash, windows: Object.entries(reviewState).map(([window_id, item]) => ({window_id, human_verdict: item.verdict || 'PENDING', human_notes: item.notes || ''}))};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'}); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'harmonic_human_review_verdicts.json'; link.click(); URL.revokeObjectURL(link.href); setStatus('Review JSON exported.');
+}
+document.querySelectorAll('.verdict').forEach((button) => button.addEventListener('click', () => { reviewState[button.dataset.window].verdict = button.dataset.verdict; persist(); renderState(); }));
+document.querySelectorAll('textarea[data-notes]').forEach((field) => field.addEventListener('input', () => { reviewState[field.dataset.notes].notes = field.value; persist(); }));
+document.getElementById('export-review').addEventListener('click', exportReview);
+document.getElementById('clear-review').addEventListener('click', () => { if (confirm('Clear local human review?')) { try { localStorage.removeItem(STORAGE_KEY); } catch (error) {} reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: 'PENDING', notes: ''}])); renderState(); setStatus('Local review cleared; all verdicts are PENDING.'); } });
+restore(); renderState();
+</script></body></html>'''
+    return header + "".join(blocks) + footer
 
 
 __all__ = ["repair_harmonic_review_audio", "render_repaired_html", "render_repaired_report"]
