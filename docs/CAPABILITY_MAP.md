@@ -36,6 +36,7 @@ reproducible bug.
 | `BASS_MUSICAL_MODEL_V1` | VERIFIED / FROZEN | Deterministic symbolic model over reconciled authoritative MIDI: pitch material, intervals, rhythmic cells, motifs, phrases, and explicit bass-only tonal abstention. No writes or model calls. |
 | `HARMONIC_UNDERSTANDING_V1` | IMPLEMENTED / READ-ONLY | Fuses authoritative bass MIDI with optional OTHER/MUSIC-stem chroma into ranked chord hypotheses, harmonic rhythm, tonal candidates, and bass-role relationships. Stem purity is not promoted to ground truth; ambiguous windows and global tonality abstain. |
 | `HARMONIC_HUMAN_REVIEW_PACKAGE_V1` | READY / AWAITING HUMAN | Reuses the exact harmonic artifact, verifies source hashes, produces 8 deterministic master/OTHER/BASS listening windows plus typed evidence and static review files. All verdicts remain `PENDING`; no musical correctness is self-certified. |
+| `HARMONIC_REVIEW_AUDIO_USABILITY_FIX_V1` | VERIFIED / HUMAN AUDIBILITY PENDING | Context-first review copies use the full reference source, verified QN-origin mapping, deterministic -3 dBFS constant gain, per-file signal audit, and valid local HTML paths. Human playback remains the next boundary. |
 
 ## Runtime / agent
 

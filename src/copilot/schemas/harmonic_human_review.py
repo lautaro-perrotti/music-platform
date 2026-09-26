@@ -45,6 +45,18 @@ class ReviewAudioArtifact(BaseModel):
     duration_seconds: float | None = Field(default=None, gt=0)
     source_hash_verified: bool | None = None
     limitation: str | None = None
+    peak_amplitude: float | None = Field(default=None, ge=0)
+    peak_dbfs: float | None = None
+    rms: float | None = Field(default=None, ge=0)
+    rms_dbfs: float | None = None
+    nonzero_sample_ratio: float | None = Field(default=None, ge=0, le=1)
+    has_signal: bool | None = None
+    audible_level: bool | None = None
+    original_peak_dbfs: float | None = None
+    gain_applied_db: float | None = None
+    source_role: str | None = None
+    source_start_qn: float | None = None
+    source_end_qn: float | None = None
 
 
 class HarmonicAlternative(BaseModel):
@@ -99,6 +111,8 @@ class HarmonicHumanReview(BaseModel):
     model_api_calls: int = 0
     musical_writes: int = 0
     ableton_mutations: int = 0
+    audio_usability_status: str = "UNVERIFIED"
+    timeline_mapping_status: str = "UNVERIFIED"
 
     @model_validator(mode="after")
     def fail_closed(self) -> "HarmonicHumanReview":
