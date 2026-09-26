@@ -30,7 +30,15 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     sf.write(source, (np.sin(np.linspace(0, 40 * np.pi, 16_000)) * 0.01).astype(np.float32), 8_000)
     output = tmp_path / "fixed"
 
-    repaired = repair_harmonic_review_audio(review_path, output_dir=output, reference_audio_path=source)
+    repaired = repair_harmonic_review_audio(
+        review_path,
+        output_dir=output,
+        reference_audio_path=source,
+        drums_stem_path=source,
+        bass_stem_path=source,
+        vocals_stem_path=source,
+        other_stem_path=source,
+    )
 
     context = repaired.review_windows[0].audio_artifacts["context"]
     assert repaired.audio_usability_status == "VERIFIED"
@@ -45,6 +53,8 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     audit = (output / "harmonic_review_audio_audit_v1.json").read_text(encoding="utf-8")
     assert '"files_valid": true' in audit
     assert '"browser_paths_valid": true' in audit
+    assert '"expected_players": 5' in audit
+    assert '"resolved_players": 5' in audit
     html = (output / "harmonic_sanity_check_v1.html").read_text(encoding="utf-8")
     assert "Exportar evaluación" in html
     assert "localStorage" in html
@@ -58,6 +68,10 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     assert 'data-verdict="ACCEPT"' in html
     assert "human_verdict: item.verdict || 'PENDING'" in html
     assert "lang='es'" in html
+    assert "Batería" in html
+    assert "Voces" in html
+    assert html.count("<audio ") == 5
+    assert "audio/window_01/context.wav" in html
     assert "PENDING" in html
     assert (output / "harmonic_sanity_check_v1.html").is_file()
 

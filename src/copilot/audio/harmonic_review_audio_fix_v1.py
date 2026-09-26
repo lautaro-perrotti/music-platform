@@ -21,6 +21,17 @@ from copilot.schemas.harmonic_human_review import (
     HarmonicHumanReview,
     ReviewAudioArtifact,
 )
+from copilot.audio.midi_read_only_v1 import (
+    TRACK_TAGS,
+    _als_device_inventory,
+    _is_arrangement_clip,
+    _load_als_root,
+    _local,
+    _parent_map,
+    _track_locator_name,
+    identity_for_als_path,
+    read_arrangement_midi,
+)
 
 
 def _sha256(path: Path) -> str:
@@ -73,18 +84,131 @@ def _load_source(path: Path) -> tuple[np.ndarray, int, dict[str, Any]]:
     return data, int(sample_rate), _stats(data)
 
 
+def _find_project_als(review: HarmonicHumanReview) -> tuple[Path | None, str | None]:
+    """Resolve the persisted working-copy ALS without guessing from a name."""
+    for artifact in review.source_artifacts.values():
+        if not isinstance(artifact, dict):
+            continue
+        for key in ("path", "project_path", "als_path"):
+            value = artifact.get(key)
+            if isinstance(value, str) and value.lower().endswith(".als") and Path(value).is_file():
+                return Path(value), None
+
+    musical = review.source_artifacts.get("musical_understanding", {})
+    musical_path = musical.get("path") if isinstance(musical, dict) else None
+    if not musical_path or not Path(musical_path).is_file():
+        return None, "PROJECT_ALS_NOT_DISCOVERED"
+    try:
+        understanding = json.loads(Path(musical_path).read_text(encoding="utf-8"))
+        midi_pack_path = understanding.get("provenance", {}).get("midi_pack_path")
+        if not midi_pack_path or not Path(midi_pack_path).is_file():
+            return None, "PROJECT_ALS_NOT_DISCOVERED"
+        pack = json.loads(Path(midi_pack_path).read_text(encoding="utf-8"))
+        project_path = pack.get("source_ref", {}).get("project_path")
+        if project_path and Path(project_path).is_file():
+            return Path(project_path), None
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None, "PROJECT_ALS_METADATA_UNREADABLE"
+    return None, "PROJECT_ALS_NOT_DISCOVERED"
+
+
+def _track_role_hint(name: str, track_type: str) -> str | None:
+    lowered = name.casefold()
+    if "capture" in lowered:
+        return "CAPTURE_HOST"
+    if track_type == "ReturnTrack":
+        return "RETURN"
+    if any(token in lowered for token in ("vocal", "vox")):
+        return "VOCALS"
+    if "drum" in lowered or "perc" in lowered:
+        return "DRUMS"
+    if "bass" in lowered:
+        return "BASS"
+    if any(token in lowered for token in ("guit", "piano", "mello", "strum", "chord")):
+        return "HARMONIC"
+    return None
+
+
+def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any]:
+    project_path, discovery_error = _find_project_als(review)
+    if project_path is None:
+        return {
+            "status": "UNAVAILABLE",
+            "error": discovery_error,
+            "tracks": [],
+            "derived_stems": [],
+        }
+    project_identity = None
+    for artifact in review.source_artifacts.values():
+        if isinstance(artifact, dict) and artifact.get("project_identity"):
+            project_identity = artifact["project_identity"]
+    try:
+        root = _load_als_root(project_path)
+        parents = _parent_map(root)
+        als_identity = identity_for_als_path(project_path)
+        tracks: list[dict[str, Any]] = []
+        for index, track in enumerate(node for node in root.iter() if _local(node.tag) in TRACK_TAGS):
+            track_type = _local(track.tag)
+            display_name = _track_locator_name(track) or f"{track_type} {index + 1}"
+            arrangement = read_arrangement_midi(root, track, parents, region_start=0.0, region_end=1_000_000.0)
+            clips = list(arrangement.get("clips") or [])
+            notes = list(arrangement.get("notes") or [])
+            device_names, device_classes = _als_device_inventory(track)
+            track_id = track.attrib.get("Id") or str(index)
+            has_midi = track_type == "MidiTrack" and bool(notes)
+            review_status = "MIDI_ONLY" if has_midi else "NO_REVIEW_AUDIO"
+            tracks.append(
+                {
+                    "stable_track_ref": f"als-track:{als_identity}:{track_id}",
+                    "display_name": display_name,
+                    "track_type": track_type,
+                    "track_index": index,
+                    "mute": None,
+                    "solo": None,
+                    "clip_content_available": bool(clips),
+                    "clip_count": len(clips),
+                    "midi_available": has_midi,
+                    "midi_note_count": len(notes),
+                    "audio_artifact_available": False,
+                    "review_audio_status": review_status,
+                    "role_hint": _track_role_hint(display_name, track_type),
+                    "device_names": device_names,
+                    "device_classes": device_classes,
+                }
+            )
+        return {
+            "status": "AUTHORITATIVE_PERSISTED_WORKING_COPY",
+            "project_path": str(project_path),
+            "project_identity": project_identity or als_identity,
+            "als_identity": als_identity,
+            "identity_match": project_identity is None or project_identity == als_identity,
+            "tracks": tracks,
+            "derived_stems": [],
+        }
+    except (OSError, ValueError, TypeError):
+        return {
+            "status": "UNAVAILABLE",
+            "error": "PROJECT_ALS_UNREADABLE",
+            "project_path": str(project_path),
+            "tracks": [],
+            "derived_stems": [],
+        }
+
+
 def _review_copy(
     source: Path | None,
     target: Path,
     *,
     role: str,
+    relative_filename: str | None = None,
     start_s: float,
     end_s: float,
     source_start_qn: float,
     source_end_qn: float,
 ) -> tuple[ReviewAudioArtifact, dict[str, Any]]:
+    browser_filename = relative_filename or target.name
     if source is None or not source.is_file():
-        artifact = ReviewAudioArtifact(role=role, filename=target.name, source_role=role, limitation="SOURCE_AUDIO_UNAVAILABLE")
+        artifact = ReviewAudioArtifact(role=role, filename=browser_filename, source_role=role, limitation="SOURCE_AUDIO_UNAVAILABLE")
         return artifact, {"role": role, "path": str(source) if source else None, "has_signal": False, "status": "SOURCE_UNAVAILABLE"}
     data, sample_rate, source_stats = _load_source(source)
     start = max(0, min(len(data), int(round(start_s * sample_rate))))
@@ -111,7 +235,7 @@ def _review_copy(
     artifact = ReviewAudioArtifact(
         role=role,
         path=str(target),
-        filename=target.name,
+        filename=browser_filename,
         sha256=_sha256(target),
         available=True,
         non_silent=stats["has_signal"],
@@ -167,6 +291,7 @@ def _review_copy(
         "right_peak_dbfs": stats["right_peak_dbfs"],
         "path": str(target),
         "has_signal": stats["has_signal"],
+        "status": "PLAYABLE" if stats["has_signal"] else "SILENT_REGION",
         "audible_level": stats["audible_level"],
         "source_start_qn": source_start_qn,
         "source_end_qn": source_end_qn,
@@ -179,13 +304,29 @@ def _source_hashes(stem_analysis_path: Path | None) -> dict[str, Any]:
         return {}
     payload = json.loads(stem_analysis_path.read_text(encoding="utf-8"))
     result = {"stem_analysis_sha256": _sha256(stem_analysis_path), "expected_source_sha256": payload.get("provenance", {}).get("source_sha256")}
-    for role in ("OTHER", "BASS"):
-        result[f"expected_{role.casefold()}_sha256"] = ((payload.get("stems", {}).get(role) or {}).get("artifact") or {}).get("sha256")
+    for role in ("DRUMS", "BASS", "VOCALS", "OTHER"):
+        artifact = (payload.get("stems", {}).get(role) or {}).get("artifact") or {}
+        result[f"expected_{role.casefold()}_sha256"] = artifact.get("sha256")
+        result[f"{role.casefold()}_path"] = artifact.get("path")
     windows = payload.get("timeline", {}).get("windows_reused", [])
     if windows:
         result["source_capture_start_qn"] = float(windows[0].get("start_qn", 0.0))
         result["source_capture_end_qn"] = float(windows[-1].get("end_qn", 0.0))
     return result
+
+
+def _discover_stem_paths(review: HarmonicHumanReview, stem_analysis_path: Path | None) -> dict[str, Path | None]:
+    hashes = _source_hashes(stem_analysis_path)
+    discovered: dict[str, Path | None] = {}
+    for role in ("drums", "bass", "vocals", "other"):
+        value = hashes.get(f"{role}_path")
+        discovered[role] = Path(value) if isinstance(value, str) and Path(value).is_file() else None
+    for role, key in (("other", "other_stem"), ("bass", "bass_stem")):
+        artifact = review.source_artifacts.get(key, {})
+        value = artifact.get("path") if isinstance(artifact, dict) else None
+        if discovered[role] is None and isinstance(value, str) and Path(value).is_file():
+            discovered[role] = Path(value)
+    return discovered
 
 
 def repair_harmonic_review_audio(
@@ -195,6 +336,8 @@ def repair_harmonic_review_audio(
     reference_audio_path: Path | str,
     other_stem_path: Path | str | None = None,
     bass_stem_path: Path | str | None = None,
+    drums_stem_path: Path | str | None = None,
+    vocals_stem_path: Path | str | None = None,
     stem_analysis_path: Path | str | None = None,
     target_peak_dbfs: float = -3.0,
 ) -> HarmonicHumanReview:
@@ -205,9 +348,14 @@ def repair_harmonic_review_audio(
     output_dir = Path(output_dir)
     review = HarmonicHumanReview.model_validate_json(existing_review_path.read_text(encoding="utf-8"))
     reference_audio = Path(reference_audio_path)
-    other_audio = Path(other_stem_path) if other_stem_path else None
-    bass_audio = Path(bass_stem_path) if bass_stem_path else None
-    stem_analysis = Path(stem_analysis_path) if stem_analysis_path else None
+    persisted_stem_analysis = review.source_artifacts.get("stem_analysis", {})
+    default_stem_analysis = persisted_stem_analysis.get("path") if isinstance(persisted_stem_analysis, dict) else None
+    stem_analysis = Path(stem_analysis_path or default_stem_analysis) if (stem_analysis_path or default_stem_analysis) else None
+    discovered_stems = _discover_stem_paths(review, stem_analysis)
+    other_audio = Path(other_stem_path) if other_stem_path else discovered_stems["other"]
+    bass_audio = Path(bass_stem_path) if bass_stem_path else discovered_stems["bass"]
+    drums_audio = Path(drums_stem_path) if drums_stem_path else discovered_stems["drums"]
+    vocals_audio = Path(vocals_stem_path) if vocals_stem_path else discovered_stems["vocals"]
     hashes = _source_hashes(stem_analysis)
 
     source_hash = _sha256(reference_audio)
@@ -239,21 +387,42 @@ def repair_harmonic_review_audio(
         context_start_s = max(0.0, (context_start_qn - source_origin_qn) * 60.0 / tempo_bpm)
         context_end_s = min(source_duration, (context_end_qn - source_origin_qn) * 60.0 / tempo_bpm)
         prefix = f"window_{index:02d}"
-        context, context_audit = _review_copy(reference_audio, output_dir / f"{prefix}_context.wav", role="context", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
-        other, other_audit = _review_copy(other_audio, output_dir / f"{prefix}_other.wav", role="other", start_s=start_s, end_s=end_s, source_start_qn=source_start_qn, source_end_qn=source_end_qn)
-        bass, bass_audit = _review_copy(bass_audio, output_dir / f"{prefix}_bass.wav", role="bass", start_s=start_s, end_s=end_s, source_start_qn=source_start_qn, source_end_qn=source_end_qn)
-        item.audio_artifacts = {"context": context, "other": other, "bass": bass}
+        audio_dir = output_dir / "audio" / prefix
+        context, context_audit = _review_copy(reference_audio, audio_dir / "context.wav", role="context", relative_filename=f"audio/{prefix}/context.wav", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
+        drums, drums_audit = _review_copy(drums_audio, audio_dir / "drums.wav", role="drums", relative_filename=f"audio/{prefix}/drums.wav", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
+        bass, bass_audit = _review_copy(bass_audio, audio_dir / "bass.wav", role="bass", relative_filename=f"audio/{prefix}/bass.wav", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
+        vocals, vocals_audit = _review_copy(vocals_audio, audio_dir / "vocals.wav", role="vocals", relative_filename=f"audio/{prefix}/vocals.wav", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
+        other, other_audit = _review_copy(other_audio, audio_dir / "other.wav", role="other", relative_filename=f"audio/{prefix}/other.wav", start_s=context_start_s, end_s=context_end_s, source_start_qn=context_start_qn, source_end_qn=context_end_qn)
+        item.audio_artifacts = {"context": context, "drums": drums, "bass": bass, "vocals": vocals, "other": other}
         item.listening_region.start_qn = context_start_qn
         item.listening_region.end_qn = context_end_qn
         item.listening_region.start_seconds = context_start_s
         item.listening_region.end_seconds = context_end_s
         item.listening_region.start_bar = context_start_qn / 4.0 + 1.0
         item.listening_region.end_bar = context_end_qn / 4.0 + 1.0
-        audit_rows.extend([context_audit, other_audit, bass_audit])
+        audit_rows.extend([context_audit, drums_audit, bass_audit, vocals_audit, other_audit])
 
     all_context_ok = all(row.get("role") == "context" and row.get("has_signal") and row.get("audible_level") and row.get("channel_balanced") for row in audit_rows if row.get("role") == "context")
     source_artifacts = dict(review.source_artifacts)
     source_artifacts["reference_audio"] = {"path": str(reference_audio), "sha256": source_hash, "duration_s": source_duration, "sample_rate": source_sr, "channels": int(source_data.shape[1]), "source_role": source_classification, "hash_verified": expected_source_hash is None or expected_source_hash == source_hash, "stats": source_stats}
+    track_inventory = _build_project_track_inventory(review)
+    derived_stems = []
+    for role, path in (("DRUMS", drums_audio), ("BASS", bass_audio), ("VOCALS", vocals_audio), ("OTHER", other_audio)):
+        source_row = next((row for row in audit_rows if row.get("role") == role.casefold() and row.get("source_path")), None)
+        derived_stems.append({
+            "role": role,
+            "source_path": str(path) if path else None,
+            "available": bool(path and path.is_file()),
+            "source_sha256": source_row.get("source_sha256") if source_row else None,
+            "review_artifacts": [
+                item.audio_artifacts[role.casefold()].filename
+                for item in review.review_windows
+                if role.casefold() in item.audio_artifacts and item.audio_artifacts[role.casefold()].available
+            ],
+        })
+    track_inventory["derived_stems"] = derived_stems
+    source_artifacts["project_track_inventory"] = track_inventory
+    source_artifacts["derived_stem_inventory"] = {item["role"]: item for item in derived_stems}
     review.source_artifacts = source_artifacts
     review.audio_usability_status = "VERIFIED" if all_context_ok else "BLOCKED_AUDIO_SIGNAL"
     review.timeline_mapping_status = "VERIFIED_SOURCE_LOCAL_ORIGIN" if source_origin_qn == 0.0 and source_end_qn > 0 else "REVIEW_REQUIRED"
@@ -268,7 +437,8 @@ def repair_harmonic_review_audio(
     referenced = [artifact.filename for item in review.review_windows for artifact in item.audio_artifacts.values() if artifact.available and artifact.filename]
     browser_paths_valid = all((output_dir / filename).is_file() for filename in referenced)
     files_valid = all(Path(row["path"]).is_file() for row in audit_rows if row.get("path"))
-    (output_dir / "harmonic_review_audio_audit_v1.json").write_text(json.dumps({"source": review.source_artifacts.get("reference_audio"), "rows": audit_rows, "files_valid": files_valid, "browser_paths_valid": browser_paths_valid, "html_path": str(html_path), "root_cause": root_cause, "root_cause_detail": root_cause_detail, "human_audibility": "PENDING"}, indent=2), encoding="utf-8")
+    expected_players = len(review.review_windows) * 5
+    (output_dir / "harmonic_review_audio_audit_v1.json").write_text(json.dumps({"source": review.source_artifacts.get("reference_audio"), "rows": audit_rows, "files_valid": files_valid, "browser_paths_valid": browser_paths_valid, "expected_players": expected_players, "resolved_players": len(referenced), "html_path": str(html_path), "root_cause": root_cause, "root_cause_detail": root_cause_detail, "human_audibility": "PENDING"}, indent=2), encoding="utf-8")
     return review
 
 
@@ -424,8 +594,10 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 
     labels = {
         "context": "Contexto completo",
+        "drums": "Batería",
         "other": "Otros / armónicos",
         "bass": "Bajo",
+        "vocals": "Voces",
         "analysis_region": "Región analizada",
         "listening_context": "Contexto para escuchar",
         "selected": "Hipótesis seleccionada",
@@ -502,13 +674,19 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 
     def player(item: Any, role: str) -> str:
         artifact = item.audio_artifacts.get(role)
-        if not artifact or not artifact.available or not artifact.filename:
-            return "<em>No disponible</em>"
+        if not artifact or not artifact.filename:
+            return "<em>Audio de revisión no disponible</em>"
+        if not artifact.available:
+            return "<em>Audio de revisión no disponible</em>"
+        if artifact.has_signal is False:
+            silence = "<small class='silence'>Silencio en esta sección</small>"
+        else:
+            silence = ""
         if artifact.peak_dbfs is not None and artifact.rms_dbfs is not None and artifact.channel_balance_db is not None:
             stats = f"Pico {artifact.peak_dbfs:.2f} dBFS · RMS {artifact.rms_dbfs:.2f} dBFS · balance L/R {artifact.channel_balance_db:.2f} dB"
         else:
             stats = "Datos técnicos no disponibles"
-        return f'<audio controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>'
+        return f'<audio controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>{silence}'
 
     review_payload = {
         "analysis_artifact_id": review.analysis_artifact_id,
@@ -567,8 +745,10 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 {f'<p class="warning"><b>{labels["contradictions"]}:</b> Hay señales que también lo contradicen.</p>' if contradictions else ''}</div>
 <h3>Escuchar</h3>
 <div class="audio-card"><b>1. {labels["context"]}</b>{player(item, "context")}</div>
-<div class="audio-card"><b>2. {labels["other"]}</b>{player(item, "other")}</div>
+<div class="audio-card"><b>2. {labels["drums"]}</b>{player(item, "drums")}</div>
 <div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>
+<div class="audio-card"><b>4. {labels["vocals"]}</b>{player(item, "vocals")}</div>
+<div class="audio-card"><b>5. {labels["other"]}</b>{player(item, "other")}</div>
 <details><summary>Ver detalles técnicos</summary>
 <p><b>{labels["listening_context"]}:</b> {html.escape(human_region(item.listening_region))}</p>
 <p><b>Posición musical (QN):</b> {html.escape(technical_region(item.listening_region))}</p><p class="technical-inline">QN = posición medida en pulsos de negra.</p>
@@ -597,6 +777,28 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     resolved_count = sum(1 for item in review.review_windows if item.selected_hypothesis is not None)
     unresolved_count = window_count - resolved_count
     pending_count = sum(1 for item in review.review_windows if item.human_verdict == "PENDING")
+    inventory = review.source_artifacts.get("project_track_inventory", {})
+    project_tracks = list(inventory.get("tracks") or []) if isinstance(inventory, dict) else []
+    derived_stems = list(inventory.get("derived_stems") or []) if isinstance(inventory, dict) else []
+    midi_only_count = sum(1 for track in project_tracks if track.get("review_audio_status") == "MIDI_ONLY")
+    no_audio_count = sum(1 for track in project_tracks if track.get("review_audio_status") == "NO_REVIEW_AUDIO")
+    project_audio_count = sum(1 for track in project_tracks if track.get("audio_artifact_available"))
+
+    def track_status(track: dict[str, Any]) -> str:
+        if track.get("audio_artifact_available"):
+            return "Audio de revisión disponible"
+        if track.get("review_audio_status") == "MIDI_ONLY":
+            return "Sólo MIDI · audio de revisión no disponible"
+        return "Audio de revisión no disponible"
+
+    track_rows = "".join(
+        f'<li><b>{html.escape(str(track.get("display_name") or "Sin nombre"))}</b> <span class="technical-inline">{html.escape(track_status(track))}</span><details><summary>Ver información de pista</summary><pre>{escaped_json(track)}</pre></details></li>'
+        for track in project_tracks
+    ) or "<li>Inventario de pistas no disponible.</li>"
+    stem_rows = "".join(
+        f'<li><b>{html.escape(str(stem.get("role") or "STEM"))}</b> <span class="technical-inline">{("Disponible" if stem.get("available") else "No disponible")}</span></li>'
+        for stem in derived_stems
+    ) or "<li>No hay inventario de stems derivados.</li>"
     header = (
         "<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Revisión armónica humana — audio reparado</title>"
         "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}h4{margin-bottom:.25rem;color:#d9def0}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.summary{background:#20242c}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.audio-card{padding:.65rem .8rem;margin:.5rem 0;background:#1d2027;border-radius:8px}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}.technical-inline,.technical-value{color:#9aa3b5;font-size:.88em}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}.warning{color:#f3c77b}</style></head><body>"
@@ -604,6 +806,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "<p>Escuchá primero <b>CONTEXTO COMPLETO</b>.</p><p>Después compará lo que escuchás con la hipótesis seleccionada. Usá <b>OTROS</b> y <b>BAJO</b> sólo si necesitás aislar elementos. No hace falta identificar el acorde desde cero: decidí si la interpretación del sistema resulta razonable.</p>"
         "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button> <button type='button' id='clear-review'>Borrar evaluación local</button> <span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
         f"<section class='summary'><h2>Resumen de la revisión</h2><p><b>Ventanas:</b> {window_count} · <b>Resueltas por el sistema:</b> {resolved_count} · <b>Sin resolver:</b> {unresolved_count} · <b>Tonalidad global:</b> {html.escape(tonality_status)} · <b>Evaluaciones pendientes:</b> {pending_count}</p></section>"
+        f"<section class='summary'><h2>Proyecto</h2><p><b>{len(project_tracks)} pistas reales</b> · {project_audio_count} con audio de revisión · {midi_only_count} sólo MIDI · {no_audio_count} sin audio de revisión.</p><details open><summary>Pistas del proyecto</summary><ul>{track_rows}</ul></details><details open><summary>Stems derivados</summary><ul>{stem_rows}</ul></details></section>"
         "<section><h2>Estado del paquete</h2>"
         f"<p><b>Usabilidad del audio:</b> {html.escape(review.audio_usability_status)} · <b>Lectura temporal:</b> {html.escape(review.timeline_mapping_status)} · <b>Audibilidad humana:</b> Pendiente</p>"
         f"<details><summary>Ver detalles técnicos de la fuente</summary><p><b>Origen:</b> {html.escape(str(source.get('source_role', 'No disponible')))}</p><p><b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p><pre>{escaped_json(source)}</pre></details>"
