@@ -688,6 +688,33 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             stats = "Datos técnicos no disponibles"
         return f'<audio controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>{silence}'
 
+    track_manifest = review.source_artifacts.get("track_review_audio_manifest", {})
+    track_rows_for_review = list(track_manifest.get("tracks") or []) if isinstance(track_manifest, dict) else []
+
+    def track_players(item: Any) -> str:
+        """Render verified individual-track players for this window."""
+        if not track_rows_for_review:
+            return ""
+        rows: list[str] = []
+        for track in track_rows_for_review:
+            artifact = (track.get("window_artifacts") or {}).get(item.window_id) or {}
+            name = str(track.get("display_name") or "Pista sin nombre")
+            status = str(track.get("status") or "UNAVAILABLE")
+            if artifact.get("available") and artifact.get("filename"):
+                stats = ""
+                if artifact.get("peak_dbfs") is not None and artifact.get("rms_dbfs") is not None:
+                    stats = f"<small>Pico {float(artifact['peak_dbfs']):.2f} dBFS Â· RMS {float(artifact['rms_dbfs']):.2f} dBFS</small>"
+                rows.append(
+                    f"<div class='track-player'><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span>"
+                    f"<audio controls preload='none' aria-label='Pista {html.escape(name)}' src='./{html.escape(str(artifact['filename']))}'></audio>{stats}</div>"
+                )
+            else:
+                rows.append(
+                    f"<div class='track-player'><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span>"
+                    "<small class='silence'>Audio individual no disponible para esta región</small></div>"
+                )
+        return "<details class='track-review'><summary>Pistas individuales del proyecto</summary>" + "".join(rows) + "</details>"
+
     review_payload = {
         "analysis_artifact_id": review.analysis_artifact_id,
         "reference_id": review.reference_id,
@@ -749,6 +776,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 <div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>
 <div class="audio-card"><b>4. {labels["vocals"]}</b>{player(item, "vocals")}</div>
 <div class="audio-card"><b>5. {labels["other"]}</b>{player(item, "other")}</div>
+{track_players(item)}
 <details><summary>Ver detalles técnicos</summary>
 <p><b>{labels["listening_context"]}:</b> {html.escape(human_region(item.listening_region))}</p>
 <p><b>Posición musical (QN):</b> {html.escape(technical_region(item.listening_region))}</p><p class="technical-inline">QN = posición medida en pulsos de negra.</p>
