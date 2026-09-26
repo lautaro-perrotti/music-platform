@@ -257,7 +257,7 @@ def repair_harmonic_review_audio(
     review.source_artifacts = source_artifacts
     review.audio_usability_status = "VERIFIED" if all_context_ok else "BLOCKED_AUDIO_SIGNAL"
     review.timeline_mapping_status = "VERIFIED_SOURCE_LOCAL_ORIGIN" if source_origin_qn == 0.0 and source_end_qn > 0 else "REVIEW_REQUIRED"
-    root_cause = "OTHER"
+    root_cause = "CHANNEL_IMBALANCE"
     root_cause_detail = "The immutable reference and previous review slices had a measured left/right imbalance of approximately 227 dB: useful signal was on L and R was effectively silent. The previous global peak/RMS gate did not detect this. Review copies are now centered and duplicated to both channels."
     review.provenance = {**review.provenance, "audio_fix_id": "harmonic-review-audio-usability-fix-v1", "source_classification": source_classification, "source_capture_start_qn": source_origin_qn, "source_capture_end_qn": source_end_qn, "tempo_bpm": tempo_bpm, "source_local_coordinate_rule": "source_local_qn = project_qn - source_capture_start_qn", "target_peak_dbfs": target_peak_dbfs, "root_cause": root_cause, "root_cause_detail": root_cause_detail, "audit_rows": audit_rows, "model_api_calls": 0, "musical_writes": 0, "ableton_mutations": 0}
     output_dir.mkdir(parents=True, exist_ok=True)
