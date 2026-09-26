@@ -35,6 +35,7 @@ reproducible bug.
 | `ADVANCED_PERCEPTION_V1` | VERIFIED / FROZEN | Local Analyzer plus real optional LAION CLAP audio/text embeddings and EvidenceGraph fusion are read-only. Semantic-ear remains an explicit unavailable limitation. |
 | `BASS_MUSICAL_MODEL_V1` | VERIFIED / FROZEN | Deterministic symbolic model over reconciled authoritative MIDI: pitch material, intervals, rhythmic cells, motifs, phrases, and explicit bass-only tonal abstention. No writes or model calls. |
 | `HARMONIC_UNDERSTANDING_V1` | IMPLEMENTED / READ-ONLY | Fuses authoritative bass MIDI with optional OTHER/MUSIC-stem chroma into ranked chord hypotheses, harmonic rhythm, tonal candidates, and bass-role relationships. Stem purity is not promoted to ground truth; ambiguous windows and global tonality abstain. |
+| `HARMONIC_HUMAN_REVIEW_PACKAGE_V1` | READY / AWAITING HUMAN | Reuses the exact harmonic artifact, verifies source hashes, produces 8 deterministic master/OTHER/BASS listening windows plus typed evidence and static review files. All verdicts remain `PENDING`; no musical correctness is self-certified. |
 
 ## Runtime / agent
 

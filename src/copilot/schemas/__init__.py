@@ -11,6 +11,7 @@ from copilot.schemas.session import (
 from copilot.schemas.transaction import AgentTransaction, TransactionAction, TransactionStatus
 from copilot.schemas.musical_understanding import MusicalUnderstanding
 from copilot.schemas.harmonic_understanding import HarmonicUnderstanding
+from copilot.schemas.harmonic_human_review import HarmonicHumanReview
 
 __all__ = [
     "AgentTransaction",
@@ -28,4 +29,5 @@ __all__ = [
     "TransportState",
     "MusicalUnderstanding",
     "HarmonicUnderstanding",
+    "HarmonicHumanReview",
 ]
