@@ -428,7 +428,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "bass": "Bajo",
         "analysis_region": "Región analizada",
         "listening_context": "Contexto para escuchar",
-        "selected": "Acorde más probable",
+        "selected": "Hipótesis seleccionada",
         "runner_up": "Segunda opción",
         "alternatives": "Otras posibilidades",
         "observed": "Notas detectadas",
@@ -440,13 +440,14 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "limitations": "Limitaciones",
         "verdict": "Tu evaluación",
         "tonality": "Tonalidad general",
+        "relationship": "Relación bajo ↔ armonía",
     }
     verdict_labels = {
         "PENDING": "Pendiente",
-        "ACCEPT": "Correcto / razonable",
-        "PLAUSIBLE_AMBIGUOUS": "Posible, pero ambiguo",
+        "ACCEPT": "Aceptar",
+        "PLAUSIBLE_AMBIGUOUS": "Plausible pero ambiguo",
         "WRONG": "Incorrecto",
-        "UNKNOWN_CORRECT": "Está bien que no decida",
+        "UNKNOWN_CORRECT": "Correcto dejarlo sin resolver",
         "UNKNOWN_SHOULD_RESOLVE": "Debería poder decidir",
     }
 
@@ -464,6 +465,34 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 
     def technical_value(value: Any) -> str:
         return "No disponible" if value is None or value == "" else str(value)
+
+    note_names = {
+        "C": "Do", "C#": "Do#", "D": "Re", "D#": "Re#", "E": "Mi", "F": "Fa",
+        "F#": "Fa#", "G": "Sol", "G#": "Sol#", "A": "La", "A#": "La#", "B": "Si",
+    }
+
+    def display_note(value: Any) -> str:
+        canonical = str(value)
+        return f"{canonical} ({note_names[canonical]})" if canonical in note_names else canonical
+
+    def display_notes(values: list[Any]) -> str:
+        return " · ".join(display_note(value) for value in dict.fromkeys(str(value) for value in values)) or "No disponibles"
+
+    def display_chord(hypothesis: Any) -> str:
+        if hypothesis is None:
+            return "No resuelto"
+        root = display_note(hypothesis.root)
+        quality = {
+            "major": "mayor",
+            "minor": "menor",
+            "major7": "maj7",
+            "minor7": "m7",
+            "dominant7": "7",
+            "diminished": "disminuido",
+            "sus2": "sus2",
+            "sus4": "sus4",
+        }.get(hypothesis.quality, hypothesis.quality)
+        return f"{root} {quality}"
 
     def human_region(value: Any) -> str:
         return f"Compases {value.start_bar:g}–{value.end_bar:g}"
@@ -497,8 +526,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     for item in review.review_windows:
         selected = item.selected_hypothesis
         runner = item.alternatives[0] if item.alternatives else None
-        selected_label = selected.label if selected else "No se puede determinar"
-        runner_label = runner.label if runner else "No hay segunda opción"
+        selected_label = display_chord(selected)
+        runner_label = display_chord(runner) if runner else "No hay segunda opción"
         selected_confidence = selected.confidence if selected else None
         contradictions = list(selected.contradictions if selected else [])
         contradictions.extend(c for alternative in item.alternatives for c in alternative.contradictions if c not in contradictions)
@@ -512,13 +541,13 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             for event in item.bass_events
             if event.get("pitch_class") or event.get("midi_note") is not None
         ]
-        bass_notes_display = " · ".join(dict.fromkeys(bass_notes)) or "No disponibles"
+        bass_notes_display = display_notes(bass_notes)
         support_lines: list[str] = []
         if selected and selected.observed_tones:
-            support_lines.append(f"Notas compatibles observadas: {html.escape(', '.join(selected.observed_tones))}")
+            support_lines.append(f"Notas compatibles observadas: {html.escape(display_notes(selected.observed_tones))}")
         if item.bass_harmony.counts:
             counts = ", ".join(f"{key} ({value})" for key, value in sorted(item.bass_harmony.counts.items()))
-            support_lines.append(f"Relación con el bajo registrada: {html.escape(counts)}")
+            support_lines.append(f"{labels['relationship']}: {html.escape(counts)}")
         if selected and selected.missing_or_inferred:
             support_lines.append(f"Notas inferidas o ausentes: {html.escape(', '.join(selected.missing_or_inferred))}")
         if not support_lines:
@@ -526,13 +555,13 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         support_html = "".join(f"<li>{line}</li>" for line in support_lines)
         blocks.append(
             f'''<section class="window" data-window-section="{html.escape(item.window_id)}">
-<h2>{html.escape(item.window_id)} · {html.escape(human_region(item.analysis_region))}</h2>
+<h2>VENTANA {html.escape(item.window_id.rsplit('_', 1)[-1].lstrip('0') or '0')}</h2>
 <p><b>{labels["analysis_region"]}:</b> {html.escape(human_region(item.analysis_region))}</p>
 <p class="technical-inline">{html.escape(technical_region(item.analysis_region))}</p>
 <div class="hypothesis"><p><b>{labels["selected"]}:</b> {html.escape(selected_label)}</p>
 <p><b>{labels["runner_up"]}:</b> {html.escape(runner_label)}</p>
 <p><b>{labels["confidence"]}:</b> {confidence_label(selected_confidence)} <span class="technical-value">{html.escape(technical_value(selected_confidence))}</span></p>
-<p><b>{labels["observed"]}:</b> {html.escape(" · ".join(item.observed_pitch_classes) or "No disponibles")}</p>
+<p><b>{labels["observed"]}:</b> {html.escape(display_notes(item.observed_pitch_classes))}</p>
 <p><b>{labels["bass_notes"]}:</b> {html.escape(bass_notes_display)}</p>
 <h4>¿Por qué se eligió este acorde?</h4><ul>{support_html}</ul>
 {f'<p class="warning"><b>{labels["contradictions"]}:</b> Hay señales que también lo contradicen.</p>' if contradictions else ''}</div>
@@ -542,7 +571,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 <div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>
 <details><summary>Ver detalles técnicos</summary>
 <p><b>{labels["listening_context"]}:</b> {html.escape(human_region(item.listening_region))}</p>
-<p><b>Región exacta:</b> {html.escape(technical_region(item.listening_region))}</p>
+<p><b>Posición musical (QN):</b> {html.escape(technical_region(item.listening_region))}</p><p class="technical-inline">QN = posición medida en pulsos de negra.</p>
 <p><b>{labels["confidence"]} numérica:</b> {html.escape(technical_value(selected_confidence))} · <b>Diferencia de puntaje:</b> {html.escape(technical_value(item.selected_runner_up_score_delta))}</p>
 <details><summary>{labels["alternatives"]}</summary><pre>{escaped_json(runner.model_dump(mode="json") if runner else None)}</pre></details>
 <details><summary>{labels["support"]}</summary><pre>{escaped_json(selected.model_dump(mode="json") if selected else None)}</pre></details>
@@ -564,23 +593,27 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "limitations": review.global_tonality_limitations,
     }
     tonality_status = {"INSUFFICIENT_EVIDENCE": "No hay evidencia suficiente", "UNKNOWN": "No se puede determinar"}.get(review.global_tonality_status, review.global_tonality_status)
+    window_count = len(review.review_windows)
+    resolved_count = sum(1 for item in review.review_windows if item.selected_hypothesis is not None)
+    unresolved_count = window_count - resolved_count
+    pending_count = sum(1 for item in review.review_windows if item.human_verdict == "PENDING")
     header = (
         "<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Revisión armónica humana — audio reparado</title>"
-        "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}h4{margin-bottom:.25rem;color:#d9def0}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.audio-card{padding:.65rem .8rem;margin:.5rem 0;background:#1d2027;border-radius:8px}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}.technical-inline,.technical-value{color:#9aa3b5;font-size:.88em}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}.warning{color:#f3c77b}</style></head><body>"
+        "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}h4{margin-bottom:.25rem;color:#d9def0}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.summary{background:#20242c}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.audio-card{padding:.65rem .8rem;margin:.5rem 0;background:#1d2027;border-radius:8px}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}.technical-inline,.technical-value{color:#9aa3b5;font-size:.88em}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}.warning{color:#f3c77b}</style></head><body>"
         f'<script type="application/json" id="review-data">{embedded_json}</script><h1>Revisión armónica humana</h1>'
-        "<p>Escuchá primero el contexto completo. La corrección musical todavía no está certificada.</p>"
+        "<p>Escuchá primero <b>CONTEXTO COMPLETO</b>.</p><p>Después compará lo que escuchás con la hipótesis seleccionada. Usá <b>OTROS</b> y <b>BAJO</b> sólo si necesitás aislar elementos. No hace falta identificar el acorde desde cero: decidí si la interpretación del sistema resulta razonable.</p>"
         "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button> <button type='button' id='clear-review'>Borrar evaluación local</button> <span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
+        f"<section class='summary'><h2>Resumen de la revisión</h2><p><b>Ventanas:</b> {window_count} · <b>Resueltas por el sistema:</b> {resolved_count} · <b>Sin resolver:</b> {unresolved_count} · <b>Tonalidad global:</b> {html.escape(tonality_status)} · <b>Evaluaciones pendientes:</b> {pending_count}</p></section>"
         "<section><h2>Estado del paquete</h2>"
         f"<p><b>Usabilidad del audio:</b> {html.escape(review.audio_usability_status)} · <b>Lectura temporal:</b> {html.escape(review.timeline_mapping_status)} · <b>Audibilidad humana:</b> Pendiente</p>"
-        f"<p><b>Fuente:</b> {html.escape(str(source.get('source_role', 'No disponible')))} · <b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p>"
-        f"<details><summary>Ver auditoría técnica de la fuente</summary><pre>{escaped_json(source)}</pre></details>"
+        f"<details><summary>Ver detalles técnicos de la fuente</summary><p><b>Origen:</b> {html.escape(str(source.get('source_role', 'No disponible')))}</p><p><b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p><pre>{escaped_json(source)}</pre></details>"
         f"<details><summary>{labels['tonality']}: {html.escape(tonality_status)}</summary><pre>{escaped_json(global_tonality)}</pre></details></section>"
     )
     footer = '''<p class="technical-value">MODEL/API CALLS: 0 · MUSICAL WRITES: 0 · ABLETON MUTATIONS: 0</p>
 <script>
 const REVIEW_DATA = JSON.parse(document.getElementById('review-data').textContent);
 const STORAGE_KEY = 'harmonic-human-review:' + REVIEW_DATA.analysis_artifact_id + ':' + REVIEW_DATA.source_hash;
-const VERDICT_LABELS = {PENDING: 'Pendiente', ACCEPT: 'Correcto / razonable', PLAUSIBLE_AMBIGUOUS: 'Posible, pero ambiguo', WRONG: 'Incorrecto', UNKNOWN_CORRECT: 'Está bien que no decida', UNKNOWN_SHOULD_RESOLVE: 'Debería poder decidir'};
+const VERDICT_LABELS = {PENDING: 'Pendiente', ACCEPT: 'Aceptar', PLAUSIBLE_AMBIGUOUS: 'Plausible pero ambiguo', WRONG: 'Incorrecto', UNKNOWN_CORRECT: 'Correcto dejarlo sin resolver', UNKNOWN_SHOULD_RESOLVE: 'Debería poder decidir'};
 let reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: item.human_verdict || 'PENDING', notes: item.human_notes || ''}]));
 function setStatus(message) { document.getElementById('save-status').textContent = message; }
 function persist() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reviewState)); setStatus('Guardado localmente en este navegador.'); } catch (error) { setStatus('No se pudo usar el almacenamiento local; exportá la evaluación.'); } }

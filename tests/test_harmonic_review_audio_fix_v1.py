@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from copilot.audio.harmonic_review_audio_fix_v1 import repair_harmonic_review_audio
+from copilot.audio.harmonic_review_audio_fix_v1 import render_repaired_html, repair_harmonic_review_audio
 from copilot.schemas.harmonic_human_review import (
     BassRelationshipSummary,
     HarmonicHumanReview,
@@ -51,9 +51,48 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     assert "UNKNOWN_SHOULD_RESOLVE" in html
     assert "¿Por qué se eligió este acorde?" in html
     assert "Contexto completo" in html
-    assert "Correcto / razonable" in html
+    assert "Aceptar" in html
+    assert "Resumen de la revisión" in html
+    assert "Ventanas:" in html
+    assert "No resuelto" in html
     assert 'data-verdict="ACCEPT"' in html
     assert "human_verdict: item.verdict || 'PENDING'" in html
     assert "lang='es'" in html
     assert "PENDING" in html
     assert (output / "harmonic_sanity_check_v1.html").is_file()
+
+
+def test_spanish_presentation_does_not_translate_machine_values() -> None:
+    region = ReviewRegion(start_qn=0.0, end_qn=4.0, start_bar=1.0, end_bar=2.0, start_seconds=0.0, end_seconds=2.0)
+    review = HarmonicHumanReview(
+        analysis_artifact_id="fixture",
+        reference_id="fixture-reference",
+        source_hash="fixture-source",
+        review_windows=[
+            HarmonicHumanReviewWindow(
+                window_id="harmonic_window_01",
+                analysis_region=region,
+                listening_region=region,
+                selected_hypothesis={
+                    "label": "F#m",
+                    "root": "F#",
+                    "quality": "minor",
+                    "score": 0.9,
+                    "confidence": 0.8,
+                    "observed_tones": ["F#", "A"],
+                },
+                observed_pitch_classes=["F#", "A"],
+                bass_harmony=BassRelationshipSummary(event_count=0),
+            )
+        ],
+        global_tonality_status="INSUFFICIENT_EVIDENCE",
+    )
+
+    html = render_repaired_html(review)
+
+    assert "Hipótesis seleccionada" in html
+    assert "F# (Fa#) menor" in html
+    assert "A (La)" in html
+    assert 'data-verdict="ACCEPT"' in html
+    assert "human_verdict: item.verdict || 'PENDING'" in html
+    assert "F#m" in html
