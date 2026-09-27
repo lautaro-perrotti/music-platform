@@ -71,8 +71,19 @@ from copilot.studio.contracts import (
     ProduceCapability,
     ProduceRequest,
     ProjectRecord,
+    PersistenceStatus,
+    MusicalDecision,
     VariationRecord,
     VersionRecord,
+)
+from copilot.studio.persistence import (
+    MUSICAL_DECISION_DISCARDED,
+    MUSICAL_DECISION_KEPT,
+    MUSICAL_DECISION_PENDING,
+    PERSISTENCE_CANDIDATE_PENDING,
+    candidate_persistence_state,
+    persist_working_copy,
+    reconciled_after_rollback,
 )
 from copilot.studio.store import StudioStore, utc_now
 from copilot.studio.simulation import SimulatedMusicProvider
@@ -467,7 +478,8 @@ class StudioService:
         ("COPILOT_OWNED_TRACK_POLICY", CapabilityState.REAL, "new deterministic Copilot Variation track plus persisted ownership registry"),
         ("VARIATION_PREVIEW_CAPTURE", CapabilityState.REAL, "created Arrangement clip -> isolated capture; READY requires measured signal"),
         ("STUDIO_PRODUCER_BRIDGE", CapabilityState.REAL, "POST /api/projects/{id}/produce calls the real Core compiler/executor"),
-        ("KEEP_VARIATION", CapabilityState.REAL, "keep persists; owned discard rollback requires the originating Studio process"),
+        ("WORKING_COPY_PERSISTENCE", CapabilityState.PARTIAL, "candidate state is persisted and disk evidence is verified; current Ableton bridge does not advertise session.save"),
+        ("KEEP_VARIATION", CapabilityState.PARTIAL, "musical KEEP is separate from SafeWrite; durable working-copy save is unavailable until the bridge advertises session.save"),
         ("FOCUS_CLIP", CapabilityState.PARTIAL, "select_clip / set_detail_clip only via untyped bridge_command"),
     )
 
@@ -475,7 +487,7 @@ class StudioService:
         "ABLETON_SESSION_READINESS", "TRACK_REGION_CAPTURE", "SAFE_WRITE_KEEP_ROLLBACK",
         "SINGLE_VARIATION_PLAN", "WRITE_MIDI_CLIP", "MULTI_ACTION_PLAN_COMPILE",
         "COPILOT_OWNED_TRACK_POLICY", "VARIATION_PREVIEW_CAPTURE",
-        "STUDIO_PRODUCER_BRIDGE", "KEEP_VARIATION",
+        "STUDIO_PRODUCER_BRIDGE",
     })
 
     def produce_capabilities(self) -> dict[str, Any]:
@@ -1036,6 +1048,9 @@ class StudioService:
                 request_id=variation_id,
                 index=1,
                 status="READY",
+                musical_decision=MUSICAL_DECISION_PENDING,
+                persistence_status=PERSISTENCE_CANDIDATE_PENDING,
+                persistence=candidate_persistence_state(session, live_after),
                 ableton_track_ref=first_role.stable_id,
                 ableton_clip_ref=f"{first_role.stable_id}:clip:{int(first_pattern.arguments['clip_index'])}",
                 preview={
@@ -1104,6 +1119,7 @@ class StudioService:
                 "variations",
                 [*self.store.get_state(project_id, "variations", []), record.model_dump(mode="json")],
             )
+            self.store.set_state(project_id, "project_persistence", record.persistence)
             self.store.add_activity(
                 project_id,
                 "variation.ready",
@@ -1327,6 +1343,9 @@ class StudioService:
                 request_id=variation_id,
                 index=variation_index,
                 status="READY",
+                musical_decision=MUSICAL_DECISION_PENDING,
+                persistence_status=PERSISTENCE_CANDIDATE_PENDING,
+                persistence=candidate_persistence_state(session, live_after),
                 ableton_track_ref=track.stable_id,
                 ableton_clip_ref=clip_ref,
                 preview={"artifact_id": artifact_id, "bars": bars, "duration_s": artifact.duration_s, "capture_region_id": f"region_{variation_id}", "signal_status": measured["signal_status"], "rms_dbfs": measured["rms_dbfs"]},
@@ -1371,6 +1390,7 @@ class StudioService:
                 created_at=utc_now(),
             )
             self.store.set_state(project_id, "variations", [*self.store.get_state(project_id, "variations", []), record.model_dump(mode="json")])
+            self.store.set_state(project_id, "project_persistence", record.persistence)
             self.store.add_activity(project_id, "variation.ready", "Real Ableton bass variation captured for review", {"variation_id": variation_id, "musical_writes": result.musical_writes, "write_authority": "ProductionCompiler->SafeWriteExecutor"})
             self._variation_runtime[variation_id] = (daw, executor, (result, compiled.intent))
             return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None), "status": "READY", "musical_writes": result.musical_writes, "write_authority": "ProductionCompiler->SafeWriteExecutor"}
@@ -1385,7 +1405,11 @@ class StudioService:
     def list_variations(self, project_id: str) -> dict[str, Any]:
         self.get_project(project_id)
         variations = [VariationRecord.model_validate(v) for v in self.store.get_state(project_id, "variations", [])]
-        return {"variations": [dict(v.model_dump(mode="json"), preview_url=v.preview.audio_url if v.preview else None) for v in variations]}
+        result: dict[str, Any] = {"variations": [dict(v.model_dump(mode="json"), preview_url=v.preview.audio_url if v.preview else None) for v in variations]}
+        persistence = self.store.get_state(project_id, "project_persistence", None)
+        if persistence is not None:
+            result["project_persistence"] = persistence
+        return result
 
     def variation_action(self, variation_id: str, action: str) -> dict[str, Any]:
         if action not in {"keep", "open", "discard"}:
@@ -1407,9 +1431,65 @@ class StudioService:
         if action == "keep":
             if record.status not in {"READY", "KEPT"}:
                 raise ValueError("VARIATION_NOT_REVIEWABLE")
-            record = record.model_copy(update={"status": "KEPT"})
+            if record.status == "KEPT" and record.musical_decision == MUSICAL_DECISION_KEPT and record.persistence_status == "IN_SYNC":
+                return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None), "status": "KEPT"}
+            runtime = self._variation_runtime.get(variation_id)
+            if runtime is None:
+                raise ProduceExecutionBlocked(
+                    "VARIATION_RUNTIME_UNAVAILABLE",
+                    detail="KEEP requires the originating Studio process so Core can verify the live identity before saving; no save was attempted.",
+                )
+            daw, _executor, pair = runtime
+            result, _intent = pair
+            if not result.ok or result.journal_terminal_state != "VERIFIED":
+                raise ProduceExecutionBlocked(
+                    "KEEP_SAFE_WRITE_NOT_VERIFIED",
+                    detail="Musical KEEP requires a verified SafeWrite transaction before disk persistence.",
+                    evidence=result.to_dict(),
+                )
+            live = daw.snapshot()
+            if not live.project_identity:
+                attach_tokens(live, path=live.project_path, name=live.project_name)
+            expected_identity = str((record.persistence or {}).get("project_identity") or live.project_identity)
+            if not expected_identity or live.project_identity != expected_identity:
+                raise ProduceExecutionBlocked(
+                    "KEEP_PROJECT_MISMATCH",
+                    detail="The live project identity no longer matches the candidate identity; no save was attempted.",
+                    evidence={
+                        "expected_project_identity": expected_identity,
+                        "actual_project_identity": live.project_identity,
+                    },
+                )
+            persistence = persist_working_copy(
+                daw,
+                live,
+                expected_project_identity=expected_identity,
+            )
+            if not persistence.get("save_verified"):
+                record = record.model_copy(
+                    update={
+                        "persistence_status": PersistenceStatus.SAVE_FAILED,
+                        "persistence": persistence,
+                    }
+                )
+                rows = [record.model_dump(mode="json") if item.get("variation_id") == variation_id else item for item in self.store.get_state(project_id, "variations", [])]
+                self.store.set_state(project_id, "variations", rows)
+                self.store.set_state(project_id, "project_persistence", persistence)
+                self.store.add_activity(project_id, "variation.keep_blocked", "Musical KEEP was not persisted because the working-copy save boundary is unavailable or failed", {"variation_id": variation_id, "reason": persistence.get("reason")})
+                raise ProduceExecutionBlocked(
+                    "KEEP_PERSISTENCE_FAILED",
+                    detail=str(persistence.get("reason") or "working-copy save was not verified"),
+                    evidence=persistence,
+                )
+            record = record.model_copy(update={
+                "status": "KEPT",
+                "musical_decision": MusicalDecision.KEPT,
+                "persistence_status": PersistenceStatus.IN_SYNC,
+                "persistence": persistence,
+            })
             rows = [record.model_dump(mode="json") if item.get("variation_id") == variation_id else item for item in self.store.get_state(project_id, "variations", [])]
             self.store.set_state(project_id, "variations", rows)
+            self.store.set_state(project_id, "project_persistence", persistence)
             self.store.add_activity(project_id, "variation.kept", "Kept Copilot-owned Ableton variation", {"variation_id": variation_id})
             return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None), "status": "KEPT"}
         if record.status == "DISCARDED":
@@ -1422,9 +1502,23 @@ class StudioService:
         rollback_error = executor._rollback_applied(result, intent)
         if rollback_error:
             raise ProduceExecutionBlocked("VARIATION_ROLLBACK_FAILED", detail=rollback_error, evidence=result.to_dict())
-        record = record.model_copy(update={"status": "DISCARDED"})
+        try:
+            rollback_session = _daw.snapshot()
+        except Exception as exc:  # noqa: BLE001
+            raise ProduceExecutionBlocked("VARIATION_ROLLBACK_READBACK_FAILED", detail=str(exc)) from exc
+        persistence = reconciled_after_rollback(
+            rollback_session,
+            (record.persistence or {}).get("disk_before"),
+        )
+        record = record.model_copy(update={
+            "status": "DISCARDED",
+            "musical_decision": MusicalDecision.DISCARDED,
+            "persistence_status": PersistenceStatus(str(persistence.get("status", "UNKNOWN"))),
+            "persistence": persistence,
+        })
         rows = [record.model_dump(mode="json") if item.get("variation_id") == variation_id else item for item in self.store.get_state(project_id, "variations", [])]
         self.store.set_state(project_id, "variations", rows)
+        self.store.set_state(project_id, "project_persistence", persistence)
         self.store.add_activity(project_id, "variation.discarded", "Rolled back Copilot-owned Ableton variation", {"variation_id": variation_id})
         return {"variation": record.model_dump(mode="json"), "status": "DISCARDED", "rollback_verified": True}
 

@@ -103,6 +103,36 @@ class CapabilityState(StrEnum):
     MISSING = "MISSING"
 
 
+class MusicalDecision(StrEnum):
+    PENDING = "PENDING"
+    KEPT = "KEPT"
+    DISCARDED = "DISCARDED"
+
+
+class PersistenceStatus(StrEnum):
+    IN_SYNC = "IN_SYNC"
+    LIVE_DIRTY = "LIVE_DIRTY"
+    CANDIDATE_PENDING = "CANDIDATE_PENDING"
+    SAVE_IN_PROGRESS = "SAVE_IN_PROGRESS"
+    CHECKPOINTED = "CHECKPOINTED"
+    SAVE_FAILED = "SAVE_FAILED"
+    UNKNOWN = "UNKNOWN"
+
+
+class ProjectPersistenceState(BaseModel):
+    status: PersistenceStatus = PersistenceStatus.UNKNOWN
+    musical_decision: MusicalDecision = MusicalDecision.PENDING
+    project_path: str = ""
+    project_identity: str = ""
+    disk_before: dict[str, Any] = Field(default_factory=dict)
+    disk_after: dict[str, Any] = Field(default_factory=dict)
+    live_before: dict[str, Any] = Field(default_factory=dict)
+    live_after: dict[str, Any] = Field(default_factory=dict)
+    save_attempted: bool = False
+    save_verified: bool = False
+    reason: str = ""
+
+
 class ProduceCapability(BaseModel):
     name: str
     state: CapabilityState
@@ -128,6 +158,9 @@ class VariationRecord(BaseModel):
     request_id: str
     index: int
     status: str  # PLANNED | CREATING_IN_ABLETON | CAPTURING | READY | KEPT | DISCARDED | FAILED
+    musical_decision: MusicalDecision = MusicalDecision.PENDING
+    persistence_status: PersistenceStatus = PersistenceStatus.UNKNOWN
+    persistence: dict[str, Any] = Field(default_factory=dict)
     ableton_track_ref: str | None = None
     ableton_clip_ref: str | None = None
     preview: VariationPreview | None = None

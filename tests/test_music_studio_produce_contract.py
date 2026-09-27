@@ -78,7 +78,8 @@ def test_capability_report_certifies_only_the_one_variation_slice(tmp_path: Path
     assert report["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE"
     assert "VARIATION_PLANNER_N" not in report["missing"]
     real = {row["name"] for row in report["capabilities"] if row["state"] == "REAL"}
-    assert {"SINGLE_VARIATION_PLAN", "MULTI_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE", "KEEP_VARIATION"} <= real
+    assert {"SINGLE_VARIATION_PLAN", "MULTI_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE"} <= real
+    assert next(row for row in report["capabilities"] if row["name"] == "KEEP_VARIATION")["state"] == "PARTIAL"
 
 
 def test_generate_supports_bounded_multi_variation_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,8 +209,14 @@ def test_real_bridge_compiles_writes_captures_and_rolls_back_owned_material(tmp_
     assert trace and any(item["changed"] for item in trace)
     assert not all(item["direct_copy"] for item in trace)
 
-    kept = service.variation_action(variation["variation_id"], "keep")
-    assert kept["status"] == "KEPT"
+    # The mock adapter has no durable .als file.  Core must not confuse a
+    # verified SafeWrite transaction with a durable musical KEEP.
+    with pytest.raises(ProduceExecutionBlocked, match="KEEP_PERSISTENCE_FAILED"):
+        service.variation_action(variation["variation_id"], "keep")
+    pending = service.list_variations(project_id)["variations"][0]
+    assert pending["status"] == "READY"
+    assert pending["musical_decision"] == "PENDING"
+    assert pending["persistence_status"] == "SAVE_FAILED"
     discarded = service.variation_action(variation["variation_id"], "discard")
     assert discarded["rollback_verified"] is True
     assert daw.snapshot().tracks == []
@@ -308,6 +315,7 @@ def test_variation_preview_contract_uses_existing_artifact_route(tmp_path: Path)
     service.store.set_state(project_id, "variations", [record.model_dump(mode="json")])
     listed = service.list_variations(project_id)["variations"]
     assert listed[0]["preview_url"] == "/api/artifacts/artifact_abc/audio"
+    assert "project_persistence" not in service.list_variations(project_id)
     assert service.variation_action("variation_1", "open")["variation"]["variation_id"] == "variation_1"
 
 
