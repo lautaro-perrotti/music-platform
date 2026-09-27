@@ -7,6 +7,7 @@ import numpy as np
 import soundfile as sf
 
 from copilot.audio.track_level_review_audio_v1 import _generic_capture_preflight, attach_track_review_audio
+from copilot.audio.harmonic_review_audio_fix_v1 import _build_track_source_coverage
 from copilot.schemas.harmonic_human_review import (
     BassRelationshipSummary,
     HarmonicHumanReview,
@@ -157,3 +158,53 @@ def test_generic_preflight_waives_only_legacy_source_specific_checks() -> None:
         }
     )
     assert blocked["pass"] is False
+
+
+def test_source_coverage_separates_midi_audio_silence_and_identity() -> None:
+    inventory = {
+        "project_identity": "project-1",
+        "project_path": "working.als",
+        "tracks": [
+            {
+                "stable_track_ref": "als-track:1",
+                "display_name": "Bass",
+                "track_type": "MidiTrack",
+                "role_hint": "BASS",
+                "clip_content_available": True,
+                "midi_available": True,
+                "midi_events": [{"pitch": 36, "arrangement_start_qn": 0.0, "duration_qn": 1.0}],
+                "review_audio_identity": {"content_fingerprint": "bass-fp", "project_identity": "project-1"},
+            },
+            {
+                "stable_track_ref": "als-track:2",
+                "display_name": "Missing Audio",
+                "track_type": "AudioTrack",
+                "role_hint": None,
+                "clip_content_available": True,
+                "midi_available": False,
+                "midi_events": [],
+            },
+        ],
+    }
+    attached = [
+        {
+            "track_ref": {"content_fingerprint": "bass-fp", "project_identity": "project-1"},
+            "display_name": "Renamed Bass",
+            "track_kind": "midi",
+            "status": "HAS_SIGNAL",
+            "window_artifacts": {"w1": {"available": True, "filename": "bass.wav", "has_signal": True}},
+        },
+        {
+            "track_ref": {"content_fingerprint": "unrelated", "project_identity": "project-1"},
+            "display_name": "Bass",
+            "track_kind": "audio",
+            "status": "HAS_SIGNAL",
+            "window_artifacts": {},
+        },
+    ]
+    coverage = _build_track_source_coverage(inventory, attached, region_start_qn=0.0, region_end_qn=4.0)
+    assert coverage["summary"]["tracks_with_midi"] == 1
+    assert coverage["summary"]["tracks_with_both"] == 1
+    assert coverage["summary"]["unresolved"] == 1
+    assert coverage["tracks"][0]["midi_events"][0]["pitch"] == 36
+    assert coverage["tracks"][1]["audio_reason"] == "IDENTITY_UNRESOLVED"

@@ -129,7 +129,12 @@ def _track_role_hint(name: str, track_type: str) -> str | None:
     return None
 
 
-def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any]:
+def _build_project_track_inventory(
+    review: HarmonicHumanReview,
+    *,
+    region_start_qn: float | None = None,
+    region_end_qn: float | None = None,
+) -> dict[str, Any]:
     project_path, discovery_error = _find_project_als(review)
     if project_path is None:
         return {
@@ -146,11 +151,20 @@ def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any
         root = _load_als_root(project_path)
         parents = _parent_map(root)
         als_identity = identity_for_als_path(project_path)
+        if region_start_qn is None or region_end_qn is None:
+            region_start_qn = 0.0
+            region_end_qn = 1_000_000.0
         tracks: list[dict[str, Any]] = []
         for index, track in enumerate(node for node in root.iter() if _local(node.tag) in TRACK_TAGS):
             track_type = _local(track.tag)
             display_name = _track_locator_name(track) or f"{track_type} {index + 1}"
-            arrangement = read_arrangement_midi(root, track, parents, region_start=0.0, region_end=1_000_000.0)
+            arrangement = read_arrangement_midi(
+                root,
+                track,
+                parents,
+                region_start=float(region_start_qn),
+                region_end=float(region_end_qn),
+            )
             clips = list(arrangement.get("clips") or [])
             notes = list(arrangement.get("notes") or [])
             device_names, device_classes = _als_device_inventory(track)
@@ -167,6 +181,8 @@ def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any
                     "solo": None,
                     "clip_content_available": bool(clips),
                     "clip_count": len(clips),
+                    "arrangement_clips": clips,
+                    "midi_events": notes,
                     "midi_available": has_midi,
                     "midi_note_count": len(notes),
                     "audio_artifact_available": False,
@@ -182,6 +198,7 @@ def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any
             "project_identity": project_identity or als_identity,
             "als_identity": als_identity,
             "identity_match": project_identity is None or project_identity == als_identity,
+            "region": {"start_qn": float(region_start_qn), "end_qn": float(region_end_qn)},
             "tracks": tracks,
             "derived_stems": [],
         }
@@ -195,6 +212,182 @@ def _build_project_track_inventory(review: HarmonicHumanReview) -> dict[str, Any
         }
 
 
+def _track_category(track: dict[str, Any]) -> str:
+    """Classify topology without turning a display name into identity."""
+    track_type = str(track.get("track_type") or "")
+    role_hint = str(track.get("role_hint") or "")
+    display_name = str(track.get("display_name") or "").casefold()
+    if track_type == "ReturnTrack":
+        return "RETURN"
+    if role_hint == "CAPTURE_HOST" or "copilot" in display_name or display_name == "ai test":
+        return "COPILOT_INFRASTRUCTURE"
+    if track_type == "GroupTrack":
+        return "UTILITY"
+    if track_type in {"MidiTrack", "AudioTrack"}:
+        return "MUSICAL"
+    return "UNKNOWN"
+
+
+def _identity_match_score(track: dict[str, Any], capture: dict[str, Any], project_identity: str | None) -> int:
+    ref = capture.get("track_ref") or {}
+    if not isinstance(ref, dict):
+        return -1
+    if project_identity and ref.get("project_identity") not in {None, project_identity}:
+        return -1
+    persisted = track.get("review_audio_identity") or {}
+    if isinstance(persisted, dict) and persisted:
+        if ref.get("target_state_token") and ref.get("target_state_token") == persisted.get("target_state_token"):
+            return 100
+        if ref.get("content_fingerprint") and ref.get("content_fingerprint") == persisted.get("content_fingerprint"):
+            return 100
+    score = 0
+    expected_role = {"midi": "MidiTrack", "audio": "AudioTrack", "return": "ReturnTrack", "group": "GroupTrack"}.get(str(capture.get("track_kind") or ""))
+    if expected_role and track.get("track_type") == expected_role:
+        score += 2
+    for field in ("clip_names", "note_counts", "grouped"):
+        expected = ref.get(field)
+        actual = track.get(field)
+        if expected not in (None, [], "") and actual not in (None, [], "") and expected == actual:
+            score += 2
+    if ref.get("device_classes") and track.get("device_classes") and ref.get("device_classes") == track.get("device_classes"):
+        score += 2
+    if ref.get("device_names") and track.get("device_names") and ref.get("device_names") == track.get("device_names"):
+        score += 2
+    return score if score >= 4 else -1
+
+
+def _build_track_source_coverage(
+    inventory: dict[str, Any],
+    attached: list[dict[str, Any]],
+    *,
+    region_start_qn: float,
+    region_end_qn: float,
+) -> dict[str, Any]:
+    """Join authoritative project evidence to existing review artifacts.
+
+    This is a read-only evidence view.  It deliberately refuses a name-only
+    join: an unresolved capture is safer than attributing audio to the wrong
+    track.
+    """
+    tracks = list(inventory.get("tracks") or []) if isinstance(inventory, dict) else []
+    project_identity = str(inventory.get("project_identity") or "") if isinstance(inventory, dict) else ""
+    coverage_tracks: list[dict[str, Any]] = []
+    used_capture_indexes: set[int] = set()
+    for track in tracks:
+        category = _track_category(track)
+        candidates = [
+            (index, row, _identity_match_score(track, row, project_identity))
+            for index, row in enumerate(attached)
+            if index not in used_capture_indexes
+        ]
+        candidates = [(index, row, score) for index, row, score in candidates if score >= 0]
+        best_score = max((score for _, _, score in candidates), default=-1)
+        best = [(index, row) for index, row, score in candidates if score == best_score]
+        capture = best[0][1] if best_score >= 0 and len(best) == 1 else None
+        capture_index = best[0][0] if capture is not None else None
+        if capture_index is not None:
+            used_capture_indexes.add(capture_index)
+
+        midi_events = list(track.get("midi_events") or [])
+        midi_available = bool(track.get("midi_available") and midi_events)
+        audio_status = "AUDIO_NOT_AVAILABLE"
+        audio_reason = "SOURCE_NOT_CAPTURED"
+        signal_windows = 0
+        available_windows = 0
+        if capture is None:
+            audio_reason = "IDENTITY_UNRESOLVED" if attached else "SOURCE_NOT_CAPTURED"
+        else:
+            status = str(capture.get("status") or "UNAVAILABLE")
+            artifacts = list((capture.get("window_artifacts") or {}).values())
+            available = [item for item in artifacts if item.get("available") and item.get("filename")]
+            available_windows = len(available)
+            signal_windows = sum(1 for item in available if item.get("has_signal"))
+            if available and signal_windows:
+                audio_status = "AUDIO_AVAILABLE"
+                audio_reason = "EXISTING_CAPTURE"
+            elif available and not signal_windows:
+                audio_status = "PROVEN_SILENT"
+                audio_reason = "PROVEN_SILENCE"
+            elif status == "UNSUPPORTED_OUTPUT":
+                audio_reason = "UNSUPPORTED_SOURCE"
+            elif status in {"TRACK_UNRESOLVED", "IDENTITY_UNRESOLVED"}:
+                audio_reason = "IDENTITY_UNRESOLVED"
+            elif status == "CAPTURE_FAILED":
+                audio_reason = "CAPTURE_FAILED"
+
+        if midi_available and audio_status == "AUDIO_AVAILABLE":
+            suggested = "USE_EXISTING_MIDI"
+        elif midi_available and audio_status != "AUDIO_AVAILABLE":
+            suggested = "USE_EXISTING_MIDI"
+        elif audio_status == "AUDIO_AVAILABLE":
+            suggested = "MAP_EXISTING_AUDIO"
+        elif audio_status == "PROVEN_SILENT" or not track.get("clip_content_available"):
+            suggested = "NO_ACTION_TRACK_EMPTY"
+        elif audio_reason == "IDENTITY_UNRESOLVED":
+            suggested = "IDENTITY_RECONCILIATION_REQUIRED"
+        elif audio_reason == "UNSUPPORTED_SOURCE":
+            suggested = "UNSUPPORTED_SOURCE"
+        else:
+            suggested = "CAPTURE_TRACK_AUDIO"
+
+        source_kinds: list[str] = []
+        if midi_available:
+            source_kinds.append("AUTHORITATIVE_MIDI")
+        if audio_status == "AUDIO_AVAILABLE":
+            source_kinds.append("EXISTING_CAPTURE")
+        elif audio_status == "PROVEN_SILENT":
+            source_kinds.append("PROVEN_SILENCE")
+        if not source_kinds:
+            source_kinds.append("SOURCE_NOT_CAPTURED")
+        coverage_tracks.append(
+            {
+                "track_ref": track.get("stable_track_ref"),
+                "display_name": track.get("display_name"),
+                "track_type": track.get("track_type"),
+                "category": category,
+                "musical_track": category == "MUSICAL",
+                "role_hint": track.get("role_hint"),
+                "region": {"start_qn": region_start_qn, "end_qn": region_end_qn},
+                "midi_status": "MIDI_AVAILABLE" if midi_available else "MIDI_NOT_AVAILABLE",
+                "midi_note_count": len(midi_events),
+                "midi_events": midi_events,
+                "audio_status": audio_status,
+                "audio_reason": audio_reason,
+                "signal_window_count": signal_windows,
+                "available_window_count": available_windows,
+                "source_kinds": source_kinds,
+                "suggested_next_action": suggested,
+                "evidence_refs": {
+                    "project_path": inventory.get("project_path"),
+                    "stable_track_ref": track.get("stable_track_ref"),
+                    "capture_index": capture_index,
+                },
+                "identity_resolution": "RESOLVED" if capture is not None else "IDENTITY_UNRESOLVED",
+                "unavailable_reason": None if audio_status in {"AUDIO_AVAILABLE", "PROVEN_SILENT"} else audio_reason,
+            }
+        )
+
+    musical = [item for item in coverage_tracks if item["musical_track"]]
+    summary = {
+        "total_musical_tracks": len(musical),
+        "tracks_with_midi": sum(1 for item in musical if item["midi_status"] == "MIDI_AVAILABLE"),
+        "tracks_with_audio": sum(1 for item in musical if item["audio_status"] == "AUDIO_AVAILABLE"),
+        "tracks_with_both": sum(1 for item in musical if item["midi_status"] == "MIDI_AVAILABLE" and item["audio_status"] == "AUDIO_AVAILABLE"),
+        "proven_silent": sum(1 for item in musical if item["audio_status"] == "PROVEN_SILENT"),
+        "unavailable": sum(1 for item in musical if item["audio_status"] == "AUDIO_NOT_AVAILABLE" and item["midi_status"] != "MIDI_AVAILABLE"),
+        "unresolved": sum(1 for item in musical if item["identity_resolution"] == "IDENTITY_UNRESOLVED"),
+    }
+    return {
+        "milestone": "TRACK_LEVEL_REVIEW_SOURCE_COVERAGE_V1",
+        "status": "VERIFIED" if inventory.get("status") == "AUTHORITATIVE_PERSISTED_WORKING_COPY" else "BLOCKED_SOURCE_INVENTORY",
+        "region": {"start_qn": region_start_qn, "end_qn": region_end_qn},
+        "summary": summary,
+        "tracks": coverage_tracks,
+        "orphaned_capture_count": len(attached) - len(used_capture_indexes),
+        "model_api_calls": 0,
+        "musical_writes": 0,
+        "ableton_mutations": 0,
+    }
 def _review_copy(
     source: Path | None,
     target: Path,
@@ -405,7 +598,11 @@ def repair_harmonic_review_audio(
     all_context_ok = all(row.get("role") == "context" and row.get("has_signal") and row.get("audible_level") and row.get("channel_balanced") for row in audit_rows if row.get("role") == "context")
     source_artifacts = dict(review.source_artifacts)
     source_artifacts["reference_audio"] = {"path": str(reference_audio), "sha256": source_hash, "duration_s": source_duration, "sample_rate": source_sr, "channels": int(source_data.shape[1]), "source_role": source_classification, "hash_verified": expected_source_hash is None or expected_source_hash == source_hash, "stats": source_stats}
-    track_inventory = _build_project_track_inventory(review)
+    track_inventory = _build_project_track_inventory(
+        review,
+        region_start_qn=min((item.analysis_region.start_qn for item in review.review_windows), default=0.0),
+        region_end_qn=max((item.analysis_region.end_qn for item in review.review_windows), default=0.0),
+    )
     derived_stems = []
     for role, path in (("DRUMS", drums_audio), ("BASS", bass_audio), ("VOCALS", vocals_audio), ("OTHER", other_audio)):
         source_row = next((row for row in audit_rows if row.get("role") == role.casefold() and row.get("source_path")), None)
@@ -691,6 +888,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 
     track_manifest = review.source_artifacts.get("track_review_audio_manifest", {})
     track_rows_for_review = list(track_manifest.get("tracks") or []) if isinstance(track_manifest, dict) else []
+    source_coverage = review.source_artifacts.get("track_review_source_coverage", {})
+    coverage_rows = list(source_coverage.get("tracks") or []) if isinstance(source_coverage, dict) else []
 
     def track_players(item: Any) -> str:
         """Render a signal-first review view instead of 22x8 flat players."""
@@ -703,18 +902,30 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             artifact = (track.get("window_artifacts") or {}).get(item.window_id) or {}
             name = str(track.get("display_name") or "Pista sin nombre")
             status = str(track.get("status") or "UNAVAILABLE")
+            coverage = track.get("source_coverage") or {}
+            midi_label = (
+                f"MIDI disponible · {int(coverage.get('midi_note_count') or 0)} notas"
+                if coverage.get("midi_status") == "MIDI_AVAILABLE"
+                else "MIDI no disponible"
+            )
+            audio_label = str(coverage.get("audio_status") or "AUDIO_NOT_AVAILABLE")
+            reason = str(coverage.get("unavailable_reason") or "")
+            coverage_label = f"{midi_label} · Audio: {audio_label}"
+            if reason:
+                coverage_label += f" · Razón: {reason}"
             if artifact.get("available") and artifact.get("filename") and artifact.get("has_signal"):
                 stats = ""
                 if artifact.get("peak_dbfs") is not None and artifact.get("rms_dbfs") is not None:
                     stats = f"<small>Pico {float(artifact['peak_dbfs']):.2f} dBFS Â· RMS {float(artifact['rms_dbfs']):.2f} dBFS</small>"
                 signal_rows.append(
                     f"<div class='track-player'><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span>"
+                    f"<small class='coverage-inline'>{html.escape(coverage_label)}</small>"
                     f"<audio controls preload='none' aria-label='Pista {html.escape(name)}' src='./{html.escape(str(artifact['filename']))}'></audio>{stats}</div>"
                 )
             elif artifact.get("available") and artifact.get("filename"):
-                silent_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>Silencio en esta ventana</span></li>")
+                silent_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>Silencio en esta ventana · {html.escape(coverage_label)}</span></li>")
             else:
-                unavailable_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span></li>")
+                unavailable_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(coverage_label or status)}</span></li>")
         signal_html = "".join(signal_rows) or "<p class='technical-inline'>Ninguna pista con señal en esta ventana.</p>"
         silent_html = "".join(silent_rows) or "<li>Ninguna</li>"
         unavailable_html = "".join(unavailable_rows) or "<li>Ninguna</li>"
@@ -904,6 +1115,45 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         if track.get("audio_artifact_available") and track.get("review_audio_status") == "EXPECTED_OR_OBSERVED_SILENCE"
     )
     project_unavailable_count = max(0, len(project_tracks) - project_audio_count)
+    coverage_summary = source_coverage.get("summary", {}) if isinstance(source_coverage, dict) else {}
+    coverage_detail_rows: list[str] = []
+    non_musical_detail_rows: list[str] = []
+    for coverage in coverage_rows:
+        if not coverage.get("musical_track"):
+            non_musical_detail_rows.append(
+                f"<li><b>{html.escape(str(coverage.get('display_name') or 'Pista sin nombre'))}</b>"
+                f" <span class='technical-inline'>{html.escape(str(coverage.get('category') or 'UNKNOWN'))} · "
+                f"no incluida en el denominador musical · {html.escape(str(coverage.get('audio_reason') or ''))}</span></li>"
+            )
+            continue
+        midi_text = (
+            f"MIDI disponible · {int(coverage.get('midi_note_count') or 0)} notas"
+            if coverage.get("midi_status") == "MIDI_AVAILABLE"
+            else "MIDI no disponible"
+        )
+        audio_text = str(coverage.get("audio_status") or "AUDIO_NOT_AVAILABLE")
+        reason = str(coverage.get("unavailable_reason") or "")
+        suffix = f" · Razón: {html.escape(reason)}" if reason else ""
+        coverage_detail_rows.append(
+            f"<li><b>{html.escape(str(coverage.get('display_name') or 'Pista sin nombre'))}</b>"
+            f" <span class='technical-inline'>{html.escape(midi_text)} · Audio: {html.escape(audio_text)}{suffix}</span></li>"
+        )
+    coverage_html = ""
+    if coverage_summary:
+        coverage_html = (
+            "<section class='coverage-summary'><h2>Cobertura de fuentes en los compases revisados</h2>"
+            f"<p><b>Pistas musicales:</b> {int(coverage_summary.get('total_musical_tracks') or 0)} · "
+            f"<b>Con MIDI:</b> {int(coverage_summary.get('tracks_with_midi') or 0)} · "
+            f"<b>Con audio:</b> {int(coverage_summary.get('tracks_with_audio') or 0)} · "
+            f"<b>Con ambos:</b> {int(coverage_summary.get('tracks_with_both') or 0)} · "
+            f"<b>Silencio confirmado:</b> {int(coverage_summary.get('proven_silent') or 0)} · "
+            f"<b>Fuente faltante:</b> {int(coverage_summary.get('unavailable') or 0)} · "
+            f"<b>Identidad sin resolver:</b> {int(coverage_summary.get('unresolved') or 0)}</p>"
+            f"<details><summary>Ver cobertura de cada pista musical ({len(coverage_detail_rows)})</summary>"
+            f"<ul>{''.join(coverage_detail_rows) or '<li>No hay cobertura persistida.</li>'}</ul></details>"
+            f"<details><summary>Infraestructura y returns excluidos ({len(non_musical_detail_rows)})</summary>"
+            f"<ul>{''.join(non_musical_detail_rows) or '<li>Ninguno.</li>'}</ul></details></section>"
+        )
 
     def track_status(track: dict[str, Any]) -> str:
         if track.get("audio_artifact_available") and track.get("review_audio_status") == "HAS_SIGNAL":
@@ -936,6 +1186,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button> <button type='button' id='clear-review'>Borrar evaluación local</button> <span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
         f"<section class='summary'><h2>Resumen de la revisión</h2><p><b>Ventanas:</b> {window_count} · <b>Resueltas por el sistema:</b> {resolved_count} · <b>Sin resolver:</b> {unresolved_count} · <b>Tonalidad global:</b> {html.escape(tonality_status)} · <b>Evaluaciones pendientes:</b> {pending_count}</p></section>"
         f"<section class='summary'><h2>Proyecto</h2><p><b>{len(project_tracks)} pistas reales</b> · {project_signal_count} con señal · {project_silence_count} silencio observado · {project_unavailable_count} no disponibles.</p><details><summary>Inventario completo de pistas</summary><ul>{track_rows}</ul></details><details><summary>Stems derivados</summary><ul>{stem_rows}</ul></details></section>"
+        f"{coverage_html}"
+        "<style>.coverage-summary{background:#151d2b;border-color:#465d87}.coverage-summary h2{margin-top:0}.coverage-inline{display:block;color:#9aa3b5;margin:.2rem 0}</style>"
         f"{timeline_html}"
         "<style>.musical-overview{background:#111a2b;border-color:#526b9b}.overview-heading{display:flex;justify-content:space-between;gap:1rem;align-items:end}.overview-heading h2{margin:.2rem 0 0;color:#f3f6ff}.eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:#9fc2ff}.timeline-ruler{position:relative;height:1.8rem;margin-left:7rem;border-bottom:1px solid #4b5361}.timeline-ruler span{position:absolute;transform:translateX(-50%);bottom:.25rem;color:#aeb8ce;font-size:.72rem}.timeline-lane{display:grid;grid-template-columns:7rem 1fr;align-items:center;gap:.5rem;margin:.55rem 0}.lane-label{font-size:.72rem;letter-spacing:.08em;color:#aeb8ce}.lane-track{position:relative;min-height:3rem;border:1px solid #384766;border-radius:8px;background:repeating-linear-gradient(90deg,#171f30 0,#171f30 calc(25% - 1px),#293652 25%)}.chord-lane{height:3.7rem}.timeline-chord{position:absolute;top:.25rem;height:3.15rem;box-sizing:border-box;overflow:hidden;text-align:left;padding:.45rem .55rem;border-radius:7px;background:#263b60;border:1px solid #7897d0;min-width:2.2rem}.timeline-chord strong{display:block;font-size:.9rem;white-space:nowrap}.timeline-chord small{display:block;color:#b8c8e8;font-size:.72rem;white-space:nowrap}.timeline-chord.selected{background:#355d91;border-color:#b8d2ff}.timeline-chord.candidate{background:#34384b;border-style:dashed}.note-lane{height:3.3rem}.timeline-note{position:absolute;top:.4rem;bottom:.4rem;min-width:.3rem;overflow:hidden;padding:.35rem .2rem;border-radius:4px;background:#ba7440;color:#fff;font-size:.68rem;text-align:center;white-space:nowrap}.track-chip-row{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.8rem}.track-chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #4b5361;font-size:.75rem}.track-chip.signal{color:#b9e8c0;border-color:#4d9a68;background:#173020}.track-chip.silent{color:#b3bac8;background:#1d2027}.track-chip.unavailable{color:#f2c48b;border-color:#956d3a;background:#2b2115}</style>"
         "<section><h2>Estado del paquete</h2>"

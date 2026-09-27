@@ -21,6 +21,8 @@ import soundfile as sf
 from copilot.audio.arrangement_active_source_isolation import capture_source_post_mixer
 from copilot.audio.harmonic_review_audio_fix_v1 import (
     _build_project_track_inventory,
+    _build_track_source_coverage,
+    _identity_match_score,
     _review_copy,
     render_repaired_html,
     render_repaired_report,
@@ -378,25 +380,61 @@ def attach_track_review_audio(
         "musical_writes": 0,
         "ableton_mutations": 0,
     }
-    inventory = source_artifacts.get("project_track_inventory")
+    persisted_inventory = source_artifacts.get("project_track_inventory")
+    region_end_qn = float((manifest.get("region") or {}).get("end_qn", _window_bounds(review)[1]))
+    fresh_inventory = _build_project_track_inventory(
+        review,
+        region_start_qn=region_start_qn,
+        region_end_qn=region_end_qn,
+    )
+    inventory = fresh_inventory if fresh_inventory.get("status") == "AUTHORITATIVE_PERSISTED_WORKING_COPY" else persisted_inventory
     if not isinstance(inventory, dict):
-        inventory = _build_project_track_inventory(review)
-    # This is a presentation join only.  Every row in `attached` already has
-    # an authoritative PersistentObjectRef from the capture operation; names
-    # are used here only to decorate the human-facing inventory.
-    by_name: dict[str, list[dict[str, Any]]] = {}
-    for row in attached:
-        by_name.setdefault(str(row.get("display_name") or ""), []).append(row)
+        inventory = fresh_inventory
+    # Preserve only previously persisted object evidence while refreshing the
+    # authoritative MIDI/clip view for the exact review region.
+    persisted_by_ref = {
+        str(row.get("stable_track_ref")): row
+        for row in ((persisted_inventory.get("tracks") or []) if isinstance(persisted_inventory, dict) else [])
+    }
+    for track in inventory.get("tracks") or []:
+        previous = persisted_by_ref.get(str(track.get("stable_track_ref")), {})
+        if previous.get("review_audio_identity"):
+            track["review_audio_identity"] = previous["review_audio_identity"]
+        if previous.get("review_audio_windows"):
+            track["review_audio_windows"] = previous["review_audio_windows"]
+    # Resolve captures against the authoritative PersistentObjectRef and
+    # structural evidence.  Names are display metadata only and are never a
+    # fallback identity key.
+    used_capture_indexes: set[int] = set()
     for track in list(inventory.get("tracks") or []):
-        matches = by_name.get(str(track.get("display_name") or ""), [])
-        if len(matches) != 1:
+        candidates = [
+            (index, row, _identity_match_score(track, row, str(inventory.get("project_identity") or "")))
+            for index, row in enumerate(attached)
+            if index not in used_capture_indexes
+        ]
+        candidates = [(index, row, score) for index, row, score in candidates if score >= 0]
+        best_score = max((score for _, _, score in candidates), default=-1)
+        matches = [(index, row) for index, row, score in candidates if score == best_score]
+        if best_score < 0 or len(matches) != 1:
             continue
-        match = matches[0]
+        capture_index, match = matches[0]
+        used_capture_indexes.add(capture_index)
         track["audio_artifact_available"] = bool(match.get("window_artifacts"))
         track["review_audio_status"] = str(match.get("status") or "UNAVAILABLE")
         track["review_audio_identity"] = match.get("track_ref") or {}
         track["review_audio_windows"] = match.get("window_artifacts") or {}
     inventory["track_level_audio_status"] = "ATTACHED"
+    coverage = _build_track_source_coverage(
+        inventory,
+        attached,
+        region_start_qn=region_start_qn,
+        region_end_qn=float((manifest.get("region") or {}).get("end_qn", _window_bounds(review)[1])),
+    )
+    for coverage_row in coverage.get("tracks") or []:
+        capture_index = (coverage_row.get("evidence_refs") or {}).get("capture_index")
+        if isinstance(capture_index, int) and 0 <= capture_index < len(attached):
+            attached[capture_index]["source_coverage"] = coverage_row
+    source_artifacts["track_review_source_coverage"] = coverage
     source_artifacts["project_track_inventory"] = inventory
     review.source_artifacts = source_artifacts
     review.provenance = {
