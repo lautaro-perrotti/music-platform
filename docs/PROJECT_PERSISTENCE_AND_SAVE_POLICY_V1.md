@@ -2,7 +2,7 @@
 
 ## Status
 
-`IMPLEMENTED / SAVE_CAPABILITY_BLOCKED`
+`IMPLEMENTED / BLOCKED_LIVE_API_UNAVAILABLE`
 
 The Studio now keeps three independent facts separate:
 
