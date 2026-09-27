@@ -14,13 +14,17 @@ separate preflight failure was rolled back before the successful run. This
 certifies editability and signal, not musical quality or harmonic correctness.
 See `docs/REFERENCE_BASS_VARIATION_AUDIT_2026-09-27.md` for evidence and limits.
 
-`MUSICAL_UNDERSTANDING_COMPLETION_P0` now has one canonical integration seam:
+`MUSICAL_UNDERSTANDING_COMPLETION_P0` is now verified in a bounded sense. It
+has one canonical integration seam:
 existing read-only evidence projects through `CanonicalMusicModelViewV2`, then
 the deterministic `MusicalVariationIntent` enters the same `MusicPlan →
 ProductionCompiler → SafeWrite` path. Groove, bass/drums relationships,
 motifs/phrases and arrangement remain explicit domains; melody is reported as
 `INSUFFICIENT_EVIDENCE` because no authoritative melody source is attached.
 No analyzer or second write authority was added.
+The real revalidation passed SafeWrite/readback/preview and rolled back to the
+same 21-track working-copy state. See
+`docs/CANONICAL_VARIATION_REAL_REVALIDATION_2026-09-27.md`.
 
 ## What the product is
 

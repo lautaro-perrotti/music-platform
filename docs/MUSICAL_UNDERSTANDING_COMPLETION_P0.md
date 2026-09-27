@@ -41,7 +41,11 @@ references, exposes groove/motif/relationship domains, reports melody as
 insufficient when no source exists, and reaches the existing variation planner
 without bypassing compiler/SafeWrite.
 
-`MUSICAL_UNDERSTANDING_COMPLETION_P0` may only be marked `VERIFIED` after a
-real controlled-working-copy run records: source evidence, intent, generated
-note count, a non-identical sequence comparison, SafeWrite/readback, preview,
-rollback/KEEP semantics, zero direct writes, and untouched original state.
+`CANONICAL_VARIATION_REAL_REVALIDATION_V1` now supplies that controlled-working-copy
+run. It records source evidence, intent, generated note count, a non-identical
+sequence comparison, SafeWrite/readback, preview, rollback, zero direct model
+writes, and the restored final state in
+`docs/CANONICAL_VARIATION_REAL_REVALIDATION_2026-09-27.md`.
+
+This closes the integration proof, not the broader claim of complete musical
+understanding: melody and human musical quality remain explicitly limited.
