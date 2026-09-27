@@ -147,8 +147,10 @@ class ProduceRequest(BaseModel):
     instruction: str
     variations: int  # 1 | 3 | 5
     length_bars: int | None = None  # 8 | 16 | 32 | None == Auto
+    elements: list[str] = Field(default_factory=list)
     start_qn: float = 0.0
     end_qn: float | None = None
     reference_analysis_path: str | None = None
     musical_understanding_path: str | None = None
+    harmonic_understanding_path: str | None = None
     astra_interpretation_path: str | None = None

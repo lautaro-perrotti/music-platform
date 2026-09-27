@@ -75,7 +75,7 @@ def test_capability_report_certifies_only_the_one_variation_slice(tmp_path: Path
     service, _ = _service(tmp_path)
     report = service.produce_capabilities()
     assert report["generation_available"] is True
-    assert report["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS"
+    assert report["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE"
     assert "VARIATION_PLANNER_N" not in report["missing"]
     real = {row["name"] for row in report["capabilities"] if row["state"] == "REAL"}
     assert {"SINGLE_VARIATION_PLAN", "MULTI_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE", "KEEP_VARIATION"} <= real
@@ -105,6 +105,31 @@ def test_generate_supports_bounded_multi_variation_request(tmp_path: Path, monke
     assert all(daw is shared_daw for _, _, daw in calls)
     assert len(output["variations"]) == 5
     assert output["musical_writes"] == 20
+
+
+def test_generate_dispatches_one_multi_element_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, project_id = _service(tmp_path)
+    captured: list[dict] = []
+
+    def fake_multi(_project_id, request):
+        captured.append(request.model_dump(mode="json"))
+        return {"status": "READY", "candidate_kind": "MULTI_ELEMENT", "musical_writes": 12}
+
+    monkeypatch.setattr(service, "_produce_one_multi_element_candidate", fake_multi)
+    output = service.produce_generate(project_id, {
+        "scope": "region",
+        "instruction": "build one multi-element variation",
+        "variations": 1,
+        "length_bars": 8,
+        "start_qn": 160.0,
+        "elements": ["bass", "drums", "harmonic"],
+        "reference_analysis_path": "reference.json",
+        "musical_understanding_path": "understanding.json",
+        "harmonic_understanding_path": "harmonic.json",
+    })
+    assert output["candidate_kind"] == "MULTI_ELEMENT"
+    assert captured[0]["elements"] == ["BASS", "DRUMS", "HARMONIC"]
+    assert captured[0]["harmonic_understanding_path"] == "harmonic.json"
 
 
 @pytest.mark.parametrize("payload, code", [
@@ -300,7 +325,7 @@ def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: 
         with urllib.request.urlopen(f"{base}/api/produce/capabilities") as response:
             body = json.load(response)
             assert body["generation_available"] is True
-            assert body["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS"
+            assert body["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE"
         request = urllib.request.Request(f"{base}/api/projects/{project_id}/produce", method="POST",
                                          data=json.dumps({"instruction": "make a bass variation", "variations": 1}).encode(),
                                          headers={"Content-Type": "application/json"})

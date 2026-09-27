@@ -20,6 +20,7 @@ from copilot.music_generation.schemas import GenerationBrief, GeneratorRequest
 from copilot.music_generation.benchmark import validate_generated_audio
 from copilot.audio.session_diagnose import preflight_session
 from copilot.audio.capture_preflight import generic_capture_preflight
+from copilot.audio.live_capture import capture_master_segment
 from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
 from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
@@ -33,6 +34,12 @@ from copilot.integration.reference_variation_v1 import (
     load_musical_understanding,
     load_reference_pack,
     validate_midi_reference,
+)
+from copilot.integration.multi_element_variation_v1 import (
+    SUPPORTED_ELEMENTS,
+    MultiElementVariationBundle,
+    build_multi_element_variation_bundle,
+    load_harmonic_understanding,
 )
 from copilot.musicplan import build_create_track_action
 from copilot.music_model import build_bass_variation_intent, build_canonical_music_model_view_v2
@@ -455,7 +462,8 @@ class StudioService:
         ("VARIATION_PLANNER_N", CapabilityState.REAL, "deterministic 1/3/5 reference-bound strategies with distinct symbolic signatures"),
         ("MULTI_VARIATION_PLAN", CapabilityState.REAL, "one request yields 1, 3, or 5 independently reviewable variation records"),
         ("WRITE_MIDI_CLIP", CapabilityState.REAL, "ProductionCompiler -> SafeWrite -> authoritative MIDI and Arrangement readback"),
-        ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded create -> instrument -> pattern -> Arrangement compound"),
+        ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded grouped BASS/DRUMS/HARMONIC create -> instrument -> pattern -> Arrangement compound"),
+        ("MULTI_ELEMENT_COMBINED_PREVIEW", CapabilityState.REAL, "one real candidate captured from Ableton Main for human review; harmonic support remains provisional"),
         ("COPILOT_OWNED_TRACK_POLICY", CapabilityState.REAL, "new deterministic Copilot Variation track plus persisted ownership registry"),
         ("VARIATION_PREVIEW_CAPTURE", CapabilityState.REAL, "created Arrangement clip -> isolated capture; READY requires measured signal"),
         ("STUDIO_PRODUCER_BRIDGE", CapabilityState.REAL, "POST /api/projects/{id}/produce calls the real Core compiler/executor"),
@@ -479,7 +487,7 @@ class StudioService:
             "capabilities": rows,
             "missing": missing,
             "required_for_one_variation_missing": required_missing,
-            "scope": "ONE_TO_FIVE_BASS_VARIATIONS",
+            "scope": "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE",
             "reference_evidence_required": ["reference_analysis_path", "musical_understanding_path"],
             "reference_evidence_sources": ["explicit request", "project configuration"],
             "discard_after_studio_restart": "UNAVAILABLE",
@@ -499,6 +507,11 @@ class StudioService:
         end_qn = payload.get("end_qn", configured.get("end_qn"))
         reference_path = payload.get("reference_analysis_path") or configured.get("reference_analysis_path")
         understanding_path = payload.get("musical_understanding_path") or configured.get("musical_understanding_path")
+        requested_elements = payload.get("elements", configured.get("elements", [])) or []
+        if isinstance(requested_elements, str):
+            requested_elements = [requested_elements]
+        elements = [str(item).strip().upper() for item in requested_elements if str(item).strip()]
+        harmonic_path = payload.get("harmonic_understanding_path") or configured.get("harmonic_understanding_path")
         request = ProduceRequest(
             scope=str(payload.get("scope") or "REGION").upper(),
             instruction=str(payload.get("instruction") or "").strip(),
@@ -508,6 +521,8 @@ class StudioService:
             end_qn=float(end_qn) if end_qn not in (None, "") else None,
             reference_analysis_path=str(reference_path) if reference_path else None,
             musical_understanding_path=str(understanding_path) if understanding_path else None,
+            harmonic_understanding_path=str(harmonic_path) if harmonic_path else None,
+            elements=elements,
             astra_interpretation_path=str(payload["astra_interpretation_path"]) if payload.get("astra_interpretation_path") else None,
         )
         if request.scope not in {"TRACK", "REGION"}:
@@ -518,11 +533,19 @@ class StudioService:
             raise ValueError("PRODUCE_VARIATION_COUNT_INVALID")
         if request.length_bars not in {None, 8}:
             raise ValueError("PRODUCE_LENGTH_INVALID")
+        if request.elements and set(request.elements) != set(SUPPORTED_ELEMENTS):
+            raise ValueError("MULTI_ELEMENT_REQUIRED_ROLES")
+        if request.elements and request.variations != 1:
+            raise ValueError("MULTI_ELEMENT_ONE_CANDIDATE_ONLY")
         if not request.reference_analysis_path or not request.musical_understanding_path:
             raise ReferenceVariationError("AUTHORITATIVE_REFERENCE_MIDI_REQUIRED")
+        if request.elements and not request.harmonic_understanding_path:
+            raise ReferenceVariationError("HARMONIC_UNDERSTANDING_REQUIRED")
         if payload.get("start_qn") is None and configured.get("start_qn") is None:
             request.start_qn = float(load_reference_pack(request.reference_analysis_path).timeline.get("start_qn") or 0.0)
         self._require_generation_backend("produce.generate")
+        if request.elements:
+            return self._produce_one_multi_element_candidate(project_id, request)
         if request.variations == 1:
             return self._produce_one_real_variation(project_id, request)
         shared_daw, _ = self._open_variation_live()
@@ -691,6 +714,423 @@ class StudioService:
                 "astra_interpretation_advisory": astra_evidence,
             },
         )
+
+    def _build_multi_element_plan(
+        self,
+        *,
+        request: ProduceRequest,
+        session: Any,
+        variation_id: str,
+    ) -> tuple[MusicPlan, MultiElementVariationBundle]:
+        """Build one bounded BASS/DRUMS/HARMONIC compound plan.
+
+        The bundle is the immutable, evidence-bound planning artifact.  This
+        method only translates it into the existing canonical MusicPlan
+        actions; it does not analyze audio or write to Live.
+        """
+        bars = request.length_bars or 8
+        length_beats = float(bars * 4)
+        pack_path = Path(request.reference_analysis_path or "").resolve()
+        understanding_path = Path(request.musical_understanding_path or "").resolve()
+        harmonic_path = Path(request.harmonic_understanding_path or "").resolve()
+        working_root = Path(session.project_path).resolve().parent
+        for source in (pack_path, understanding_path, harmonic_path):
+            if not source.is_relative_to(working_root):
+                raise ReferenceVariationError("REFERENCE_OUTSIDE_WORKING_COPY")
+        reference_pack = load_reference_pack(pack_path)
+        understanding = load_musical_understanding(understanding_path)
+        validate_midi_reference(
+            reference_pack,
+            understanding,
+            pack_path=pack_path,
+            understanding_path=understanding_path,
+            project_identity=session.project_identity or "",
+        )
+        if request.end_qn is not None and abs(request.end_qn - request.start_qn - length_beats) > 1e-6:
+            raise ReferenceVariationError("REFERENCE_REGION_LENGTH_MISMATCH")
+        harmonic = load_harmonic_understanding(harmonic_path)
+        bundle = build_multi_element_variation_bundle(
+            reference_pack,
+            understanding,
+            start_qn=request.start_qn,
+            length_beats=length_beats,
+            variation_index=1,
+            variation_count=1,
+            harmonic_understanding=harmonic,
+        )
+        if bundle.status != "READY":
+            raise ReferenceVariationError(
+                "MULTI_ELEMENT_EVIDENCE_INSUFFICIENT: " + "; ".join(bundle.limitations)
+            )
+
+        actions: list[PlanAction] = []
+        role_track_names: dict[str, str] = {}
+        for role in SUPPORTED_ELEMENTS:
+            element = bundle.elements[role]
+            track_name = f"Copilot Multi {role.title()} {variation_id[-8:]}"
+            role_track_names[role] = track_name
+            evidence_refs = list(element.evidence_refs) or [
+                f"reference:{bundle.reference_id}:{role}:{bundle.start_qn}:{bundle.end_qn}"
+            ]
+            create = build_create_track_action(
+                project_identity=session.project_identity,
+                track_name=track_name,
+                track_kind="midi",
+                reason=f"create evidence-bound {role.lower()} element",
+                evidence_refs=evidence_refs,
+            )
+            actions.append(create)
+            actions.append(
+                PlanAction(
+                    action_id=f"device_{role.lower()}_{variation_id}",
+                    action_type=ProductionActionKind.LOAD_DEVICE,
+                    target=ActionTarget(ref=dict(create.target.ref)),
+                    params=DeviceLoadActionParams(device_name="Operator", device_uri="Operator"),
+                    reason=f"load one native instrument for the {role.lower()} preview",
+                    evidence_refs=evidence_refs,
+                    expected_effect=ExpectedEffect(
+                        affected_target=f"{track_name}.devices",
+                        direction="add",
+                        description="load one native Ableton instrument",
+                        measurement_to_compare_after="authoritative device readback",
+                    ),
+                    verification=VerificationSpec(
+                        execution=ExecutionVerificationSpec(parameter="track.device", expected_after=1.0, unit="present"),
+                        musical=MusicalVerificationSpec(comparison="combined_preview_for_human_review", deferred=True),
+                    ),
+                    rollback=RollbackSpec(parameter="device", unit="device", restore_value=-1.0, prepared=True),
+                )
+            )
+            actions.append(
+                PlanAction(
+                    action_id=f"pattern_{role.lower()}_{variation_id}",
+                    action_type=ProductionActionKind.CREATE_PATTERN,
+                    target=ActionTarget(ref=dict(create.target.ref)),
+                    params=PatternActionParams(
+                        clip_index=0,
+                        length_beats=length_beats,
+                        notes=element.notes,
+                    ),
+                    reason=element.transformation,
+                    evidence_refs=evidence_refs,
+                    expected_effect=ExpectedEffect(
+                        affected_target=f"{track_name}.clip[0]",
+                        direction="add",
+                        description=f"create the evidence-bound {role.lower()} pattern",
+                        measurement_to_compare_after="authoritative MIDI note readback",
+                    ),
+                    verification=VerificationSpec(
+                        execution=ExecutionVerificationSpec(parameter="clip.notes", expected_after=float(len(element.notes)), unit="patterned"),
+                        musical=MusicalVerificationSpec(comparison="combined_preview_for_human_review", deferred=True),
+                    ),
+                    rollback=RollbackSpec(parameter="pattern", unit="clip", restore_value=-1.0, prepared=True),
+                )
+            )
+            actions.append(
+                PlanAction(
+                    action_id=f"arrangement_{role.lower()}_{variation_id}",
+                    action_type=ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+                    target=ActionTarget(ref=dict(create.target.ref)),
+                    params=ArrangementDuplicateActionParams(
+                        clip_index=0,
+                        destination_time=request.start_qn,
+                        length=None,
+                    ),
+                    reason=f"place the {role.lower()} element at the exact reference region",
+                    evidence_refs=evidence_refs,
+                    expected_effect=ExpectedEffect(
+                        affected_target=f"{track_name}.arrangement",
+                        direction="add",
+                        description="place the editable clip at the reference region",
+                        measurement_to_compare_after="authoritative arrangement readback",
+                    ),
+                    verification=VerificationSpec(
+                        execution=ExecutionVerificationSpec(parameter="arrangement.clip", expected_after=1.0, unit="present"),
+                        musical=MusicalVerificationSpec(comparison="combined_preview_for_human_review", deferred=True),
+                    ),
+                    rollback=RollbackSpec(parameter="arrangement.clip", unit="clip", restore_value=0.0, prepared=True),
+                )
+            )
+
+        canonical_view = build_canonical_music_model_view_v2(
+            reference_pack,
+            musical_understanding=understanding,
+        )
+        reference_features = {
+            "source_reference_id": reference_pack.reference_id,
+            "source_project_id": reference_pack.project_id,
+            "tempo_bpm": reference_pack.tempo_bpm,
+            "pack_sha256": hashlib.sha256(pack_path.read_bytes()).hexdigest(),
+            "understanding_sha256": hashlib.sha256(understanding_path.read_bytes()).hexdigest(),
+            "harmonic_understanding_sha256": hashlib.sha256(harmonic_path.read_bytes()).hexdigest(),
+            "canonical_music_model": canonical_view.model_dump(mode="json"),
+            "multi_element_bundle": bundle.model_dump(mode="json"),
+            "role_track_names": role_track_names,
+        }
+        plan = MusicPlan(
+            plan_id=f"multi_element_plan_{variation_id}",
+            status=PlanStatus.DRAFT,
+            intent_class=PlanIntentClass.AUTONOMOUS_MUSICAL_IMPROVEMENT,
+            diagnosis=DiagnosisBinding(
+                diagnosis_id=f"multi_element_reference_{variation_id}",
+                diagnosis_status="REFERENCE_REGION_BOUND",
+                diagnosis_accepted=True,
+                region_id=f"region_{variation_id}",
+            ),
+            project_state_token=session.project_token or session.project_identity or "",
+            audible_state_token=session.audible_token or "",
+            created_at=utc_now(),
+            actions=actions,
+            notes=[
+                "One bounded multi-element candidate: BASS + DRUMS + HARMONIC_SUPPORT.",
+                "All material is newly generated from persisted evidence-bound patterns.",
+                "Harmonic support is provisional pending human listening; no auto-keep.",
+            ],
+            gate={
+                "reference_region": {"start_qn": bundle.start_qn, "end_qn": bundle.end_qn},
+                "reference_features": reference_features,
+                "multi_element_bundle": bundle.model_dump(mode="json"),
+                "harmonic_status": "PROVISIONAL_EVIDENCE",
+                "role_track_names": role_track_names,
+            },
+        )
+        return plan, bundle
+
+    def _produce_one_multi_element_candidate(
+        self, project_id: str, request: ProduceRequest
+    ) -> dict[str, Any]:
+        """Execute exactly one real multi-element candidate and capture Main."""
+        variation_id = f"multi_element_{uuid.uuid4().hex[:16]}"
+        bars = request.length_bars or 8
+        length_beats = float(bars * 4)
+        daw, session = self._open_variation_live()
+        try:
+            plan, bundle = self._build_multi_element_plan(
+                request=request,
+                session=session,
+                variation_id=variation_id,
+            )
+            bundle_dir = self.data_dir / "multi_element_bundles"
+            bundle_dir.mkdir(parents=True, exist_ok=True)
+            bundle_path = bundle_dir / f"{variation_id}.json"
+            bundle_path.write_text(
+                bundle.model_dump_json(indent=2), encoding="utf-8"
+            )
+            bundle_sha256 = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+            compiled = ProductionCompiler().compile(plan, session=session)
+            if compiled.status != "COMPILED" or compiled.intent is None:
+                raise ProduceExecutionBlocked(
+                    "PLAN_NOT_COMPILED",
+                    detail="; ".join(compiled.reasons),
+                    evidence={"plan_id": plan.plan_id},
+                )
+            persist_dir = self.data_dir / "safe_write" / "multi_element"
+            executor = build_safe_write_executor(
+                daw,
+                journal_path=persist_dir / f"{variation_id}.jsonl",
+                persist_dir=persist_dir,
+            )
+            result = executor.run(compiled.intent)
+            if not result.ok:
+                raise ProduceExecutionBlocked(
+                    "SAFE_WRITE_FAILED",
+                    detail=result.error or "SafeWrite rejected the multi-element candidate",
+                    evidence=result.to_dict(),
+                )
+            live_after = daw.snapshot()
+            role_tracks: dict[str, Any] = {}
+            for role, track_name in (plan.gate.get("role_track_names") or {}).items():
+                track = live_after.track_by_name(track_name)
+                if track is None:
+                    raise ProduceExecutionBlocked("ROLE_TRACK_READBACK_MISSING", evidence={"role": role, "track_name": track_name})
+                role_tracks[role] = track
+            arrangement_steps = [
+                step for step in compiled.intent.executions
+                if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT"
+            ]
+            if len(arrangement_steps) != len(SUPPORTED_ELEMENTS) or any(
+                not step.expected_after.get("arrangement_clip_ids") for step in arrangement_steps
+            ):
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked(
+                    "ARRANGEMENT_READBACK_MISSING",
+                    detail=rollback_error or "arrangement readback missing",
+                    evidence=result.to_dict(),
+                )
+            preflight = generic_capture_preflight(
+                preflight_session(daw, lab_track_exclusions=frozenset({"AI Test"}))
+            )
+            if not preflight.get("pass"):
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked(
+                    "CAPTURE_PREFLIGHT_NOT_READY",
+                    detail="; ".join(preflight.get("missing") or []) + (f"; rollback={rollback_error}" if rollback_error else ""),
+                    evidence={"preflight": preflight, "safe_write": result.to_dict()},
+                )
+            capture_root = self.data_dir / "multi_element_captures" / variation_id
+            capture_root.mkdir(parents=True, exist_ok=True)
+            try:
+                combined_asset = capture_master_segment(
+                    daw,
+                    request.start_qn,
+                    request.end_qn or request.start_qn + length_beats,
+                    require_signal=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked(
+                    "COMBINED_PREVIEW_CAPTURE_FAILED",
+                    detail=f"{exc}; rollback={rollback_error or 'verified'}",
+                ) from exc
+            source_wav = Path(str(combined_asset.analysis_file_path or combined_asset.file_path))
+            if not source_wav.is_file():
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked(
+                    "COMBINED_PREVIEW_ARTIFACT_MISSING",
+                    detail=f"{source_wav}; rollback={rollback_error or 'verified'}",
+                )
+            measured = _inspect_variation_wav(source_wav)
+            expected_duration = length_beats * 60.0 / float(live_after.transport.tempo)
+            if measured["signal_status"] != "HAS_SIGNAL" or abs(measured["duration_s"] - expected_duration) > 0.25:
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                raise ProduceExecutionBlocked(
+                    "COMBINED_PREVIEW_INVALID",
+                    detail=f"measured={measured}; rollback={rollback_error or 'verified'}",
+                )
+            artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"
+            preview_job_id = self._create_preview_job(project_id, variation_id)
+            relative = Path("artifacts") / "multi_element_captures" / variation_id / source_wav.name
+            destination = self.data_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if source_wav.resolve() != destination.resolve():
+                shutil.copy2(source_wav, destination)
+            artifact = ArtifactRecord(
+                artifact_id=artifact_id,
+                job_id=preview_job_id,
+                filename=destination.name,
+                relative_path=relative.as_posix(),
+                sha256=measured["audio_sha256"],
+                bytes=destination.stat().st_size,
+                duration_s=measured["duration_s"],
+                sample_rate=measured["sample_rate"],
+                provider_metadata={
+                    "kind": "MULTI_ELEMENT_COMBINED_PREVIEW",
+                    "candidate_id": variation_id,
+                    "bundle_path": str(bundle_path),
+                    "bundle_sha256": bundle_sha256,
+                    "capture": combined_asset.model_dump(mode="json"),
+                    "measured_signal": measured,
+                    "plan_id": plan.plan_id,
+                },
+                rights={"source": "GENERATED_IN_ABLETON", "copilot_owned": True},
+                created_at=utc_now(),
+            )
+            self.store.create_artifact(artifact)
+            first_role = role_tracks[SUPPORTED_ELEMENTS[0]]
+            first_pattern = next(
+                step for step in compiled.intent.executions if step.action_type == "CREATE_PATTERN"
+            )
+            record = VariationRecord(
+                variation_id=variation_id,
+                project_id=project_id,
+                request_id=variation_id,
+                index=1,
+                status="READY",
+                ableton_track_ref=first_role.stable_id,
+                ableton_clip_ref=f"{first_role.stable_id}:clip:{int(first_pattern.arguments['clip_index'])}",
+                preview={
+                    "artifact_id": artifact_id,
+                    "bars": bars,
+                    "duration_s": artifact.duration_s,
+                    "capture_region_id": f"region_{variation_id}",
+                    "signal_status": measured["signal_status"],
+                    "rms_dbfs": measured["rms_dbfs"],
+                },
+                plan_id=plan.plan_id,
+                ownership={
+                    "owner": "COPILOT",
+                    "candidate_kind": "MULTI_ELEMENT",
+                    "roles": {
+                        role: {
+                            "track_stable_id": track.stable_id,
+                            "track_name": track.name,
+                        }
+                        for role, track in role_tracks.items()
+                    },
+                    "arrangement_clip_ids": [
+                        clip_id
+                        for step in arrangement_steps
+                        for clip_id in step.expected_after["arrangement_clip_ids"]
+                    ],
+                },
+                safe_write={
+                    "result": result.to_dict(),
+                    "journal_path": result.journal_path,
+                    "prestate_path": result.prestate_path,
+                    "single_transaction": True,
+                    "rollback_scope": "BASS+DRUMS+HARMONIC_ALL_OR_NONE",
+                },
+                region={
+                    "start_qn": request.start_qn,
+                    "end_qn": request.end_qn or request.start_qn + length_beats,
+                    "bars": bars,
+                    "scope": request.scope,
+                },
+                reference={
+                    "source_reference_id": bundle.reference_id,
+                    "source_project_id": bundle.project_id,
+                    "tempo_bpm": bundle.structure.get("tempo_bpm"),
+                },
+                musical_summary={
+                    "elements": list(SUPPORTED_ELEMENTS),
+                    "harmonic_status": "PROVISIONAL_EVIDENCE",
+                    "human_review": "PENDING",
+                    "combined_preview": True,
+                    "limitations": bundle.limitations,
+                },
+                provenance={
+                    "bundle_path": str(bundle_path),
+                    "bundle_sha256": bundle_sha256,
+                    "bundle_schema_version": bundle.schema_version,
+                    "evidence_refs": bundle.evidence_refs,
+                    "all_material_is_new": bundle.all_material_is_new,
+                    "harmonic_status": "PROVISIONAL_EVIDENCE",
+                    "source_not_copied": True,
+                },
+                created_at=utc_now(),
+            )
+            self.store.set_state(
+                project_id,
+                "variations",
+                [*self.store.get_state(project_id, "variations", []), record.model_dump(mode="json")],
+            )
+            self.store.add_activity(
+                project_id,
+                "variation.ready",
+                "Real Ableton multi-element candidate captured for human review",
+                {
+                    "variation_id": variation_id,
+                    "candidate_kind": "MULTI_ELEMENT",
+                    "roles": list(SUPPORTED_ELEMENTS),
+                    "musical_writes": result.musical_writes,
+                    "write_authority": "ProductionCompiler->SafeWriteExecutor",
+                },
+            )
+            self._variation_runtime[variation_id] = (daw, executor, (result, compiled.intent))
+            return {
+                "variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None),
+                "status": "READY",
+                "candidate_kind": "MULTI_ELEMENT",
+                "musical_writes": result.musical_writes,
+                "write_authority": "ProductionCompiler->SafeWriteExecutor",
+                "human_review": "PENDING",
+            }
+        except Exception:
+            try:
+                daw.disconnect()
+            except Exception:
+                pass
+            raise
 
     def _open_variation_live(self) -> tuple[AbletonTcpAdapter, Any]:
         probe = probe_session_ready()

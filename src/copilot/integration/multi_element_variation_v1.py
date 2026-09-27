@@ -9,6 +9,7 @@ replaced with a generic musical template.
 from __future__ import annotations
 
 from typing import Any, Literal
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -116,12 +117,23 @@ def build_multi_element_variation_bundle(
         pitch_semantics="SOURCE_EVIDENCED_BASS_PITCHES",
     )
 
-    drums = _build_drum_support(understanding, start_qn=start_qn, end_qn=end_qn)
+    evidence_offset_qn = _infer_relative_evidence_offset(
+        pack,
+        understanding,
+        harmonic_understanding,
+    )
+    drums = _build_drum_support(
+        understanding,
+        start_qn=start_qn,
+        end_qn=end_qn,
+        evidence_offset_qn=evidence_offset_qn,
+    )
     harmonic = _build_harmonic_support(
         harmonic_understanding,
         reference_id=pack.reference_id,
         start_qn=start_qn,
         end_qn=end_qn,
+        evidence_offset_qn=evidence_offset_qn,
     )
     elements = {"BASS": bass, "DRUMS": drums, "HARMONIC": harmonic}
     refs = list(dict.fromkeys(ref for element in elements.values() for ref in element.evidence_refs))
@@ -140,6 +152,7 @@ def build_multi_element_variation_bundle(
             "tempo_bpm": pack.tempo_bpm,
             "reference_window_bars": length_beats / 4.0,
             "section_labels": _section_labels(pack, start_qn, end_qn),
+            "evidence_time_offset_qn": evidence_offset_qn,
         },
         evidence_refs=refs,
         limitations=limitations,
@@ -147,12 +160,16 @@ def build_multi_element_variation_bundle(
 
 
 def _build_drum_support(
-    understanding: MusicalUnderstanding, *, start_qn: float, end_qn: float
+    understanding: MusicalUnderstanding,
+    *,
+    start_qn: float,
+    end_qn: float,
+    evidence_offset_qn: float = 0.0,
 ) -> ElementPattern:
     events = [
         event
         for event in understanding.drums.transient_grid
-        if start_qn <= event.grid.onset_qn < end_qn
+        if start_qn <= event.grid.onset_qn + evidence_offset_qn < end_qn
     ]
     if not events:
         return ElementPattern(
@@ -166,7 +183,7 @@ def _build_drum_support(
     notes = [
         MidiNote(
             pitch=42,
-            start_time=round(event.grid.onset_qn - start_qn, 4),
+            start_time=round(event.grid.onset_qn + evidence_offset_qn - start_qn, 4),
             duration=0.1,
             velocity=max(1, min(127, round(60 + min(float(event.strength), 1.0) * 60))),
         )
@@ -190,6 +207,7 @@ def _build_harmonic_support(
     reference_id: str,
     start_qn: float,
     end_qn: float,
+    evidence_offset_qn: float = 0.0,
 ) -> ElementPattern:
     if harmonic is None:
         return ElementPattern(
@@ -206,8 +224,8 @@ def _build_harmonic_support(
         window
         for window in harmonic.windows
         if window.selected is not None
-        and window.end_qn > start_qn
-        and window.start_qn < end_qn
+        and window.end_qn + evidence_offset_qn > start_qn
+        and window.start_qn + evidence_offset_qn < end_qn
     ]
     if not windows:
         return ElementPattern(
@@ -224,8 +242,10 @@ def _build_harmonic_support(
     for window in windows:
         chord = window.selected
         assert chord is not None
-        local_start = max(start_qn, window.start_qn) - start_qn
-        local_end = min(end_qn, window.end_qn) - start_qn
+        window_start = window.start_qn + evidence_offset_qn
+        window_end = window.end_qn + evidence_offset_qn
+        local_start = max(start_qn, window_start) - start_qn
+        local_end = min(end_qn, window_end) - start_qn
         duration = local_end - local_start
         if duration <= 0:
             continue
@@ -257,6 +277,36 @@ def _build_harmonic_support(
     )
 
 
+def _infer_relative_evidence_offset(
+    pack: MusicAnalysisPack,
+    understanding: MusicalUnderstanding,
+    harmonic: HarmonicUnderstanding | None,
+) -> float:
+    """Reconcile artifacts captured from the reference window's local zero.
+
+    The authoritative bass pack keeps the Live-set QN origin (160 in the
+    current source).  The persisted drum/harmony artifacts use the same
+    reference region but serialize it from local QN zero.  Shift only when
+    the evidence range proves that representation; never guess from names.
+    """
+    source_start = float(pack.timeline.get("start_qn") or 0.0)
+    source_end = float(pack.timeline.get("end_qn") or 0.0)
+    source_span = max(0.0, source_end - source_start)
+    if source_start <= 0.0 or source_span <= 0.0:
+        return 0.0
+    observed: list[float] = [
+        float(event.grid.onset_qn)
+        for event in understanding.drums.transient_grid
+    ]
+    if harmonic is not None:
+        observed.extend(float(window.end_qn) for window in harmonic.windows)
+    if not observed:
+        return 0.0
+    if max(observed) <= source_span + 1e-6:
+        return source_start
+    return 0.0
+
+
 def _pitch_class_to_midi(value: str) -> int | None:
     names = {"C": 0, "B#": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3, "E": 4,
              "FB": 4, "E#": 5, "F": 5, "F#": 6, "GB": 6, "G": 7, "G#": 8, "AB": 8,
@@ -273,10 +323,21 @@ def _section_labels(pack: MusicAnalysisPack, start_qn: float, end_qn: float) -> 
     ))
 
 
+def load_harmonic_understanding(path: Path | str) -> HarmonicUnderstanding:
+    source = Path(path)
+    if not source.is_file():
+        raise ReferenceVariationError(f"HARMONIC_UNDERSTANDING_NOT_FOUND: {source}")
+    try:
+        return HarmonicUnderstanding.model_validate_json(source.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise ReferenceVariationError(f"HARMONIC_UNDERSTANDING_INVALID: {source}") from exc
+
+
 __all__ = [
     "ElementPattern",
     "MultiElementVariationBundle",
     "MULTI_ELEMENT_SCHEMA_VERSION",
     "SUPPORTED_ELEMENTS",
     "build_multi_element_variation_bundle",
+    "load_harmonic_understanding",
 ]

@@ -87,6 +87,8 @@ class ProductionCompiler:
             [ProductionActionKind.CREATE_TRACK, ProductionActionKind.DEVICE_LOAD, ProductionActionKind.CREATE_PATTERN, ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT],
         ):
             return self._compile_midi_variation(plan, session=session)
+        if sum(action.action_type is ProductionActionKind.CREATE_TRACK for action in plan.actions) > 1:
+            return self._compile_multi_midi_variation(plan, session=session)
         if len(plan.actions) != 1:
             return ProductionCompileResult(
                 status="PLAN_REJECTED",
@@ -483,5 +485,154 @@ class ProductionCompiler:
         return ProductionCompileResult(
             status="COMPILED",
             intent=intent,
+            certified_action_ids=tuple(action.action_id for action in plan.actions),
+        )
+
+    def _compile_multi_midi_variation(
+        self, plan: MusicPlan, *, session: SessionState
+    ) -> ProductionCompileResult:
+        """Compile several explicit MIDI role groups into one SafeWrite intent.
+
+        Each group is CREATE_TRACK -> optional LOAD_DEVICE -> CREATE_PATTERN ->
+        optional DUPLICATE_CLIP_TO_ARRANGEMENT.  The groups share one typed
+        MutationIntent and therefore one journal/transaction/rollback graph.
+        This is intentionally limited to Copilot-owned MIDI tracks.
+        """
+        groups: list[list] = []
+        current: list = []
+        for action in plan.actions:
+            if action.action_type is ProductionActionKind.CREATE_TRACK and current:
+                groups.append(current)
+                current = []
+            current.append(action)
+        if current:
+            groups.append(current)
+        if len(groups) < 2:
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_GROUPS_REQUIRED",))
+
+        targets: list[MutationTarget] = []
+        executions: list[MutationExecution] = []
+        for group_index, group in enumerate(groups):
+            if not group or group[0].action_type is not ProductionActionKind.CREATE_TRACK:
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_GROUP_MUST_START_WITH_CREATE_TRACK",))
+            allowed = {
+                ProductionActionKind.CREATE_TRACK,
+                ProductionActionKind.LOAD_DEVICE,
+                ProductionActionKind.DEVICE_LOAD,
+                ProductionActionKind.CREATE_PATTERN,
+                ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+            }
+            if any(action.action_type not in allowed for action in group):
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_GROUP_ACTION_UNSUPPORTED",))
+            create = group[0]
+            if create.params.track_kind != "midi":
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_TRACK_KIND_REQUIRED",))
+            pattern = next((action for action in group if action.action_type is ProductionActionKind.CREATE_PATTERN), None)
+            device = next((action for action in group if action.action_type in {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD}), None)
+            arrangement = next((action for action in group if action.action_type is ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT), None)
+            if pattern is None or getattr(pattern.params, "kind", None) != "create_pattern" or not pattern.params.notes:
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_PATTERN_REQUIRED",))
+            if float(pattern.params.length_beats) <= 0 or not pattern.rollback or not pattern.rollback.prepared:
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_PATTERN_INVALID",))
+            if device is not None and (getattr(device.params, "kind", None) != "device_load" or not str(device.params.device_name).strip()):
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_DEVICE_INVALID",))
+            if arrangement is not None:
+                params = arrangement.params
+                if (
+                    getattr(params, "kind", None) != "duplicate_clip_to_arrangement"
+                    or params.clip_index != pattern.params.clip_index
+                    or params.length is not None
+                    or params.destination_time < 0
+                    or not arrangement.rollback
+                    or not arrangement.rollback.prepared
+                ):
+                    return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_ARRANGEMENT_INVALID",))
+
+            create_id = create.action_id
+            track_name = create.params.track_name
+            pattern_id = pattern.action_id
+            create_target = MutationTarget(
+                action_id=create_id, ref=create.target.ref, name_at_plan=track_name,
+                fingerprint=TargetFingerprint(), locator=None,
+                session_incarnation_id=session.session_incarnation_id or "",
+            )
+            targets.append(create_target)
+            executions.append(MutationExecution(
+                action_id=create_id, action_type="CREATE_TRACK", operation="create_midi_track",
+                arguments={"name": track_name, "index": create.params.index_hint},
+                expected_before={"track_count": len(session.tracks) + group_index},
+                expected_after={
+                    "track_count": len(session.tracks) + group_index + 1,
+                    "multi_intent": True,
+                },
+                certified=True,
+                rollback=MutationRollback(
+                    inverse_operation="delete_track", reversibility=RollbackReversibility.INDEPENDENT,
+                    prepared=True,
+                ),
+            ))
+            group_ref = {"object_type": "track", "project_identity": session.project_identity or "", "role": "midi", "name": track_name}
+            if device is not None:
+                device_target = MutationTarget(
+                    action_id=device.action_id, ref=dict(group_ref), name_at_plan=track_name,
+                    fingerprint=TargetFingerprint(), locator=None,
+                    session_incarnation_id=session.session_incarnation_id or "",
+                )
+                targets.append(device_target)
+                targets_create = [create_id]
+                executions.append(MutationExecution(
+                    action_id=device.action_id, action_type="LOAD_DEVICE", operation="load_instrument_or_effect",
+                    arguments={"uri": device.params.device_uri or device.params.device_name, "device_name": device.params.device_name},
+                    expected_before={"device_count": 0}, expected_after={"device_count": 1}, certified=True,
+                    rollback=MutationRollback(
+                        inverse_operation="delete_device", depends_on=targets_create,
+                        reversibility=RollbackReversibility.DEPENDENT, prepared=True,
+                    ),
+                ))
+            pattern_target = MutationTarget(
+                action_id=pattern_id, ref=dict(group_ref), name_at_plan=track_name,
+                fingerprint=TargetFingerprint(), locator=None,
+                session_incarnation_id=session.session_incarnation_id or "",
+            )
+            targets.append(pattern_target)
+            executions.append(MutationExecution(
+                action_id=pattern_id, action_type="CREATE_PATTERN", operation="create_pattern",
+                arguments={"clip_index": int(pattern.params.clip_index), "length_beats": float(pattern.params.length_beats), "notes": [note.model_dump(mode="json") for note in pattern.params.notes]},
+                expected_before={"clip_exists": False, "clip_index": int(pattern.params.clip_index)},
+                expected_after={"clip_index": int(pattern.params.clip_index), "note_count": len(pattern.params.notes)},
+                certified=True,
+                rollback=MutationRollback(
+                    inverse_operation="delete_clip", depends_on=[create_id],
+                    reversibility=RollbackReversibility.DEPENDENT, prepared=True,
+                ),
+            ))
+            if arrangement is not None:
+                arrangement_target = MutationTarget(
+                    action_id=arrangement.action_id, ref=dict(group_ref), name_at_plan=track_name,
+                    fingerprint=TargetFingerprint(), locator=None,
+                    session_incarnation_id=session.session_incarnation_id or "",
+                )
+                targets.append(arrangement_target)
+                executions.append(MutationExecution(
+                    action_id=arrangement.action_id, action_type="DUPLICATE_CLIP_TO_ARRANGEMENT",
+                    operation="duplicate_clip_to_arrangement",
+                    arguments={"clip_index": int(arrangement.params.clip_index), "destination_time": float(arrangement.params.destination_time), "length": None},
+                    expected_before={}, expected_after={}, certified=True,
+                    rollback=MutationRollback(
+                        inverse_operation="delete_arrangement_clips", depends_on=[create_id, pattern_id],
+                        reversibility=RollbackReversibility.DEPENDENT, prepared=True,
+                    ),
+                ))
+
+        return ProductionCompileResult(
+            status="COMPILED",
+            intent=MutationIntent(
+                plan_id=plan.plan_id, kind=KIND_PRODUCER_EXECUTION_V1,
+                user_intent=plan.notes[0] if plan.notes else plan.plan_id,
+                project_identity=session.project_identity or "",
+                expected_revision=session.revision, expected_session_hash=session.state_hash,
+                expected_project_token=session.project_token or "", expected_audible_token=session.audible_token or "",
+                expected_incarnation_id=session.session_incarnation_id or "", targets=targets, executions=executions,
+            ),
             certified_action_ids=tuple(action.action_id for action in plan.actions),
         )

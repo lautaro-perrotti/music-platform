@@ -10,12 +10,20 @@ from copilot.musicplan import (
 from copilot.runtime.production_compiler import ProductionCompiler
 from copilot.runtime.safe_write import build_safe_write_executor
 from copilot.schemas.musicplan import (
+    ActionTarget,
+    ArrangementDuplicateActionParams,
+    DeviceLoadActionParams,
     DiagnosisBinding,
+    ExpectedEffect,
     MusicPlan,
+    PatternActionParams,
+    PlanAction,
     PlanIntentClass,
     PlanStatus,
     ProductionActionKind,
 )
+from copilot.schemas.session import MidiNote
+from copilot.schemas.musicplan import RollbackSpec
 from copilot.daw.state_tokens import attach_tokens, target_token
 from copilot.human_eval.store import now_iso
 
@@ -231,6 +239,85 @@ def test_create_track_executes_and_rolls_back_through_safewrite(tmp_path):
     rollback_error = executor._rollback_applied(result, compiled.intent)
     assert rollback_error == ""
     assert not any(track.stable_id == created_id for track in daw.snapshot().tracks)
+
+
+def _multi_role_plan(session):
+    actions = []
+    for role, pitch in (("Bass", 36), ("Drums", 42), ("Harmony", 60)):
+        name = f"Copilot {role}"
+        create = build_create_track_action(
+            project_identity=session.project_identity,
+            track_name=name,
+            track_kind="midi",
+            reason=f"create {role.lower()} role",
+            evidence_refs=[f"role:{role.upper()}"],
+        )
+        ref = {"object_type": "track", "project_identity": session.project_identity, "role": "midi", "name": name}
+        device = PlanAction(
+            action_id=f"device_{role.lower()}", action_type=ProductionActionKind.LOAD_DEVICE,
+            target=ActionTarget(ref=ref),
+            params=DeviceLoadActionParams(device_name="Operator", device_uri="Operator"),
+            reason=f"load {role.lower()} instrument", expected_effect=ExpectedEffect(
+                affected_target=f"{name}.devices", direction="add", description="load device",
+            ), rollback=RollbackSpec(parameter="device", unit="device", restore_value=-1, prepared=True),
+        )
+        pattern = PlanAction(
+            action_id=f"pattern_{role.lower()}", action_type=ProductionActionKind.CREATE_PATTERN,
+            target=ActionTarget(ref=ref),
+            params=PatternActionParams(clip_index=0, length_beats=4, notes=[MidiNote(pitch=pitch, start_time=0, duration=1)]),
+            reason=f"write {role.lower()} pattern", expected_effect=ExpectedEffect(
+                affected_target=f"{name}.clip", direction="add", description="write MIDI",
+            ), rollback=RollbackSpec(parameter="pattern", unit="clip", restore_value=-1, prepared=True),
+        )
+        arrangement = PlanAction(
+            action_id=f"arrangement_{role.lower()}", action_type=ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+            target=ActionTarget(ref=ref),
+            params=ArrangementDuplicateActionParams(clip_index=0, destination_time=0, length=None),
+            reason=f"arrange {role.lower()} pattern", expected_effect=ExpectedEffect(
+                affected_target=f"{name}.arrangement", direction="add", description="place MIDI",
+            ), rollback=RollbackSpec(parameter="arrangement", unit="clip", restore_value=0, prepared=True),
+        )
+        actions.extend([create, device, pattern, arrangement])
+    return _create_plan(session).model_copy(update={"plan_id": "multi_role_plan", "actions": actions})
+
+
+def test_multi_role_plan_is_one_compiled_safewrite_transaction(tmp_path):
+    daw, session = _session()
+    plan = _multi_role_plan(session)
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED", compiled.reasons
+    assert compiled.intent is not None
+    assert len(compiled.intent.executions) == 12
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "multi.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok is True, result.to_dict()
+    assert result.musical_writes == 12
+    assert len(daw.snapshot().tracks) == 4
+    assert len(daw.get_arrangement_clips()["clips"]) == 3
+    assert executor._rollback_applied(result, compiled.intent) == ""
+    assert len(daw.snapshot().tracks) == 1
+    assert daw.get_arrangement_clips()["clips"] == []
+
+
+def test_multi_role_failure_rolls_back_all_prior_roles(tmp_path):
+    class FailingPatternMock(MockAbletonAdapter):
+        def create_midi_clip(self, track_index, clip_index, length_beats):
+            if self.tracks[track_index]["name"] == "Copilot Drums":
+                raise RuntimeError("drum role rejected")
+            return super().create_midi_clip(track_index, clip_index, length_beats)
+
+    daw = FailingPatternMock()
+    daw.connect()
+    daw.create_midi_track("Compiler Test")
+    session = daw.snapshot()
+    plan = _multi_role_plan(session)
+    compiled = ProductionCompiler().compile(plan, session=session)
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "multi-fail.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok is False
+    assert result.failure.value in {"PARTIAL_FAILURE", "EXECUTION_FAILED"}
+    assert [track.name for track in daw.snapshot().tracks] == ["Compiler Test"]
+    assert daw.get_arrangement_clips()["clips"] == []
 
 
 def test_load_device_executes_and_rolls_back_through_safewrite(tmp_path):

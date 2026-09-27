@@ -966,12 +966,26 @@ class SafeWriteExecutor:
     ) -> tuple[MutationFailure, str] | None:
         if not intent.executions:
             return (MutationFailure.PRECONDITION_FAILED, "empty mutation plan")
+        multi_create_count = min(
+            (
+                int(step.expected_before.get("track_count", len(_session.tracks)))
+                for step in intent.executions
+                if step.action_type == "CREATE_TRACK"
+                and step.expected_after.get("multi_intent")
+            ),
+            default=None,
+        )
         for step in intent.executions:
             if not action_is_certified_for_intent(intent, step.action_type):
                 continue
             track = resolved[step.action_id]
             if step.action_type == "CREATE_TRACK":
-                if len(_session.tracks) != int(step.expected_before.get("track_count", len(_session.tracks))):
+                expected_track_count = (
+                    multi_create_count
+                    if step.expected_after.get("multi_intent")
+                    else int(step.expected_before.get("track_count", len(_session.tracks)))
+                )
+                if len(_session.tracks) != expected_track_count:
                     return (MutationFailure.PRECONDITION_FAILED, "track count changed before CREATE_TRACK")
                 if any(item.name == str(step.arguments.get("name", "")) for item in _session.tracks):
                     return (MutationFailure.PRECONDITION_FAILED, "track name already exists")
@@ -1176,7 +1190,12 @@ class SafeWriteExecutor:
         command_id = f"cmd_{uuid4().hex[:12]}"
         operation = step.operation
         self.transactions.mark_sent(command_id, operation)
-        before_ids = {track.stable_id for track in session.tracks}
+        # A compound multi-element intent may create several tracks.  The
+        # precondition snapshot is intentionally shared, but the durable
+        # journal must record the live count immediately before this step.
+        live_before = self.tools.get_session_snapshot()
+        before_ids = {track.stable_id for track in live_before.tracks}
+        before_count = len(live_before.tracks)
         try:
             if operation == "create_audio_track":
                 result = self.tools.daw.create_audio_track(
@@ -1203,9 +1222,9 @@ class SafeWriteExecutor:
             target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
             target_name_at_apply=track.name,
             operation=operation,
-            before={"track_count": len(session.tracks), "track_ids": sorted(before_ids)},
+            before={"track_count": before_count, "track_ids": sorted(before_ids)},
             after={"track_count": len(live.tracks), "stable_id": track.stable_id},
-            expected_after={"track_count": len(session.tracks) + 1, "stable_id": track.stable_id},
+            expected_after={"track_count": before_count + 1, "stable_id": track.stable_id},
             inverse_operation="delete_track",
             inverse_params={},
             asset_id=track.stable_id,
@@ -1598,12 +1617,29 @@ class SafeWriteExecutor:
         after: SessionState,
     ) -> tuple[MutationVerification, tuple[MutationFailure, str] | None]:
         unexpected: list[dict[str, Any]] = []
+        # A single multi-element intent is allowed to create several
+        # Copilot-owned tracks.  Each CREATE_TRACK must see all of the
+        # intent's new tracks as expected, not only itself.
+        created_target_ids = {
+            target.stable_id
+            for target in intent.targets
+            if any(
+                step.action_id == target.action_id and step.action_type == "CREATE_TRACK"
+                for step in intent.executions
+            )
+        }
+        created_arrangement_ids = {
+            str(item)
+            for step in intent.executions
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT"
+            for item in step.expected_after.get("arrangement_clip_ids", [])
+        }
         for target in intent.targets:
             step = next(item for item in intent.executions if item.action_id == target.action_id)
             if step.action_type == "CREATE_TRACK":
                 before_ids = set(guards[target.name_at_plan].get("track_ids", []))
                 after_ids = {item.stable_id for item in after.tracks}
-                if target.stable_id not in after_ids or (after_ids - before_ids - {target.stable_id}):
+                if target.stable_id not in after_ids or (after_ids - before_ids - created_target_ids):
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
                 continue
             if step.action_type == "CREATE_PATTERN":
@@ -1629,7 +1665,11 @@ class SafeWriteExecutor:
                     str(item.get("id", ""))
                     for item in self.tools.daw.get_arrangement_clips().get("clips", [])
                 }
-                if not expected_ids or not expected_ids.issubset(actual_ids) or (actual_ids - before_ids - expected_ids):
+                if (
+                    not expected_ids
+                    or not expected_ids.issubset(actual_ids)
+                    or (actual_ids - before_ids - created_arrangement_ids)
+                ):
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_arrangement_state"})
                 continue
             if step.action_type == "LOAD_SAMPLE":
@@ -1868,29 +1908,37 @@ class SafeWriteExecutor:
             # and only when the last recorded content state still matches
             # authoritative Live readback. Existing user tracks stay strict.
             if txn.actions and not result.unknown_action_ids:
-                created = next(
-                    (action for action in txn.actions if action.inverse_operation == "delete_track"), None
-                )
-                if created is not None and all(
-                    action.target_stable_id == created.target_stable_id for action in txn.actions
-                ):
+                created_tracks = [
+                    action for action in txn.actions if action.inverse_operation == "delete_track"
+                ]
+                created_ids = {action.target_stable_id for action in created_tracks}
+                if created_tracks and all(action.target_stable_id in created_ids for action in txn.actions):
                     current = self.tools.get_session_snapshot()
-                    track = next(
-                        (item for item in current.tracks if item.stable_id == created.target_stable_id), None
-                    )
-                    content = next(
-                        (action for action in reversed(txn.actions)
-                         if action.inverse_operation in {"delete_clip", "delete_device", "delete_track"}), None
-                    )
-                    if (
-                        track is not None
-                        and content is not None
-                        and current.session_incarnation_id == txn.session_incarnation_id
-                        and track.name == created.target_name_at_apply
-                        and fingerprints_equal(
-                            fingerprint_track(track), content.target_fingerprint.model_dump()
+                    refreshable = True
+                    for created in created_tracks:
+                        track = next(
+                            (item for item in current.tracks if item.stable_id == created.target_stable_id), None
                         )
-                    ):
+                        content = next(
+                            (
+                                action for action in reversed(txn.actions)
+                                if action.target_stable_id == created.target_stable_id
+                                and action.inverse_operation in {"delete_clip", "delete_device", "delete_track"}
+                            ),
+                            None,
+                        )
+                        if not (
+                            track is not None
+                            and content is not None
+                            and current.session_incarnation_id == txn.session_incarnation_id
+                            and track.name == created.target_name_at_apply
+                            and fingerprints_equal(
+                                fingerprint_track(track), content.target_fingerprint.model_dump()
+                            )
+                        ):
+                            refreshable = False
+                            break
+                    if refreshable:
                         self.transactions._refresh_targets(txn, current)
             txn = self.transactions.abort("safe-write rollback")
             if txn.status is TransactionStatus.IN_DOUBT:
