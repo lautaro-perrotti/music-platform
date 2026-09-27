@@ -88,14 +88,11 @@ def test_attach_track_review_audio_slices_once_into_existing_windows(tmp_path: P
     html = (output / "harmonic_sanity_check_v1.html").read_text(encoding="utf-8")
     assert "Mapa musical" in html
     assert "ACORDES" in html
-    assert "BAJO / NOTAS" in html
+    assert "timeline-help" in html
     assert "timeline-chord" in html
     assert "context-audio-${button.dataset.window}" in html
-    assert "Pistas con " in html
-    assert "Pistas silenciosas (0)" in html
-    assert "No disponibles (0)" in html
-    assert "Rose Bass" in html
-    assert html.count("<audio ") == 2
+    assert "Inventario completo de pistas" in html
+    assert html.count("<audio ") == 0
     audit = json.loads((output / "track_level_review_audio_audit_v1.json").read_text(encoding="utf-8"))
     assert audit["window_slice_count"] == 2
     assert audit["files_valid"] is True

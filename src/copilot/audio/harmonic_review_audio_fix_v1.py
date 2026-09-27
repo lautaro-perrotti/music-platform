@@ -842,7 +842,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 
     def display_note(value: Any) -> str:
         canonical = str(value)
-        return f"{canonical} ({note_names[canonical]})" if canonical in note_names else canonical
+        return note_names.get(canonical, canonical)
 
     def display_notes(values: list[Any]) -> str:
         return " · ".join(display_note(value) for value in dict.fromkeys(str(value) for value in values)) or "No disponibles"
@@ -853,7 +853,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         root = display_note(hypothesis.root)
         quality = {
             "major": "mayor",
-            "minor": "menor",
+            "minor": "m",
             "major7": "maj7",
             "minor7": "m7",
             "dominant7": "7",
@@ -861,7 +861,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             "sus2": "sus2",
             "sus4": "sus4",
         }.get(hypothesis.quality, hypothesis.quality)
-        return f"{root} {quality}"
+        return f"{root}{quality}" if quality in {"m", "m7", "7", "sus2", "sus4"} else f"{root} {quality}"
 
     def human_region(value: Any) -> str:
         return f"Compases {value.start_bar:g}–{value.end_bar:g}"
@@ -884,7 +884,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         else:
             stats = "Datos técnicos no disponibles"
         identifier = f' id="{html.escape(audio_id)}"' if audio_id else ""
-        return f'<audio{identifier} controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>{silence}'
+        return f'<audio{identifier} controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><details class="technical-details"><summary>Detalles del audio</summary><small>{html.escape(stats)}</small></details>{silence}'
 
     track_manifest = review.source_artifacts.get("track_review_audio_manifest", {})
     track_rows_for_review = list(track_manifest.get("tracks") or []) if isinstance(track_manifest, dict) else []
@@ -973,8 +973,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             region = item.analysis_region
             left = max(0.0, min(100.0, (region.start_qn - start_qn) / span_qn * 100.0))
             width = max(1.0, min(100.0 - left, (region.end_qn - region.start_qn) / span_qn * 100.0))
-            hypothesis = item.selected_hypothesis or (item.alternatives[0] if item.alternatives else None)
-            chord = display_chord(hypothesis) if hypothesis else "?"
+            hypothesis = item.selected_hypothesis
+            chord = display_chord(hypothesis) if hypothesis else "No determinado"
             state = "selected" if item.selected_hypothesis else "candidate"
             bars = f"{region.start_bar:g}–{max(region.start_bar, region.end_bar - 1):g}"
             chord_segments.append(
@@ -1007,8 +1007,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             "<p class='technical-inline'>Seleccioná un acorde para reproducir su ventana.</p></div>"
             f"<div class='timeline-ruler' aria-label='Compases'>{ruler}</div>"
             f"<div class='timeline-lane'><span class='lane-label'>ACORDES</span><div class='lane-track chord-lane'>{''.join(chord_segments)}</div></div>"
-            f"<div class='timeline-lane'><span class='lane-label'>BAJO / NOTAS</span><div class='lane-track note-lane'>{''.join(note_segments) or '<span class=\"technical-inline\">Sin notas autoritativas en este tramo</span>'}</div></div>"
-            f"<div class='track-chip-row'><span class='lane-label'>PISTAS</span>{track_chips}</div>"
+            "<p class='timeline-help'>Seleccioná un bloque para escuchar esa sección y revisar sus notas abajo.</p>"
             "</section>"
         )
 
@@ -1057,6 +1056,77 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         if not support_lines:
             support_lines.append("No hay una explicación positiva adicional registrada.")
         support_html = "".join(f"<li>{line}</li>" for line in support_lines)
+        first_window = review.review_windows[0] if review.review_windows else None
+        hidden_attr = "" if item is first_window else " hidden"
+        selected_text = display_chord(selected) if selected else "No determinado"
+        alternative_text = display_chord(runner) if runner else "No hay alternativa registrada"
+        observed_text = display_notes(selected.observed_tones if selected and selected.observed_tones else item.observed_pitch_classes)
+        bass_note_values = [
+            str(event.get("pitch_class") or event.get("midi_note"))
+            for event in item.bass_events
+            if event.get("pitch_class") or event.get("midi_note") is not None
+        ]
+        bass_text = display_notes(bass_note_values)
+        compatible_classes = {"ROOT", "THIRD", "FIFTH", "EXTENSION"}
+        compatible_count = sum(value for key, value in item.bass_harmony.counts.items() if key in compatible_classes)
+        bass_total = int(item.bass_harmony.event_count or 0)
+        if selected and bass_total:
+            relationship_text = f"{compatible_count} de {bass_total} eventos del bajo coinciden con notas del acorde detectado."
+        elif bass_total:
+            relationship_text = "El acorde no está determinado; no se puede evaluar la relación del bajo todavía."
+        else:
+            relationship_text = "No hay eventos de bajo autoritativos en esta sección."
+        bass_rows = []
+        for event in item.bass_events:
+            onset = event.get("onset_qn")
+            if not isinstance(onset, (int, float)):
+                continue
+            note = display_note(event.get("pitch_class") or event.get("midi_note"))
+            beat = float(onset) - float(item.analysis_region.start_qn) + 1.0
+            duration = float(event.get("duration_qn") or 0.0)
+            bass_rows.append(f"<tr><td>{beat:.2f}</td><td>{html.escape(note)}</td><td>{duration:.2f}</td></tr>")
+        bass_table = (
+            "<table class='bass-events'><thead><tr><th>Pulso</th><th>Nota</th><th>Duración</th></tr></thead><tbody>"
+            + "".join(bass_rows)
+            + "</tbody></table>"
+            if bass_rows
+            else "<p class='muted'>No hay notas de bajo disponibles para esta sección.</p>"
+        )
+        human_verdict_labels = {
+            "ACCEPT": "Sí, suena correcto",
+            "PLAUSIBLE_AMBIGUOUS": "Puede ser / es ambiguo",
+            "WRONG": "No, está mal",
+            "UNKNOWN_CORRECT": "Está bien dejarlo sin determinar",
+            "UNKNOWN_SHOULD_RESOLVE": "Creo que sí hay un acorde claro",
+        }
+        musician_verdict_buttons = "".join(
+            f'<button type="button" class="verdict" data-window="{html.escape(item.window_id)}" data-verdict="{verdict}">{html.escape(human_verdict_labels[verdict])}</button>'
+            for verdict in ("ACCEPT", "PLAUSIBLE_AMBIGUOUS", "WRONG", "UNKNOWN_CORRECT", "UNKNOWN_SHOULD_RESOLVE")
+        )
+        technical_html = (
+            f"<details class='technical-details'><summary>Detalles técnicos</summary>"
+            f"<p><b>Región:</b> {html.escape(technical_region(item.analysis_region))}</p>"
+            f"<p><b>Contexto:</b> {html.escape(technical_region(item.listening_region))}</p>"
+            f"<p><b>Confianza numérica:</b> {html.escape(technical_value(selected_confidence))} · <b>Diferencia:</b> {html.escape(technical_value(item.selected_runner_up_score_delta))}</p>"
+            f"<details><summary>Alternativa completa</summary><pre>{escaped_json(runner.model_dump(mode='json') if runner else None)}</pre></details>"
+            f"<details><summary>Evidencia y referencias</summary><pre>{escaped_json({'support': selected.model_dump(mode='json') if selected else None, 'evidence_refs': item.evidence_refs, 'contradictions': contradictions, 'limitations': item.limitations})}</pre></details>"
+            f"<details><summary>Eventos MIDI del bajo</summary><pre>{escaped_json(item.bass_events)}</pre></details></details>"
+        )
+        blocks.append(
+            f'''<section class="window musician-window" data-window-section="{html.escape(item.window_id)}"{hidden_attr}>
+<div class="window-title"><span class="eyebrow">Sección seleccionada</span><h2>{html.escape(human_region(item.analysis_region))}</h2></div>
+<div class="listen-grid"><div class="listen-card"><b>Escuchar contexto</b>{player(item, "context", f"context-audio-{item.window_id}")}</div>
+<div class="listen-card"><b>Escuchar armónicos</b>{player(item, "other")}</div>
+<div class="listen-card"><b>Escuchar bajo</b>{player(item, "bass")}</div></div>
+<div class="musical-finding"><span class="eyebrow">Acorde detectado</span><h3>{html.escape(selected_text)}</h3>
+<p><b>Alternativa:</b> {html.escape(alternative_text)}</p>
+<p><b>Notas que escucha el sistema:</b> {html.escape(observed_text)}</p></div>
+<div class="bass-finding"><h3>Bajo</h3><p><b>Notas principales:</b> {html.escape(bass_text)}</p><p><b>Relación con el acorde:</b> {html.escape(relationship_text)}</p>{bass_table}</div>
+<div class="human-decision"><span class="eyebrow">¿Estás de acuerdo?</span><div class="verdicts">{musician_verdict_buttons}</div><p class="current-verdict" data-current-verdict="{html.escape(item.window_id)}">Pendiente</p><label>Nota opcional<textarea data-notes="{html.escape(item.window_id)}" rows="2" placeholder="¿Qué escuchaste?"></textarea></label></div>
+{technical_html}
+</section>'''
+        )
+        continue
         blocks.append(
             f'''<section class="window" data-window-section="{html.escape(item.window_id)}">
 <h2>VENTANA {html.escape(item.window_id.rsplit('_', 1)[-1].lstrip('0') or '0')}</h2>
@@ -1195,12 +1265,45 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         f"<details><summary>Ver detalles técnicos de la fuente</summary><p><b>Origen:</b> {html.escape(str(source.get('source_role', 'No disponible')))}</p><p><b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p><pre>{escaped_json(source)}</pre></details>"
         f"<details><summary>{labels['tonality']}: {html.escape(tonality_status)}</summary><pre>{escaped_json(global_tonality)}</pre></details></section>"
     )
-    footer = '''<p class="technical-value">MODEL/API CALLS: 0 · MUSICAL WRITES: 0 · ABLETON MUTATIONS: 0</p>
+    first_item = review.review_windows[0] if review.review_windows else None
+    musician_start_bar = min((item.analysis_region.start_bar for item in review.review_windows), default=1.0)
+    musician_end_bar = max((max(item.analysis_region.start_bar, item.analysis_region.end_bar - 1.0) for item in review.review_windows), default=32.0)
+    progression_rows = "".join(
+        f"<button type='button' class='progression-row' data-window='{html.escape(item.window_id)}'><span>Compases {item.analysis_region.start_bar:g}–{max(item.analysis_region.start_bar, item.analysis_region.end_bar - 1):g}</span><strong>{html.escape(display_chord(item.selected_hypothesis) if item.selected_hypothesis else 'No determinado')}</strong></button>"
+        for item in review.review_windows
+    )
+    progression_pattern = " → ".join(display_chord(item.selected_hypothesis) if item.selected_hypothesis else "No determinado" for item in review.review_windows)
+    role_labels = {"DRUMS": "🥁 Batería", "BASS": "🎸 Bajo", "HARMONIC": "🎹 Material armónico", "VOCALS": "🎤 Voz"}
+    available_roles = []
+    for role, label in role_labels.items():
+        if any(row.get("musical_track") and row.get("role_hint") == role and (row.get("midi_status") == "MIDI_AVAILABLE" or row.get("audio_status") in {"AUDIO_AVAILABLE", "PROVEN_SILENT"}) for row in coverage_rows):
+            available_roles.append(f"<li>{label}</li>")
+    elements_html = "".join(available_roles) + "<li>▶ Contexto completo</li>"
+    full_context_html = player(first_item, "context", "full-context-audio") if first_item else "<p class='muted'>Contexto no disponible.</p>"
+    technical_project_html = (
+        f"<details class='technical-details'><summary>Detalles técnicos del proyecto</summary>"
+        f"<p><b>Inventario:</b> {len(project_tracks)} pistas reales · {project_signal_count} con señal · {project_silence_count} silencio observado · {project_unavailable_count} no disponibles.</p>"
+        f"<details><summary>Inventario completo de pistas</summary><ul>{track_rows}</ul></details>"
+        f"<details><summary>Stems derivados</summary><ul>{stem_rows}</ul></details>"
+        f"{coverage_html}</details>"
+    )
+    musician_header = (
+        "<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Análisis musical</title>"
+        "<style>body{font:15px system-ui;max-width:980px;margin:0 auto;padding:1.5rem 1rem 4rem;background:#0f1117;color:#f1f4fb;line-height:1.45}h1,h2,h3{margin:.2rem 0 .7rem}button{font:inherit;color:inherit;background:#202838;border:1px solid #536783;border-radius:8px;padding:.55rem .75rem;cursor:pointer}button.active,button.active-window{background:#365985;border-color:#a6c7ff}.toolbar{position:sticky;top:0;z-index:5;display:flex;gap:.5rem;align-items:center;background:#0f1117;padding:.65rem 0;border-bottom:1px solid #2b3444}.status{color:#a9d6ad}.hero,.summary,.window,.musical-overview,.technical-details{border:1px solid #303b4f;border-radius:12px;background:#151b26;padding:1rem;margin:1rem 0}.hero{background:linear-gradient(135deg,#18253b,#151b26)}.hero h1{font-size:1.45rem;letter-spacing:.04em}.eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:#9fc2ff}.hero-player{margin:1rem 0}.progression{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:.5rem}.progression-row{display:flex;flex-direction:column;align-items:flex-start;gap:.2rem;text-align:left;background:#1b2433}.progression-row span{font-size:.75rem;color:#b8c3d8}.progression-row strong{font-size:1rem}.tonality{padding:.8rem;border-left:3px solid #8da6ca;background:#101722}.timeline-ruler{position:relative;height:1.8rem;margin-left:7rem;border-bottom:1px solid #4b5361}.timeline-ruler span{position:absolute;transform:translateX(-50%);bottom:.25rem;color:#aeb8ce;font-size:.72rem}.timeline-lane{display:grid;grid-template-columns:7rem 1fr;align-items:center;gap:.5rem;margin:.55rem 0}.lane-label{font-size:.72rem;letter-spacing:.08em;color:#aeb8ce}.lane-track{position:relative;min-height:3rem;border:1px solid #384766;border-radius:8px;background:repeating-linear-gradient(90deg,#171f30 0,#171f30 calc(25% - 1px),#293652 25%)}.chord-lane{height:3.7rem}.timeline-chord{position:absolute;top:.25rem;height:3.15rem;box-sizing:border-box;overflow:hidden;text-align:left;padding:.45rem .55rem;border-radius:7px;background:#263b60;border:1px solid #7897d0;min-width:2.2rem}.timeline-chord strong{display:block;font-size:.9rem;white-space:nowrap}.timeline-chord small{display:block;color:#b8c8e8;font-size:.72rem;white-space:nowrap}.timeline-chord.selected{background:#355d91;border-color:#b8d2ff}.timeline-chord.candidate{background:#34384b;border-style:dashed}.timeline-help,.muted{color:#aeb8ce}.listen-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem}.listen-card{padding:.75rem;border-radius:9px;background:#1b2433}.listen-card audio{display:block;width:100%;margin:.65rem 0}.musical-finding,.bass-finding{margin:1rem 0;padding:.9rem;border-radius:9px;background:#1a2331}.musical-finding h3{font-size:1.5rem}.human-decision{padding:1rem;border:1px solid #536783;border-radius:9px}.verdicts{display:flex;flex-wrap:wrap;gap:.45rem;margin:.5rem 0}.current-verdict{color:#a9d6ad}.bass-events{border-collapse:collapse;width:100%;max-width:30rem}.bass-events th,.bass-events td{border-bottom:1px solid #344054;padding:.35rem;text-align:left}.technical-details{background:#111720;border-color:#273244}.technical-details summary{cursor:pointer;color:#b8c8e8}.technical-details pre{white-space:pre-wrap;overflow:auto;background:#0b0e13;padding:.7rem;border-radius:7px;color:#cdd3e0}.technical-details small{color:#aeb8ce}.coverage-summary{margin:0;padding:.7rem;border:1px solid #344054;border-radius:8px}.window[hidden]{display:none}.musician-window{background:#151e2d}.warning{color:#f3c77b}@media(max-width:720px){.listen-grid{grid-template-columns:1fr}.timeline-lane{grid-template-columns:5rem 1fr}}</style></head><body>"
+        f"<script type='application/json' id='review-data'>{embedded_json}</script>"
+        "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button><button type='button' id='clear-review'>Borrar evaluación local</button><span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
+        f"<section class='hero'><span class='eyebrow'>Análisis musical</span><h1>Compases {musician_start_bar:g}–{musician_end_bar:g}</h1><div class='hero-player'><b>Escuchar tema completo</b>{full_context_html}</div><h2>Armonía detectada</h2><div class='progression'>{progression_rows}</div><div class='tonality'><b>Tonalidad</b><p>No pudimos determinar una tonalidad o modo con suficiente confianza.</p><small>Esto no significa que no exista una tonalidad; sólo que la evidencia actual no alcanza para afirmarla.</small></div><p><b>Patrón:</b> {html.escape(progression_pattern)}</p></section>"
+        f"{timeline_html}"
+        f"<section class='summary'><h2>Elementos disponibles para esta revisión</h2><ul>{elements_html}</ul></section>"
+        f"{technical_project_html}"
+    )
+    footer = '''<details class="technical-details"><summary>Estado técnico de esta revisión</summary><p>MODEL/API CALLS: 0 · MUSICAL WRITES: 0 · ABLETON MUTATIONS: 0</p></details>
 <script>
 const REVIEW_DATA = JSON.parse(document.getElementById('review-data').textContent);
 const STORAGE_KEY = 'harmonic-human-review:' + REVIEW_DATA.analysis_artifact_id + ':' + REVIEW_DATA.source_hash;
 const VERDICT_LABELS = {PENDING: 'Pendiente', ACCEPT: 'Aceptar', PLAUSIBLE_AMBIGUOUS: 'Plausible pero ambiguo', WRONG: 'Incorrecto', UNKNOWN_CORRECT: 'Correcto dejarlo sin resolver', UNKNOWN_SHOULD_RESOLVE: 'Debería poder decidir'};
 let reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: item.human_verdict || 'PENDING', notes: item.human_notes || ''}]));
+Object.assign(VERDICT_LABELS, {ACCEPT: 'Sí, suena correcto', PLAUSIBLE_AMBIGUOUS: 'Puede ser / es ambiguo', WRONG: 'No, está mal', UNKNOWN_CORRECT: 'Está bien dejarlo sin determinar', UNKNOWN_SHOULD_RESOLVE: 'Creo que sí hay un acorde claro'});
 function setStatus(message) { document.getElementById('save-status').textContent = message; }
 function persist() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reviewState)); setStatus('Guardado localmente en este navegador.'); } catch (error) { setStatus('No se pudo usar el almacenamiento local; exportá la evaluación.'); } }
 function restore() { try { const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); if (saved && typeof saved === 'object') reviewState = Object.assign(reviewState, saved); } catch (error) { setStatus('No se pudo recuperar el borrador; las evaluaciones siguen en memoria.'); } }
@@ -1219,14 +1322,20 @@ document.getElementById('export-review').addEventListener('click', exportReview)
 document.getElementById('clear-review').addEventListener('click', () => { if (confirm('¿Borrar la evaluación local?')) { try { localStorage.removeItem(STORAGE_KEY); } catch (error) {} reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: 'PENDING', notes: ''}])); renderState(); setStatus('Evaluación local borrada; todo vuelve a Pendiente.'); } });
 document.querySelectorAll('.timeline-chord').forEach((button) => button.addEventListener('click', () => {
   const audio = document.getElementById(`context-audio-${button.dataset.window}`);
+  document.querySelectorAll('[data-window-section]').forEach((section) => { section.hidden = section.dataset.windowSection !== button.dataset.window; });
+  document.querySelectorAll('.timeline-chord').forEach((candidate) => candidate.classList.toggle('active-window', candidate === button));
   if (!audio) return;
   audio.currentTime = 0;
   audio.play().catch(() => {});
   audio.scrollIntoView({behavior: 'smooth', block: 'center'});
 }));
+document.querySelectorAll('.progression-row').forEach((button) => button.addEventListener('click', () => {
+  const target = document.querySelector(`.timeline-chord[data-window="${button.dataset.window}"]`);
+  if (target) target.click();
+}));
 restore(); renderState();
 </script></body></html>'''
-    return header + "".join(blocks) + footer
+    return musician_header + "".join(blocks) + footer
 
 
 __all__ = ["repair_harmonic_review_audio", "render_repaired_html", "render_repaired_report"]

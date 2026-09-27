@@ -56,21 +56,20 @@ def test_harmonic_review_audio_fix_creates_audible_context_and_verifies_paths(tm
     assert '"expected_players": 5' in audit
     assert '"resolved_players": 5' in audit
     html = (output / "harmonic_sanity_check_v1.html").read_text(encoding="utf-8")
-    assert "Exportar evaluación" in html
+    assert "Exportar" in html
     assert "localStorage" in html
     assert "UNKNOWN_SHOULD_RESOLVE" in html
-    assert "¿Por qué se eligió este acorde?" in html
-    assert "Contexto completo" in html
-    assert "Aceptar" in html
-    assert "Resumen de la revisión" in html
-    assert "Ventanas:" in html
-    assert "No resuelto" in html
+    assert "Acorde detectado" in html
+    assert "Escuchar tema completo" in html
+    assert "Sí, suena correcto" in html
+    assert "No determinado" in html
+    assert "Detalles técnicos" in html
+    assert "Elementos disponibles" in html
     assert 'data-verdict="ACCEPT"' in html
     assert "human_verdict: item.verdict || 'PENDING'" in html
     assert "lang='es'" in html
-    assert "Batería" in html
-    assert "Voces" in html
-    assert html.count("<audio ") == 5
+    assert "Contexto completo" in html
+    assert html.count("<audio ") == 4
     assert "audio/window_01/context.wav" in html
     assert "PENDING" in html
     assert (output / "harmonic_sanity_check_v1.html").is_file()
@@ -104,9 +103,9 @@ def test_spanish_presentation_does_not_translate_machine_values() -> None:
 
     html = render_repaired_html(review)
 
-    assert "Hipótesis seleccionada" in html
-    assert "F# (Fa#) menor" in html
-    assert "A (La)" in html
+    assert "Acorde detectado" in html
+    assert "Fa#m" in html
+    assert "La" in html
     assert 'data-verdict="ACCEPT"' in html
     assert "human_verdict: item.verdict || 'PENDING'" in html
     assert "F#m" in html
