@@ -77,10 +77,12 @@ from copilot.studio.contracts import (
     VersionRecord,
 )
 from copilot.studio.persistence import (
+    MUSICAL_DECISION_ACCEPTED,
     MUSICAL_DECISION_DISCARDED,
     MUSICAL_DECISION_KEPT,
     MUSICAL_DECISION_PENDING,
     PERSISTENCE_CANDIDATE_PENDING,
+    PERSISTENCE_DISK_SAVE_REQUIRED,
     candidate_persistence_state,
     persist_working_copy,
     reconciled_after_rollback,
@@ -1359,6 +1361,7 @@ class StudioService:
                     "tempo_bpm": plan.gate["reference_features"].get("tempo_bpm"),
                 },
                 musical_summary={
+                    "candidate_label": f"Candidate {chr(64 + variation_index)}",
                     "preserved": [
                         "evidenced pitch material",
                         "reference tempo and QN grid",
@@ -1378,6 +1381,7 @@ class StudioService:
                     "generated_event_count": plan.gate["reference_features"].get("generated_event_count"),
                     "variation_index": variation_index,
                     "variation_count": variation_count,
+                    "candidate_label": f"Candidate {chr(64 + variation_index)}",
                     "variation_strategy": plan.gate["reference_features"].get("variation_strategy"),
                     "source_not_copied": plan.gate["reference_features"].get("source_not_copied"),
                     "event_traceability": plan.gate["reference_features"].get("event_traceability", []),
@@ -1412,7 +1416,7 @@ class StudioService:
         return result
 
     def variation_action(self, variation_id: str, action: str) -> dict[str, Any]:
-        if action not in {"keep", "open", "discard"}:
+        if action not in {"keep", "open", "discard", "select"}:
             raise ValueError("VARIATION_ACTION_INVALID")
         found: tuple[str, VariationRecord] | None = None
         for project in self.list_projects():
@@ -1428,6 +1432,63 @@ class StudioService:
         project_id, record = found
         if action == "open":
             return {"variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None)}
+        if action == "select":
+            if record.status not in {"READY", "KEPT"}:
+                raise ValueError("VARIATION_NOT_REVIEWABLE")
+
+            # Selection is a musical decision only.  It deliberately does not
+            # call SafeWrite, delete candidates, or attempt Live/disk save.
+            # The selected candidate remains in the working copy and is
+            # explicitly marked for the human persistence boundary.
+            rows: list[VariationRecord] = []
+            for item in self.store.get_state(project_id, "variations", []):
+                candidate = VariationRecord.model_validate(item)
+                if candidate.variation_id != variation_id and candidate.musical_decision == MusicalDecision.ACCEPTED:
+                    pending_persistence = dict(candidate.persistence or {})
+                    pending_persistence.update({
+                        "status": PERSISTENCE_CANDIDATE_PENDING,
+                        "musical_decision": MUSICAL_DECISION_PENDING,
+                        "save_required": False,
+                        "reason": "candidate remains available after selection changed",
+                    })
+                    candidate = candidate.model_copy(update={
+                        "musical_decision": MusicalDecision.PENDING,
+                        "persistence_status": PersistenceStatus.CANDIDATE_PENDING,
+                        "persistence": pending_persistence,
+                    })
+                rows.append(candidate)
+
+            persistence = dict(record.persistence or {})
+            persistence.update({
+                "status": PERSISTENCE_DISK_SAVE_REQUIRED,
+                "musical_decision": MUSICAL_DECISION_ACCEPTED,
+                "save_required": True,
+                "save_attempted": False,
+                "save_verified": False,
+                "reason": "musical selection accepted; manual Ableton disk save is still required",
+                "selected_variation_id": variation_id,
+            })
+            record = record.model_copy(update={
+                "musical_decision": MusicalDecision.ACCEPTED,
+                "persistence_status": PersistenceStatus.DISK_SAVE_REQUIRED,
+                "persistence": persistence,
+            })
+            rows = [record if item.variation_id == variation_id else item for item in rows]
+            self.store.set_state(project_id, "variations", [item.model_dump(mode="json") for item in rows])
+            self.store.set_state(project_id, "project_persistence", persistence)
+            self.store.add_activity(
+                project_id,
+                "variation.musical_accepted",
+                "Selected a Copilot variation for musical review; manual disk save remains required",
+                {"variation_id": variation_id, "persistence_status": PERSISTENCE_DISK_SAVE_REQUIRED},
+            )
+            return {
+                "variation": dict(record.model_dump(mode="json"), preview_url=record.preview.audio_url if record.preview else None),
+                "status": MUSICAL_DECISION_ACCEPTED,
+                "persistence_status": PERSISTENCE_DISK_SAVE_REQUIRED,
+                "disk_save_required": True,
+                "musical_writes": 0,
+            }
         if action == "keep":
             if record.status not in {"READY", "KEPT"}:
                 raise ValueError("VARIATION_NOT_REVIEWABLE")
@@ -1521,6 +1582,26 @@ class StudioService:
         self.store.set_state(project_id, "project_persistence", persistence)
         self.store.add_activity(project_id, "variation.discarded", "Rolled back Copilot-owned Ableton variation", {"variation_id": variation_id})
         return {"variation": record.model_dump(mode="json"), "status": "DISCARDED", "rollback_verified": True}
+
+    def reject_all_variations(self, project_id: str) -> dict[str, Any]:
+        """Rollback every reviewable Copilot candidate in this project.
+
+        This is a thin product action over the existing per-candidate rollback
+        authority; it never deletes arbitrary Live material and never bypasses
+        SafeWrite journals.
+        """
+        self.get_project(project_id)
+        candidates = [
+            VariationRecord.model_validate(item)
+            for item in self.store.get_state(project_id, "variations", [])
+            if item.get("status") in {"READY", "KEPT"}
+        ]
+        results = [self.variation_action(item.variation_id, "discard") for item in candidates]
+        return {
+            "status": "DISCARDED",
+            "variations": results,
+            "musical_writes": 0,
+        }
 
     def ableton_status(self) -> dict[str, Any]:
         from copilot.daw.detect import detect_ableton

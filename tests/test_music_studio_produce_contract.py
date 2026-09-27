@@ -319,6 +319,39 @@ def test_variation_preview_contract_uses_existing_artifact_route(tmp_path: Path)
     assert service.variation_action("variation_1", "open")["variation"]["variation_id"] == "variation_1"
 
 
+def test_select_is_musical_only_and_requires_manual_disk_save(tmp_path: Path) -> None:
+    service, project_id = _service(tmp_path)
+    records = [
+        VariationRecord(
+            variation_id=f"variation_{index}", project_id=project_id, request_id=f"req_{index}",
+            index=index, status="READY", persistence_status="CANDIDATE_PENDING",
+            persistence={"status": "CANDIDATE_PENDING", "project_identity": "mock-project"},
+            created_at="2026-09-27T00:00:00Z",
+        )
+        for index in (1, 2, 3)
+    ]
+    service.store.set_state(project_id, "variations", [record.model_dump(mode="json") for record in records])
+
+    selected = service.variation_action("variation_2", "select")
+
+    assert selected["status"] == "MUSICAL_ACCEPTED"
+    assert selected["persistence_status"] == "DISK_SAVE_REQUIRED"
+    assert selected["disk_save_required"] is True
+    assert selected["musical_writes"] == 0
+    rows = service.list_variations(project_id)["variations"]
+    assert rows[1]["musical_decision"] == "MUSICAL_ACCEPTED"
+    assert rows[1]["persistence_status"] == "DISK_SAVE_REQUIRED"
+    assert rows[0]["musical_decision"] == "PENDING"
+    assert rows[2]["musical_decision"] == "PENDING"
+    assert service.list_variations(project_id)["project_persistence"]["selected_variation_id"] == "variation_2"
+
+    replaced = service.variation_action("variation_3", "select")
+    assert replaced["status"] == "MUSICAL_ACCEPTED"
+    rows = service.list_variations(project_id)["variations"]
+    assert rows[1]["musical_decision"] == "PENDING"
+    assert rows[2]["musical_decision"] == "MUSICAL_ACCEPTED"
+
+
 def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: Path) -> None:
     service, project_id = _service(tmp_path)
     service._open_variation_live = lambda: (_ for _ in ()).throw(

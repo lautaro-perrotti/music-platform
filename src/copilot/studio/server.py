@@ -123,6 +123,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return self._json(result)
             if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "produce":
                 return self._json(self.service.produce_generate(parts[2], self._body()), 202)
+            if len(parts) == 5 and parts[:2] == ["api", "projects"] and parts[3:] == ["variations", "reject-all"]:
+                return self._json(self.service.reject_all_variations(parts[2]))
             if len(parts) == 4 and parts[:2] == ["api", "variations"]:
                 return self._json(self.service.variation_action(parts[2], parts[3]))
             if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "actions":
