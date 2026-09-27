@@ -672,7 +672,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     def technical_region(value: Any) -> str:
         return f"QN {value.start_qn:g}–{value.end_qn:g} · segundos {value.start_seconds:.3f}–{value.end_seconds:.3f}"
 
-    def player(item: Any, role: str) -> str:
+    def player(item: Any, role: str, audio_id: str | None = None) -> str:
         artifact = item.audio_artifacts.get(role)
         if not artifact or not artifact.filename:
             return "<em>Audio de revisión no disponible</em>"
@@ -686,7 +686,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
             stats = f"Pico {artifact.peak_dbfs:.2f} dBFS · RMS {artifact.rms_dbfs:.2f} dBFS · balance L/R {artifact.channel_balance_db:.2f} dB"
         else:
             stats = "Datos técnicos no disponibles"
-        return f'<audio controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>{silence}'
+        identifier = f' id="{html.escape(audio_id)}"' if audio_id else ""
+        return f'<audio{identifier} controls preload="none" aria-label="{html.escape(labels.get(role, role))}" src="./{html.escape(artifact.filename)}"></audio><small>{html.escape(stats)}</small>{silence}'
 
     track_manifest = review.source_artifacts.get("track_review_audio_manifest", {})
     track_rows_for_review = list(track_manifest.get("tracks") or []) if isinstance(track_manifest, dict) else []
@@ -727,20 +728,80 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     def derived_players(item: Any) -> str:
         if not track_rows_for_review:
             return (
-                f'<div class="audio-card"><b>1. {labels["context"]}</b>{player(item, "context")}</div>'
+                f'<div class="audio-card"><b>1. {labels["context"]}</b>{player(item, "context", f"context-audio-{item.window_id}")}</div>'
                 f'<div class="audio-card"><b>2. {labels["drums"]}</b>{player(item, "drums")}</div>'
                 f'<div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>'
                 f'<div class="audio-card"><b>4. {labels["vocals"]}</b>{player(item, "vocals")}</div>'
                 f'<div class="audio-card"><b>5. {labels["other"]}</b>{player(item, "other")}</div>'
             )
         return (
-            f'<div class="audio-card"><b>{labels["context"]}</b>{player(item, "context")}</div>'
+            f'<div class="audio-card"><b>{labels["context"]}</b>{player(item, "context", f"context-audio-{item.window_id}")}</div>'
             f'<details class="derived-stems"><summary>Stems derivados (opcional)</summary>'
             f'<div class="audio-card"><b>{labels["drums"]}</b>{player(item, "drums")}</div>'
             f'<div class="audio-card"><b>{labels["bass"]}</b>{player(item, "bass")}</div>'
             f'<div class="audio-card"><b>{labels["vocals"]}</b>{player(item, "vocals")}</div>'
             f'<div class="audio-card"><b>{labels["other"]}</b>{player(item, "other")}</div></details>'
         )
+
+    def musical_timeline() -> str:
+        """Make the musical time legible without changing any evidence."""
+        if not review.review_windows:
+            return ""
+        start_qn = min(item.analysis_region.start_qn for item in review.review_windows)
+        end_qn = max(item.analysis_region.end_qn for item in review.review_windows)
+        span_qn = max(1.0, end_qn - start_qn)
+        total_bars = max(1, int(math.ceil(span_qn / 4.0)))
+        ruler = "".join(
+            f"<span style='left:{((bar * 4 - start_qn) / span_qn) * 100:.4f}%'>{bar + 1}</span>"
+            for bar in range(total_bars + 1)
+            if bar % 4 == 0 or bar == total_bars
+        )
+        chord_segments: list[str] = []
+        note_segments: list[str] = []
+        for item in review.review_windows:
+            region = item.analysis_region
+            left = max(0.0, min(100.0, (region.start_qn - start_qn) / span_qn * 100.0))
+            width = max(1.0, min(100.0 - left, (region.end_qn - region.start_qn) / span_qn * 100.0))
+            hypothesis = item.selected_hypothesis or (item.alternatives[0] if item.alternatives else None)
+            chord = display_chord(hypothesis) if hypothesis else "?"
+            state = "selected" if item.selected_hypothesis else "candidate"
+            bars = f"{region.start_bar:g}–{max(region.start_bar, region.end_bar - 1):g}"
+            chord_segments.append(
+                f"<button type='button' class='timeline-chord {state}' data-window='{html.escape(item.window_id)}' "
+                f"style='left:{left:.4f}%;width:{width:.4f}%' title='Compases {html.escape(bars)} · {html.escape(chord)}'>"
+                f"<strong>{html.escape(chord)}</strong><small>{html.escape(bars)}</small></button>"
+            )
+            for event in item.bass_events:
+                onset = event.get("onset_qn")
+                duration = event.get("duration_qn") or 0.0
+                if not isinstance(onset, (int, float)):
+                    continue
+                note_left = max(0.0, min(100.0, (float(onset) - start_qn) / span_qn * 100.0))
+                note_width = max(0.45, min(100.0 - note_left, float(duration) / span_qn * 100.0))
+                note = str(event.get("pitch_class") or event.get("midi_note") or "?")
+                note_segments.append(
+                    f"<span class='timeline-note' style='left:{note_left:.4f}%;width:{note_width:.4f}%' "
+                    f"title='Nota {html.escape(note)} · QN {float(onset):.2f}'>"
+                    f"{html.escape(note)}</span>"
+                )
+        chips: list[str] = []
+        for track in track_rows_for_review:
+            status = str(track.get("status") or "UNAVAILABLE")
+            state = "signal" if status == "HAS_SIGNAL" else "silent" if status == "EXPECTED_OR_OBSERVED_SILENCE" else "unavailable"
+            chips.append(f"<span class='track-chip {state}'>{html.escape(str(track.get('display_name') or 'Sin nombre'))}</span>")
+        track_chips = "".join(chips)
+        return (
+            "<section class='musical-overview'><div class='overview-heading'><div><span class='eyebrow'>Mapa musical</span>"
+            "<h2>Cuándo cae cada acorde y qué notas lo sostienen</h2></div>"
+            "<p class='technical-inline'>Seleccioná un acorde para reproducir su ventana.</p></div>"
+            f"<div class='timeline-ruler' aria-label='Compases'>{ruler}</div>"
+            f"<div class='timeline-lane'><span class='lane-label'>ACORDES</span><div class='lane-track chord-lane'>{''.join(chord_segments)}</div></div>"
+            f"<div class='timeline-lane'><span class='lane-label'>BAJO / NOTAS</span><div class='lane-track note-lane'>{''.join(note_segments) or '<span class=\"technical-inline\">Sin notas autoritativas en este tramo</span>'}</div></div>"
+            f"<div class='track-chip-row'><span class='lane-label'>PISTAS</span>{track_chips}</div>"
+            "</section>"
+        )
+
+    timeline_html = musical_timeline()
 
     review_payload = {
         "analysis_artifact_id": review.analysis_artifact_id,
@@ -875,6 +936,8 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
         "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button> <button type='button' id='clear-review'>Borrar evaluación local</button> <span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
         f"<section class='summary'><h2>Resumen de la revisión</h2><p><b>Ventanas:</b> {window_count} · <b>Resueltas por el sistema:</b> {resolved_count} · <b>Sin resolver:</b> {unresolved_count} · <b>Tonalidad global:</b> {html.escape(tonality_status)} · <b>Evaluaciones pendientes:</b> {pending_count}</p></section>"
         f"<section class='summary'><h2>Proyecto</h2><p><b>{len(project_tracks)} pistas reales</b> · {project_signal_count} con señal · {project_silence_count} silencio observado · {project_unavailable_count} no disponibles.</p><details><summary>Inventario completo de pistas</summary><ul>{track_rows}</ul></details><details><summary>Stems derivados</summary><ul>{stem_rows}</ul></details></section>"
+        f"{timeline_html}"
+        "<style>.musical-overview{background:#111a2b;border-color:#526b9b}.overview-heading{display:flex;justify-content:space-between;gap:1rem;align-items:end}.overview-heading h2{margin:.2rem 0 0;color:#f3f6ff}.eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:#9fc2ff}.timeline-ruler{position:relative;height:1.8rem;margin-left:7rem;border-bottom:1px solid #4b5361}.timeline-ruler span{position:absolute;transform:translateX(-50%);bottom:.25rem;color:#aeb8ce;font-size:.72rem}.timeline-lane{display:grid;grid-template-columns:7rem 1fr;align-items:center;gap:.5rem;margin:.55rem 0}.lane-label{font-size:.72rem;letter-spacing:.08em;color:#aeb8ce}.lane-track{position:relative;min-height:3rem;border:1px solid #384766;border-radius:8px;background:repeating-linear-gradient(90deg,#171f30 0,#171f30 calc(25% - 1px),#293652 25%)}.chord-lane{height:3.7rem}.timeline-chord{position:absolute;top:.25rem;height:3.15rem;box-sizing:border-box;overflow:hidden;text-align:left;padding:.45rem .55rem;border-radius:7px;background:#263b60;border:1px solid #7897d0;min-width:2.2rem}.timeline-chord strong{display:block;font-size:.9rem;white-space:nowrap}.timeline-chord small{display:block;color:#b8c8e8;font-size:.72rem;white-space:nowrap}.timeline-chord.selected{background:#355d91;border-color:#b8d2ff}.timeline-chord.candidate{background:#34384b;border-style:dashed}.note-lane{height:3.3rem}.timeline-note{position:absolute;top:.4rem;bottom:.4rem;min-width:.3rem;overflow:hidden;padding:.35rem .2rem;border-radius:4px;background:#ba7440;color:#fff;font-size:.68rem;text-align:center;white-space:nowrap}.track-chip-row{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.8rem}.track-chip{padding:.25rem .5rem;border-radius:999px;border:1px solid #4b5361;font-size:.75rem}.track-chip.signal{color:#b9e8c0;border-color:#4d9a68;background:#173020}.track-chip.silent{color:#b3bac8;background:#1d2027}.track-chip.unavailable{color:#f2c48b;border-color:#956d3a;background:#2b2115}</style>"
         "<section><h2>Estado del paquete</h2>"
         f"<p><b>Usabilidad del audio:</b> {html.escape(review.audio_usability_status)} · <b>Lectura temporal:</b> {html.escape(review.timeline_mapping_status)} · <b>Audibilidad humana:</b> Pendiente</p>"
         f"<details><summary>Ver detalles técnicos de la fuente</summary><p><b>Origen:</b> {html.escape(str(source.get('source_role', 'No disponible')))}</p><p><b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p><pre>{escaped_json(source)}</pre></details>"
@@ -902,6 +965,13 @@ document.querySelectorAll('.verdict').forEach((button) => button.addEventListene
 document.querySelectorAll('textarea[data-notes]').forEach((field) => field.addEventListener('input', () => { reviewState[field.dataset.notes].notes = field.value; persist(); }));
 document.getElementById('export-review').addEventListener('click', exportReview);
 document.getElementById('clear-review').addEventListener('click', () => { if (confirm('¿Borrar la evaluación local?')) { try { localStorage.removeItem(STORAGE_KEY); } catch (error) {} reviewState = Object.fromEntries(REVIEW_DATA.windows.map((item) => [item.window_id, {verdict: 'PENDING', notes: ''}])); renderState(); setStatus('Evaluación local borrada; todo vuelve a Pendiente.'); } });
+document.querySelectorAll('.timeline-chord').forEach((button) => button.addEventListener('click', () => {
+  const audio = document.getElementById(`context-audio-${button.dataset.window}`);
+  if (!audio) return;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+  audio.scrollIntoView({behavior: 'smooth', block: 'center'});
+}));
 restore(); renderState();
 </script></body></html>'''
     return header + "".join(blocks) + footer
