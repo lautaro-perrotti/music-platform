@@ -692,28 +692,55 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     track_rows_for_review = list(track_manifest.get("tracks") or []) if isinstance(track_manifest, dict) else []
 
     def track_players(item: Any) -> str:
-        """Render verified individual-track players for this window."""
+        """Render a signal-first review view instead of 22x8 flat players."""
         if not track_rows_for_review:
             return ""
-        rows: list[str] = []
+        signal_rows: list[str] = []
+        silent_rows: list[str] = []
+        unavailable_rows: list[str] = []
         for track in track_rows_for_review:
             artifact = (track.get("window_artifacts") or {}).get(item.window_id) or {}
             name = str(track.get("display_name") or "Pista sin nombre")
             status = str(track.get("status") or "UNAVAILABLE")
-            if artifact.get("available") and artifact.get("filename"):
+            if artifact.get("available") and artifact.get("filename") and artifact.get("has_signal"):
                 stats = ""
                 if artifact.get("peak_dbfs") is not None and artifact.get("rms_dbfs") is not None:
                     stats = f"<small>Pico {float(artifact['peak_dbfs']):.2f} dBFS Â· RMS {float(artifact['rms_dbfs']):.2f} dBFS</small>"
-                rows.append(
+                signal_rows.append(
                     f"<div class='track-player'><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span>"
                     f"<audio controls preload='none' aria-label='Pista {html.escape(name)}' src='./{html.escape(str(artifact['filename']))}'></audio>{stats}</div>"
                 )
+            elif artifact.get("available") and artifact.get("filename"):
+                silent_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>Silencio en esta ventana</span></li>")
             else:
-                rows.append(
-                    f"<div class='track-player'><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span>"
-                    "<small class='silence'>Audio individual no disponible para esta región</small></div>"
-                )
-        return "<details class='track-review'><summary>Pistas individuales del proyecto</summary>" + "".join(rows) + "</details>"
+                unavailable_rows.append(f"<li><b>{html.escape(name)}</b> <span class='technical-inline'>{html.escape(status)}</span></li>")
+        signal_html = "".join(signal_rows) or "<p class='technical-inline'>Ninguna pista con señal en esta ventana.</p>"
+        silent_html = "".join(silent_rows) or "<li>Ninguna</li>"
+        unavailable_html = "".join(unavailable_rows) or "<li>Ninguna</li>"
+        return (
+            "<section class='track-review'><h3>Pistas con señal en esta ventana</h3>"
+            f"{signal_html}"
+            f"<details><summary>Pistas silenciosas ({len(silent_rows)})</summary><ul>{silent_html}</ul></details>"
+            f"<details><summary>No disponibles ({len(unavailable_rows)})</summary><ul>{unavailable_html}</ul></details></section>"
+        )
+
+    def derived_players(item: Any) -> str:
+        if not track_rows_for_review:
+            return (
+                f'<div class="audio-card"><b>1. {labels["context"]}</b>{player(item, "context")}</div>'
+                f'<div class="audio-card"><b>2. {labels["drums"]}</b>{player(item, "drums")}</div>'
+                f'<div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>'
+                f'<div class="audio-card"><b>4. {labels["vocals"]}</b>{player(item, "vocals")}</div>'
+                f'<div class="audio-card"><b>5. {labels["other"]}</b>{player(item, "other")}</div>'
+            )
+        return (
+            f'<div class="audio-card"><b>{labels["context"]}</b>{player(item, "context")}</div>'
+            f'<details class="derived-stems"><summary>Stems derivados (opcional)</summary>'
+            f'<div class="audio-card"><b>{labels["drums"]}</b>{player(item, "drums")}</div>'
+            f'<div class="audio-card"><b>{labels["bass"]}</b>{player(item, "bass")}</div>'
+            f'<div class="audio-card"><b>{labels["vocals"]}</b>{player(item, "vocals")}</div>'
+            f'<div class="audio-card"><b>{labels["other"]}</b>{player(item, "other")}</div></details>'
+        )
 
     review_payload = {
         "analysis_artifact_id": review.analysis_artifact_id,
@@ -771,11 +798,7 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
 <h4>¿Por qué se eligió este acorde?</h4><ul>{support_html}</ul>
 {f'<p class="warning"><b>{labels["contradictions"]}:</b> Hay señales que también lo contradicen.</p>' if contradictions else ''}</div>
 <h3>Escuchar</h3>
-<div class="audio-card"><b>1. {labels["context"]}</b>{player(item, "context")}</div>
-<div class="audio-card"><b>2. {labels["drums"]}</b>{player(item, "drums")}</div>
-<div class="audio-card"><b>3. {labels["bass"]}</b>{player(item, "bass")}</div>
-<div class="audio-card"><b>4. {labels["vocals"]}</b>{player(item, "vocals")}</div>
-<div class="audio-card"><b>5. {labels["other"]}</b>{player(item, "other")}</div>
+{derived_players(item)}
 {track_players(item)}
 <details><summary>Ver detalles técnicos</summary>
 <p><b>{labels["listening_context"]}:</b> {html.escape(human_region(item.listening_region))}</p>
@@ -811,8 +834,25 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     midi_only_count = sum(1 for track in project_tracks if track.get("review_audio_status") == "MIDI_ONLY")
     no_audio_count = sum(1 for track in project_tracks if track.get("review_audio_status") == "NO_REVIEW_AUDIO")
     project_audio_count = sum(1 for track in project_tracks if track.get("audio_artifact_available"))
+    project_signal_count = sum(
+        1 for track in project_tracks
+        if track.get("audio_artifact_available") and track.get("review_audio_status") == "HAS_SIGNAL"
+    )
+    project_silence_count = sum(
+        1 for track in project_tracks
+        if track.get("audio_artifact_available") and track.get("review_audio_status") == "EXPECTED_OR_OBSERVED_SILENCE"
+    )
+    project_unavailable_count = max(0, len(project_tracks) - project_audio_count)
 
     def track_status(track: dict[str, Any]) -> str:
+        if track.get("audio_artifact_available") and track.get("review_audio_status") == "HAS_SIGNAL":
+            return "Captura disponible - senal observada"
+        if track.get("audio_artifact_available"):
+            return "Captura disponible - silencio observado"
+        if track.get("review_audio_status") == "UNSUPPORTED_OUTPUT":
+            return "No disponible - salida no soportada"
+        if track.get("review_audio_status") == "CAPTURE_FAILED":
+            return "No disponible - captura fallida"
         if track.get("audio_artifact_available"):
             return "Audio de revisión disponible"
         if track.get("review_audio_status") == "MIDI_ONLY":
@@ -829,12 +869,12 @@ def render_repaired_html(review: HarmonicHumanReview) -> str:
     ) or "<li>No hay inventario de stems derivados.</li>"
     header = (
         "<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Revisión armónica humana — audio reparado</title>"
-        "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}h4{margin-bottom:.25rem;color:#d9def0}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.summary{background:#20242c}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.audio-card{padding:.65rem .8rem;margin:.5rem 0;background:#1d2027;border-radius:8px}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}.technical-inline,.technical-value{color:#9aa3b5;font-size:.88em}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}.warning{color:#f3c77b}</style></head><body>"
+        "<style>body{font:15px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#101216;color:#eee;line-height:1.45}section{border:1px solid #343944;border-radius:12px;padding:1rem;margin:1rem 0;background:#16181d}audio{display:block;width:100%;margin:.5rem 0}h3{margin-bottom:.25rem;color:#b9c4ff}h4{margin-bottom:.25rem;color:#d9def0}pre{white-space:pre-wrap;overflow:auto;background:#0c0d10;padding:.75rem;border-radius:8px;color:#cdd3e0}details{margin:.6rem 0}summary{cursor:pointer;color:#b9c4ff}.summary{background:#20242c}.hypothesis{padding:.8rem;background:#20242c;border-radius:8px}.audio-card,.track-player{padding:.65rem .8rem;margin:.5rem 0;background:#1d2027;border-radius:8px}.track-review{background:#13161c}.track-review h3{margin-top:0}.track-player b{display:inline-block;min-width:14rem}.track-review ul{margin:.5rem 0;padding-left:1.4rem}.verdicts{display:flex;flex-wrap:wrap;gap:.4rem}button{background:#242832;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.5rem .7rem;cursor:pointer}button.active{background:#405d8b;border-color:#9fc2ff}.technical-inline,.technical-value{color:#9aa3b5;font-size:.88em}textarea{display:block;width:100%;box-sizing:border-box;margin-top:.4rem;background:#0c0d10;color:#eee;border:1px solid #4b5361;border-radius:6px;padding:.6rem}.toolbar{position:sticky;top:0;background:#101216;padding:.7rem 0;border-bottom:1px solid #343944;z-index:2}.status{color:#a9d6ad}.warning{color:#f3c77b}</style></head><body>"
         f'<script type="application/json" id="review-data">{embedded_json}</script><h1>Revisión armónica humana</h1>'
         "<p>Escuchá primero <b>CONTEXTO COMPLETO</b>.</p><p>Después compará lo que escuchás con la hipótesis seleccionada. Usá <b>OTROS</b> y <b>BAJO</b> sólo si necesitás aislar elementos. No hace falta identificar el acorde desde cero: decidí si la interpretación del sistema resulta razonable.</p>"
         "<div class='toolbar'><button type='button' id='export-review'>Exportar evaluación</button> <button type='button' id='clear-review'>Borrar evaluación local</button> <span class='status' id='save-status'>Todas las evaluaciones comienzan como Pendiente.</span></div>"
         f"<section class='summary'><h2>Resumen de la revisión</h2><p><b>Ventanas:</b> {window_count} · <b>Resueltas por el sistema:</b> {resolved_count} · <b>Sin resolver:</b> {unresolved_count} · <b>Tonalidad global:</b> {html.escape(tonality_status)} · <b>Evaluaciones pendientes:</b> {pending_count}</p></section>"
-        f"<section class='summary'><h2>Proyecto</h2><p><b>{len(project_tracks)} pistas reales</b> · {project_audio_count} con audio de revisión · {midi_only_count} sólo MIDI · {no_audio_count} sin audio de revisión.</p><details open><summary>Pistas del proyecto</summary><ul>{track_rows}</ul></details><details open><summary>Stems derivados</summary><ul>{stem_rows}</ul></details></section>"
+        f"<section class='summary'><h2>Proyecto</h2><p><b>{len(project_tracks)} pistas reales</b> · {project_signal_count} con señal · {project_silence_count} silencio observado · {project_unavailable_count} no disponibles.</p><details><summary>Inventario completo de pistas</summary><ul>{track_rows}</ul></details><details><summary>Stems derivados</summary><ul>{stem_rows}</ul></details></section>"
         "<section><h2>Estado del paquete</h2>"
         f"<p><b>Usabilidad del audio:</b> {html.escape(review.audio_usability_status)} · <b>Lectura temporal:</b> {html.escape(review.timeline_mapping_status)} · <b>Audibilidad humana:</b> Pendiente</p>"
         f"<details><summary>Ver detalles técnicos de la fuente</summary><p><b>Origen:</b> {html.escape(str(source.get('source_role', 'No disponible')))}</p><p><b>Hash:</b> <span class='technical-value'>{html.escape(str(review.source_hash))}</span></p><pre>{escaped_json(source)}</pre></details>"

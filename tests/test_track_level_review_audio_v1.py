@@ -85,7 +85,9 @@ def test_attach_track_review_audio_slices_once_into_existing_windows(tmp_path: P
     }
     assert (output / "audio" / "window_01" / "tracks" / "track_01.wav").is_file()
     html = (output / "harmonic_sanity_check_v1.html").read_text(encoding="utf-8")
-    assert "Pistas individuales del proyecto" in html
+    assert "Pistas con " in html
+    assert "Pistas silenciosas (0)" in html
+    assert "No disponibles (0)" in html
     assert "Rose Bass" in html
     assert html.count("<audio ") == 2
     audit = json.loads((output / "track_level_review_audio_audit_v1.json").read_text(encoding="utf-8"))

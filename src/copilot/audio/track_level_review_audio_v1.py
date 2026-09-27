@@ -224,9 +224,11 @@ def capture_track_level_review_audio(
             "capture_provenance": "Ableton authoritative track output via existing temporary capture host",
             "limitations": [],
         }
-        if track.name in CAPTURE_HOST_NAMES:
+        if track.name in CAPTURE_HOST_NAMES or track.name == "AI Test":
             base["status"] = "UNSUPPORTED_OUTPUT"
-            base["limitations"].append("Copilot capture infrastructure track; self-routing is prohibited.")
+            base["limitations"].append(
+                "Infrastructure/test track is not a musical review source; direct self-routing is prohibited."
+            )
             captures.append(base)
             continue
         live = daw.snapshot(include_notes=False)
@@ -446,6 +448,13 @@ def reconcile_return_inventory(manifest_path: Path | str) -> dict[str, Any]:
     path = Path(manifest_path)
     manifest = json.loads(path.read_text(encoding="utf-8"))
     existing = {str(row.get("display_name") or "") for row in manifest.get("captures") or []}
+    for row in manifest.get("captures") or []:
+        if str(row.get("display_name") or "") in CAPTURE_HOST_NAMES or str(row.get("display_name") or "") == "AI Test":
+            row["status"] = "UNSUPPORTED_OUTPUT"
+            row["capture"]["artifact_path"] = None
+            row.setdefault("limitations", []).append(
+                "Infrastructure/test track is not a musical review source; direct self-routing is prohibited."
+            )
     topology = ((manifest.get("preflight") or {}).get("topology") or {}).get("return_tracks") or {}
     for return_row in topology.get("return_tracks") or []:
         name = str(return_row.get("name") or "Return")
