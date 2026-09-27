@@ -168,8 +168,16 @@ def build_reference_bound_bass_notes(
     *,
     start_qn: float,
     length_beats: float,
+    variation_index: int = 1,
 ) -> tuple[list[MidiNote], dict[str, Any]]:
-    """Move secondary onsets by a quarter beat; retain evidenced pitches."""
+    """Build one deterministic, evidence-bound bass variation.
+
+    Index 1 preserves the previously validated transform.  Indices 2-5 use
+    different deterministic combinations of onset movement, pitch assignment,
+    and density while staying inside the source's evidenced material.
+    """
+    if variation_index not in {1, 2, 3, 4, 5}:
+        raise ReferenceVariationError("BASS_VARIATION_INDEX_INVALID")
     source_start = float(pack.timeline.get("start_qn") or 0.0)
     source_end = float(pack.timeline.get("end_qn") or 0.0)
     if length_beats <= 0 or start_qn < source_start or start_qn + length_beats > source_end:
@@ -200,27 +208,42 @@ def build_reference_bound_bass_notes(
                 events[-1] = event
         else:
             events.append(event)
+    if variation_index == 5 and len(events) > 4:
+        events = [event for index, event in enumerate(events) if index % 4 != 3]
     original = [float(event.onset_qn) - local_start for event in events]
     shifted = original.copy()
     first_by_bar: set[int] = set()
     moved = 0
+    step = {1: 0.25, 2: 0.25, 3: 0.5, 4: 0.25, 5: 0.75}[variation_index]
+    direction = {1: 1, 2: -1, 3: 1, 4: -1, 5: 1}[variation_index]
+    eligible_mod = {1: 2, 2: 2, 3: 3, 4: 3, 5: 2}[variation_index]
+    eligible_remainder = {1: 1, 2: 0, 3: 1, 4: 2, 5: 1}[variation_index]
     for index, onset in enumerate(original):
         bar = int(onset // 4)
         if bar not in first_by_bar:
             first_by_bar.add(bar)
             continue
-        if index % 2 == 0:
+        if index % eligible_mod != eligible_remainder:
             continue
         previous = shifted[index - 1]
         following = original[index + 1] if index + 1 < len(original) else length_beats
         bar_start, bar_end = bar * 4.0, min((bar + 1) * 4.0, length_beats)
-        for candidate in (onset + 0.25, onset - 0.25):
+        for candidate in (onset + direction * step, onset - direction * step):
             if max(previous, bar_start) + 0.05 < candidate < min(following, bar_end) - 0.05:
                 shifted[index] = candidate
                 moved += 1
                 break
     if not moved:
         raise ReferenceVariationError("BASS_VARIATION_NO_SAFE_TRANSFORM")
+    pitches = [int(event.midi_note) for event in events]
+    if variation_index == 3:
+        pitches = pitches[1:] + pitches[:1]
+    elif variation_index == 4:
+        pitches = list(reversed(pitches))
+    elif variation_index == 5:
+        rotation = min(2, len(pitches))
+        pitches = pitches[-rotation:] + pitches[:-rotation] if rotation else pitches
+
     notes: list[MidiNote] = []
     for index, event in enumerate(events):
         onset = shifted[index]
@@ -229,7 +252,7 @@ def build_reference_bound_bass_notes(
         if duration <= 0.05:
             raise ReferenceVariationError("BASS_VARIATION_INVALID_DURATION")
         notes.append(MidiNote(
-            pitch=int(event.midi_note), start_time=round(onset, 4),
+            pitch=pitches[index], start_time=round(onset, 4),
             duration=round(duration, 4), velocity=100,
         ))
     event_traceability = [
@@ -241,7 +264,10 @@ def build_reference_bound_bass_notes(
             "source_pitch": int(event.midi_note),
             "generated_pitch": notes[index].pitch,
             "preserved": ["evidenced_pitch_material", "bar_boundary", "source_register"],
-            "changed": ["secondary_onset"] if notes[index].start_time != round(original[index], 4) else [],
+            "changed": (
+                (["secondary_onset"] if notes[index].start_time != round(original[index], 4) else [])
+                + (["pitch_assignment"] if notes[index].pitch != int(event.midi_note) else [])
+            ),
             "pitch_supported_by_source": notes[index].pitch in {int(item.midi_note) for item in events},
             "direct_copy": (
                 notes[index].start_time == round(original[index], 4)
@@ -262,7 +288,15 @@ def build_reference_bound_bass_notes(
         "simultaneous_events_merged": len(source_events) - len(events),
         "shifted_onsets": moved,
         "source_region_qn": [start_qn, start_qn + length_beats],
-        "transformation": "secondary_onsets_quarter_qn_within_bar",
+        "variation_index": variation_index,
+        "variation_strategy": {
+            1: "secondary_onsets_quarter_qn_within_bar",
+            2: "alternate_secondary_onsets_earlier_within_bar",
+            3: "half_beat_onsets_with_rotated_evidenced_pitch_assignment",
+            4: "reverse_evidenced_pitch_assignment_with_alternate_onsets",
+            5: "reduced_density_rotated_pitch_assignment_and_larger_onset_moves",
+        }[variation_index],
+        "transformation": "reference_bound_deterministic_variation",
         "source_not_copied": True,
         "event_traceability": event_traceability,
         "symbolic_validation": symbolic_validation,

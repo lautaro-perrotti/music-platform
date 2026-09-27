@@ -444,10 +444,7 @@ class StudioService:
         self.store.set_state(project_id, "workspace", workspace)
         return self.workspace_snapshot(project_id)
 
-    # --- Produce: generate one real Ableton variation, preview here ----------
-    # This is deliberately narrower than the UI's future N-variation surface.
-    # The report describes the smallest certified bass slice, not a promise
-    # that every Produce control is executable.
+    # --- Produce: generate bounded real Ableton variations, preview here ----
     PRODUCE_CAPABILITIES: tuple[tuple[str, CapabilityState, str], ...] = (
         ("ABLETON_SESSION_READINESS", CapabilityState.REAL, "copilot.daw.session_ready_v1.probe_session_ready"),
         ("REFERENCE_ANALYSIS", CapabilityState.REAL, "copilot.audio.music_analyzer.analyze_reference_file (tempo is an input)"),
@@ -455,7 +452,8 @@ class StudioService:
         ("SAFE_WRITE_KEEP_ROLLBACK", CapabilityState.REAL, "SAFE_WRITE_FOUNDATION_V2, certified producer actions only"),
         ("READ_SELECTION", CapabilityState.PARTIAL, "V1 accepts an explicit region; Live selection is not required for this slice"),
         ("SINGLE_VARIATION_PLAN", CapabilityState.REAL, "one 8-bar bass variation from explicit, project-bound MIDI evidence paths"),
-        ("VARIATION_PLANNER_N", CapabilityState.MISSING, "no planner returns N distinct plans from reference + instruction"),
+        ("VARIATION_PLANNER_N", CapabilityState.REAL, "deterministic 1/3/5 reference-bound strategies with distinct symbolic signatures"),
+        ("MULTI_VARIATION_PLAN", CapabilityState.REAL, "one request yields 1, 3, or 5 independently reviewable variation records"),
         ("WRITE_MIDI_CLIP", CapabilityState.REAL, "ProductionCompiler -> SafeWrite -> authoritative MIDI and Arrangement readback"),
         ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded create -> instrument -> pattern -> Arrangement compound"),
         ("COPILOT_OWNED_TRACK_POLICY", CapabilityState.REAL, "new deterministic Copilot Variation track plus persisted ownership registry"),
@@ -481,7 +479,7 @@ class StudioService:
             "capabilities": rows,
             "missing": missing,
             "required_for_one_variation_missing": required_missing,
-            "scope": "ONE_BASS_VARIATION_ONLY",
+            "scope": "ONE_TO_FIVE_BASS_VARIATIONS",
             "reference_evidence_required": ["reference_analysis_path", "musical_understanding_path"],
             "reference_evidence_sources": ["explicit request", "project configuration"],
             "discard_after_studio_restart": "UNAVAILABLE",
@@ -518,8 +516,6 @@ class StudioService:
             raise ValueError("PRODUCE_INSTRUCTION_REQUIRED")
         if request.variations not in {1, 3, 5}:
             raise ValueError("PRODUCE_VARIATION_COUNT_INVALID")
-        if request.variations != 1:
-            raise ValueError("PRODUCE_VARIATION_COUNT_UNSUPPORTED_FOR_V1")
         if request.length_bars not in {None, 8}:
             raise ValueError("PRODUCE_LENGTH_INVALID")
         if not request.reference_analysis_path or not request.musical_understanding_path:
@@ -527,12 +523,39 @@ class StudioService:
         if payload.get("start_qn") is None and configured.get("start_qn") is None:
             request.start_qn = float(load_reference_pack(request.reference_analysis_path).timeline.get("start_qn") or 0.0)
         self._require_generation_backend("produce.generate")
-        return self._produce_one_real_variation(project_id, request)
+        if request.variations == 1:
+            return self._produce_one_real_variation(project_id, request)
+        shared_daw, _ = self._open_variation_live()
+        try:
+            results = [
+                self._produce_one_real_variation(
+                    project_id, request, variation_index=index,
+                    variation_count=request.variations, live_daw=shared_daw,
+                )
+                for index in range(1, request.variations + 1)
+            ]
+        except Exception:
+            try:
+                shared_daw.disconnect()
+            except Exception:
+                pass
+            raise
+        if request.variations == 1:
+            return results[0]
+        return {
+            "variations": [result["variation"] for result in results],
+            "status": "READY",
+            "musical_writes": sum(int(result.get("musical_writes") or 0) for result in results),
+            "write_authority": "ProductionCompiler->SafeWriteExecutor",
+        }
 
-    def _build_variation_plan(self, *, request: ProduceRequest, session: Any, variation_id: str) -> MusicPlan:
+    def _build_variation_plan(
+        self, *, request: ProduceRequest, session: Any, variation_id: str,
+        variation_index: int = 1, variation_count: int = 1,
+    ) -> MusicPlan:
         bars = request.length_bars or 8
         length_beats = float(bars * 4)
-        track_name = f"Copilot Variation {variation_id[-8:]}"
+        track_name = f"Copilot Variation {variation_index} {variation_id[-8:]}"
         pack_path = Path(request.reference_analysis_path or "").resolve()
         understanding_path = Path(request.musical_understanding_path or "").resolve()
         working_root = Path(session.project_path).resolve().parent
@@ -549,7 +572,7 @@ class StudioService:
             raise ReferenceVariationError("REFERENCE_REGION_LENGTH_MISMATCH")
         notes, reference_features = build_reference_bound_bass_notes(
             reference_pack, understanding, start_qn=request.start_qn,
-            length_beats=length_beats,
+            length_beats=length_beats, variation_index=variation_index,
         )
         reference_features.update({
             "source_reference_id": reference_pack.reference_id,
@@ -566,6 +589,8 @@ class StudioService:
             start_qn=request.start_qn,
             length_bars=bars,
             instruction=request.instruction,
+            variation_index=variation_index,
+            variation_count=variation_count,
         )
         reference_features["canonical_music_model"] = canonical_view.model_dump(mode="json")
         reference_features["musical_variation_intent"] = variation_intent.model_dump(mode="json")
@@ -715,13 +740,23 @@ class StudioService:
             self.store.create_job(job)
         return job_id
 
-    def _produce_one_real_variation(self, project_id: str, request: ProduceRequest) -> dict[str, Any]:
+    def _produce_one_real_variation(
+        self, project_id: str, request: ProduceRequest, *,
+        variation_index: int = 1, variation_count: int = 1,
+        live_daw: AbletonTcpAdapter | None = None,
+    ) -> dict[str, Any]:
         variation_id = f"variation_{uuid.uuid4().hex[:16]}"
         bars = request.length_bars or 8
         length_beats = float(bars * 4)
-        daw, session = self._open_variation_live()
+        owns_daw = live_daw is None
+        daw, session = self._open_variation_live() if owns_daw else (live_daw, live_daw.snapshot())
+        if not session.project_identity:
+            raise ProduceExecutionBlocked("PROJECT_IDENTITY_MISSING")
         try:
-            plan = self._build_variation_plan(request=request, session=session, variation_id=variation_id)
+            plan = self._build_variation_plan(
+                request=request, session=session, variation_id=variation_id,
+                variation_index=variation_index, variation_count=variation_count,
+            )
             compiled = ProductionCompiler().compile(plan, session=session)
             if compiled.status != "COMPILED" or compiled.intent is None:
                 raise ProduceExecutionBlocked("PLAN_NOT_COMPILED", detail="; ".join(compiled.reasons), evidence={"plan_id": plan.plan_id})
@@ -760,7 +795,7 @@ class StudioService:
                     )
                 failed = VariationRecord(
                     variation_id=variation_id, project_id=project_id, request_id=variation_id,
-                    index=1, status="FAILED", ableton_track_ref=track.stable_id,
+                    index=variation_index, status="FAILED", ableton_track_ref=track.stable_id,
                     ableton_clip_ref=clip_ref, plan_id=plan.plan_id, failure_reason=reason,
                     safe_write={"result": result.to_dict(), "rollback_verified": True},
                     region={"start_qn": request.start_qn, "end_qn": request.start_qn + length_beats, "bars": bars},
@@ -850,7 +885,7 @@ class StudioService:
                 variation_id=variation_id,
                 project_id=project_id,
                 request_id=variation_id,
-                index=1,
+                index=variation_index,
                 status="READY",
                 ableton_track_ref=track.stable_id,
                 ableton_clip_ref=clip_ref,
@@ -871,7 +906,7 @@ class StudioService:
                         "phrase length and source register",
                     ],
                     "changed": [
-                        "eligible secondary onset placement within each bar",
+                        plan.gate["reference_features"].get("variation_strategy", "deterministic reference-bound transformation"),
                     ],
                     "limitations": [
                         "harmony remains evidence-bound and unresolved where the source is ambiguous",
@@ -882,6 +917,9 @@ class StudioService:
                     "source_kind": plan.gate["reference_features"].get("source_kind"),
                     "source_event_count": plan.gate["reference_features"].get("source_event_count"),
                     "generated_event_count": plan.gate["reference_features"].get("generated_event_count"),
+                    "variation_index": variation_index,
+                    "variation_count": variation_count,
+                    "variation_strategy": plan.gate["reference_features"].get("variation_strategy"),
                     "source_not_copied": plan.gate["reference_features"].get("source_not_copied"),
                     "event_traceability": plan.gate["reference_features"].get("event_traceability", []),
                     "symbolic_validation": plan.gate["reference_features"].get("symbolic_validation", {}),

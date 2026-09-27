@@ -100,6 +100,10 @@ export async function showProduce(ctx) {
 ${ui.error ? `<div role="alert" style="padding:10px 14px;border-radius:8px;background:#1E1616;border:1px solid #4A2C2A;font-size:12.5px;color:#E7B7B2">${esc(ui.error)}</div>` : ''}
 ${referencePanel(live)}${instructionPanel()}${refusalPanel()}${resultsPanel(variations || [])}
 </div></div>${rail(project, live)}</main>`;
+  const countGroup = main.querySelector('[aria-label="count"]');
+  if (countGroup) {
+    countGroup.innerHTML = [1, 3, 5].map(value => `<button role="radio" aria-checked="${value === ui.count}" data-p="count" data-v="${value}" style="height:28px;min-width:40px;padding:0 12px;border:0;border-radius:4px;background:${value === ui.count ? '#34373D' : 'transparent'};color:${value === ui.count ? C.t1 : C.t3};font-size:12.5px;cursor:pointer">${value}</button>`).join('');
+  }
   wire(ctx, project);
   if (!live && !liveRequest) liveStatus(api).then(() => { if ((location.hash.slice(1) || 'produce').startsWith('produce')) showProduce(ctx); });
 }

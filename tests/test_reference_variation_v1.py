@@ -106,6 +106,21 @@ def test_reference_bound_notes_fail_closed_without_events() -> None:
         build_reference_bound_bass_notes(_pack(), understanding, start_qn=160.0, length_beats=32.0)
 
 
+def test_five_variation_strategies_are_deterministic_and_distinct() -> None:
+    signatures = set()
+    for variation_index in range(1, 6):
+        notes, features = build_reference_bound_bass_notes(
+            _pack(), _understanding(), start_qn=160.0, length_beats=32.0,
+            variation_index=variation_index,
+        )
+        assert features["symbolic_validation"]["status"] == "VERIFIED"
+        assert features["variation_index"] == variation_index
+        assert features["variation_strategy"]
+        assert all(note.pitch in {33, 37, 40, 42} for note in notes)
+        signatures.add(tuple((note.start_time, note.duration, note.pitch) for note in notes))
+    assert len(signatures) == 5
+
+
 def test_reference_binding_rejects_other_project_or_analysis(tmp_path) -> None:
     path = tmp_path / "reference_pack.json"
     path.write_text(_pack().model_dump_json(), encoding="utf-8")

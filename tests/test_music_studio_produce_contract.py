@@ -75,16 +75,36 @@ def test_capability_report_certifies_only_the_one_variation_slice(tmp_path: Path
     service, _ = _service(tmp_path)
     report = service.produce_capabilities()
     assert report["generation_available"] is True
-    assert report["scope"] == "ONE_BASS_VARIATION_ONLY"
-    assert "VARIATION_PLANNER_N" in report["missing"]
+    assert report["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS"
+    assert "VARIATION_PLANNER_N" not in report["missing"]
     real = {row["name"] for row in report["capabilities"] if row["state"] == "REAL"}
-    assert {"SINGLE_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE", "KEEP_VARIATION"} <= real
+    assert {"SINGLE_VARIATION_PLAN", "MULTI_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE", "KEEP_VARIATION"} <= real
 
 
-def test_generate_blocks_n_variations_before_live_write(tmp_path: Path) -> None:
+def test_generate_supports_bounded_multi_variation_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     service, project_id = _service(tmp_path)
-    with pytest.raises(ValueError, match="PRODUCE_VARIATION_COUNT_UNSUPPORTED_FOR_V1"):
-        service.produce_generate(project_id, {"scope": "region", "instruction": "make a bass variation", "variations": 5, "length_bars": 16})
+    reference = _reference_payload(tmp_path, "mock-project")
+    calls = []
+    shared_daw = object()
+
+    def fake_generate(_project_id, _request, *, variation_index, variation_count, live_daw=None):
+        calls.append((variation_index, variation_count, live_daw))
+        return {
+            "variation": {"variation_id": f"variation_{variation_index}", "index": variation_index},
+            "status": "READY", "musical_writes": 4,
+        }
+
+    monkeypatch.setattr(service, "_produce_one_real_variation", fake_generate)
+    monkeypatch.setattr(service, "_open_variation_live", lambda: (shared_daw, None))
+    output = service.produce_generate(project_id, {
+        "scope": "region", "instruction": "make five bass variations", "variations": 5,
+        "length_bars": 8, **reference,
+    })
+    assert [index for index, _, _ in calls] == list(range(1, 6))
+    assert all(total == 5 for _, total, _ in calls)
+    assert all(daw is shared_daw for _, _, daw in calls)
+    assert len(output["variations"]) == 5
+    assert output["musical_writes"] == 20
 
 
 @pytest.mark.parametrize("payload, code", [
@@ -280,7 +300,7 @@ def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: 
         with urllib.request.urlopen(f"{base}/api/produce/capabilities") as response:
             body = json.load(response)
             assert body["generation_available"] is True
-            assert body["scope"] == "ONE_BASS_VARIATION_ONLY"
+            assert body["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS"
         request = urllib.request.Request(f"{base}/api/projects/{project_id}/produce", method="POST",
                                          data=json.dumps({"instruction": "make a bass variation", "variations": 1}).encode(),
                                          headers={"Content-Type": "application/json"})
