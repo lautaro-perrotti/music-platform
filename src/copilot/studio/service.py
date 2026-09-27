@@ -551,6 +551,11 @@ class StudioService:
             reference_pack, understanding, start_qn=request.start_qn,
             length_beats=length_beats,
         )
+        reference_features.update({
+            "source_reference_id": reference_pack.reference_id,
+            "source_project_id": reference_pack.project_id,
+            "tempo_bpm": reference_pack.tempo_bpm,
+        })
         canonical_view = build_canonical_music_model_view_v2(
             reference_pack,
             musical_understanding=understanding,
@@ -854,6 +859,37 @@ class StudioService:
                 ownership={"owner": "COPILOT", "track_stable_id": track.stable_id, "track_name": track.name, "clip_index": int(pattern_step.arguments["clip_index"]), "arrangement_clip_ids": arrangement_step.expected_after["arrangement_clip_ids"]},
                 safe_write={"result": result.to_dict(), "journal_path": result.journal_path, "prestate_path": result.prestate_path},
                 region={"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats, "bars": bars, "scope": request.scope},
+                reference={
+                    "source_reference_id": plan.gate["reference_features"].get("source_reference_id"),
+                    "region": plan.gate["reference_features"].get("source_region_qn"),
+                    "tempo_bpm": plan.gate["reference_features"].get("tempo_bpm"),
+                },
+                musical_summary={
+                    "preserved": [
+                        "evidenced pitch material",
+                        "reference tempo and QN grid",
+                        "phrase length and source register",
+                    ],
+                    "changed": [
+                        "eligible secondary onset placement within each bar",
+                    ],
+                    "limitations": [
+                        "harmony remains evidence-bound and unresolved where the source is ambiguous",
+                        "musical quality still requires human listening",
+                    ],
+                },
+                provenance={
+                    "source_kind": plan.gate["reference_features"].get("source_kind"),
+                    "source_event_count": plan.gate["reference_features"].get("source_event_count"),
+                    "generated_event_count": plan.gate["reference_features"].get("generated_event_count"),
+                    "source_not_copied": plan.gate["reference_features"].get("source_not_copied"),
+                    "event_traceability": plan.gate["reference_features"].get("event_traceability", []),
+                    "symbolic_validation": plan.gate["reference_features"].get("symbolic_validation", {}),
+                    "canonical_music_model": plan.gate["reference_features"].get("canonical_music_model", {}),
+                    "musical_variation_intent": plan.gate["reference_features"].get("musical_variation_intent", {}),
+                    "pack_sha256": plan.gate["reference_features"].get("pack_sha256"),
+                    "understanding_sha256": plan.gate["reference_features"].get("understanding_sha256"),
+                },
                 created_at=utc_now(),
             )
             self.store.set_state(project_id, "variations", [*self.store.get_state(project_id, "variations", []), record.model_dump(mode="json")])

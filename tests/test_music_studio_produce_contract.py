@@ -157,6 +157,11 @@ def test_real_bridge_compiles_writes_captures_and_rolls_back_owned_material(tmp_
     assert generated is not None
     assert generated.clips[0].notes
     assert len(daw.snapshot().tracks) == 1
+    assert variation["provenance"]["symbolic_validation"]["status"] == "VERIFIED"
+    assert variation["provenance"]["source_not_copied"] is True
+    trace = variation["provenance"]["event_traceability"]
+    assert trace and any(item["changed"] for item in trace)
+    assert not all(item["direct_copy"] for item in trace)
 
     kept = service.variation_action(variation["variation_id"], "keep")
     assert kept["status"] == "KEPT"

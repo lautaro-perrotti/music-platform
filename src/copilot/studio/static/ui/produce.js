@@ -57,7 +57,13 @@ function refusalPanel() {
 
 function resultsPanel(variations) {
   if (!variations.length) return '';
-  const rows = variations.map(v => {
+  const summarySource = variations.find(v => v.musical_summary) || variations[0];
+  const summary = summarySource.musical_summary || {};
+  const summarySection = `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 0 14px;border-bottom:1px solid ${C.line}">
+<div><div>${label('Preserved')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${(summary.preserved || []).map(item => `• ${esc(item)}`).join('<br>') || 'Reference-bound evidence'}</div></div>
+<div><div>${label('Changed')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${(summary.changed || []).map(item => `• ${esc(item)}`).join('<br>') || 'New editable material'}</div></div>
+<div><div>${label('Limitations')}</div><div style="font-size:12px;color:${C.t3};line-height:1.5">${(summary.limitations || []).map(item => `• ${esc(item)}`).join('<br>') || 'Human listening required'}</div></div></div>`;
+  const rows = summarySection + variations.map(v => {
     const ready = v.preview_url && v.preview?.signal_status === 'HAS_SIGNAL' && ['READY', 'KEPT'].includes(v.status);
     const kept = v.status === 'KEPT';
     const preview = ready ? `<audio data-variation="${esc(v.variation_id)}" preload="none" src="${esc(v.preview_url)}"></audio><button data-p="preview" data-id="${esc(v.variation_id)}" style="height:30px;padding:0 12px;border-radius:15px;border:0;background:${ui.playing === v.variation_id ? C.ivory : C.control};color:${ui.playing === v.variation_id ? '#141518' : C.t1};font-size:12.5px;font-weight:600;cursor:pointer">${ui.playing === v.variation_id ? '❚❚ Pause' : '▶ Preview'}</button>` : `<span style="font-size:12px;color:${C.cue}">● ${esc(v.failure_reason || (v.status === 'READY' ? 'PREVIEW_NOT_VERIFIED' : String(v.status).replace(/_/g, ' ').toLowerCase()))}</span>`;

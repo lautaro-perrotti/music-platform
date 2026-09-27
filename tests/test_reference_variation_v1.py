@@ -86,6 +86,12 @@ def test_reference_bound_notes_use_measured_events_and_transform_them() -> None:
     assert features["source_not_copied"] is True
     assert features["generated_event_count"] == len(notes)
     assert features["shifted_onsets"] > 0
+    assert features["symbolic_validation"]["status"] == "VERIFIED"
+    assert features["symbolic_validation"]["direct_note_copy"] is False
+    assert features["symbolic_validation"]["rhythm_transformed"] is True
+    assert len(features["event_traceability"]) == len(notes)
+    assert any(row["changed"] for row in features["event_traceability"])
+    assert not all(row["direct_copy"] for row in features["event_traceability"])
     assert {note.pitch for note in notes} == {33, 37, 40, 42}
     assert notes[0].start_time == 0.0
     assert notes[4].start_time == 4.0

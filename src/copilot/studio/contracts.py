@@ -135,6 +135,9 @@ class VariationRecord(BaseModel):
     ownership: dict[str, Any] = Field(default_factory=dict)
     safe_write: dict[str, Any] = Field(default_factory=dict)
     region: dict[str, Any] = Field(default_factory=dict)
+    reference: dict[str, Any] = Field(default_factory=dict)
+    musical_summary: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
     failure_reason: str | None = None
     created_at: str
 

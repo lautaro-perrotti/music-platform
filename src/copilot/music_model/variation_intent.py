@@ -86,4 +86,8 @@ def build_bass_variation_intent(
     )
 
 
-__all__ = ["MusicalVariationIntent", "build_bass_variation_intent"]
+# Product-facing name; keep the historical name as a compatibility alias so
+# existing persisted payloads and imports remain stable.
+VariationIntent = MusicalVariationIntent
+
+__all__ = ["VariationIntent", "MusicalVariationIntent", "build_bass_variation_intent"]

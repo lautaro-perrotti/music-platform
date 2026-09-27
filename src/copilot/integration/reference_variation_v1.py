@@ -16,6 +16,68 @@ class ReferenceVariationError(ValueError):
     """The reference does not contain enough measured evidence to vary safely."""
 
 
+def validate_bass_variation_symbolically(
+    source_events: list[Any],
+    generated_notes: list[MidiNote],
+    *,
+    length_beats: float,
+    moved_onsets: int,
+    source_offset_qn: float = 0.0,
+) -> dict[str, Any]:
+    """Validate one generated bass phrase before it reaches Ableton.
+
+    This is a deterministic plan gate, not a new musical analyzer.  It checks
+    the invariants that make the bounded variation safe to execute and keeps
+    the distinction between evidenced source material and the transformed
+    event sequence explicit.
+    """
+    if not generated_notes:
+        raise ReferenceVariationError("BASS_VARIATION_NO_GENERATED_NOTES")
+    if length_beats <= 0:
+        raise ReferenceVariationError("BASS_VARIATION_LENGTH_INVALID")
+    if any(
+        note.start_time < -1e-6
+        or note.duration <= 0
+        or note.start_time + note.duration > length_beats + 1e-6
+        or not 0 <= note.pitch <= 127
+        for note in generated_notes
+    ):
+        raise ReferenceVariationError("BASS_VARIATION_SYMBOLIC_BOUNDS_INVALID")
+
+    source_pitches = {int(event.midi_note) for event in source_events if event.midi_note is not None}
+    if not source_pitches or any(note.pitch not in source_pitches for note in generated_notes):
+        raise ReferenceVariationError("BASS_VARIATION_UNSUPPORTED_PITCH_MATERIAL")
+
+    source_signature = [
+        (round(float(event.onset_qn) - source_offset_qn, 4), int(event.midi_note), round(float(event.duration_qn), 4))
+        for event in source_events
+    ]
+    generated_signature = [
+        (round(note.start_time, 4), note.pitch, round(note.duration, 4))
+        for note in generated_notes
+    ]
+    direct_copy = source_signature == generated_signature
+    if direct_copy or moved_onsets <= 0:
+        raise ReferenceVariationError("BASS_VARIATION_NOT_NEW_MATERIAL")
+
+    return {
+        "status": "VERIFIED",
+        "length_beats": length_beats,
+        "source_note_count": len(source_events),
+        "generated_note_count": len(generated_notes),
+        "note_count_preserved": len(source_events) == len(generated_notes),
+        "pitch_range": {
+            "source": [min(source_pitches), max(source_pitches)],
+            "generated": [min(note.pitch for note in generated_notes), max(note.pitch for note in generated_notes)],
+        },
+        "harmonic_compatibility": "EVIDENCED_SOURCE_PITCH_MATERIAL",
+        "direct_note_copy": direct_copy,
+        "rhythm_transformed": moved_onsets > 0,
+        "phrase_length_preserved": all(note.start_time + note.duration <= length_beats + 1e-6 for note in generated_notes),
+        "unresolved_harmony_preserved": True,
+    }
+
+
 def load_reference_pack(path: Path | str) -> MusicAnalysisPack:
     source = Path(path)
     if not source.is_file():
@@ -170,6 +232,29 @@ def build_reference_bound_bass_notes(
             pitch=int(event.midi_note), start_time=round(onset, 4),
             duration=round(duration, 4), velocity=100,
         ))
+    event_traceability = [
+        {
+            "generated_index": index,
+            "source_event_id": event.event_id,
+            "source_onset_qn": round(original[index], 4),
+            "generated_onset_qn": round(notes[index].start_time, 4),
+            "source_pitch": int(event.midi_note),
+            "generated_pitch": notes[index].pitch,
+            "preserved": ["evidenced_pitch_material", "bar_boundary", "source_register"],
+            "changed": ["secondary_onset"] if notes[index].start_time != round(original[index], 4) else [],
+            "pitch_supported_by_source": notes[index].pitch in {int(item.midi_note) for item in events},
+            "direct_copy": (
+                notes[index].start_time == round(original[index], 4)
+                and notes[index].pitch == int(event.midi_note)
+                and notes[index].duration == round(float(event.duration_qn), 4)
+            ),
+        }
+        for index, event in enumerate(events)
+    ]
+    symbolic_validation = validate_bass_variation_symbolically(
+        events, notes, length_beats=length_beats, moved_onsets=moved,
+        source_offset_qn=local_start,
+    )
     return notes, {
         "source_kind": "ABLETON_MIDI",
         "source_event_count": len(source_events),
@@ -179,6 +264,8 @@ def build_reference_bound_bass_notes(
         "source_region_qn": [start_qn, start_qn + length_beats],
         "transformation": "secondary_onsets_quarter_qn_within_bar",
         "source_not_copied": True,
+        "event_traceability": event_traceability,
+        "symbolic_validation": symbolic_validation,
         "evidence_refs": list(dict.fromkeys(ref for event in events for ref in event.evidence_refs)),
     }
 

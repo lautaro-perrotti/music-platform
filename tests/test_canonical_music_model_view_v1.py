@@ -1,5 +1,5 @@
 from copilot.audio.music_analyzer_v1 import build_music_analysis_pack
-from copilot.music_model import build_bass_variation_intent, build_canonical_music_model_view, build_canonical_music_model_view_v2
+from copilot.music_model import VariationIntent, build_bass_variation_intent, build_canonical_music_model_view, build_canonical_music_model_view_v2
 from copilot.reasoning.producer_planner_v1 import build_astra_producer_planner_context
 from copilot.schemas.canonical_music_model import CanonicalMusicModelView
 from copilot.schemas.reference_analysis import ReferenceAnalysisPack, ReferenceStateTokens
@@ -117,3 +117,4 @@ def test_bass_variation_intent_is_read_only_and_evidence_bound():
     assert intent.role == "BASS"
     assert "evidenced_pitch_material" in intent.preserve
     assert "produce_a_new_editable_sequence_not_an_exact_copy" in intent.transform
+    assert isinstance(intent, VariationIntent)
