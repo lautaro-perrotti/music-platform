@@ -1,6 +1,26 @@
 # CURRENT_STATE.md
 
-Date: 2026-09-21. Runtime > this file when they disagree.
+Date: 2026-09-27. Runtime > this file when they disagree.
+
+## Latest bounded variation (pista Project)
+
+`REFERENCE_BASS_VARIATION_8_BAR` passed one real controlled-working-copy run:
+authoritative reconciled bass MIDI → 21-note rhythmic variation →
+`MusicPlan → ProductionCompiler → SafeWrite` → Live Arrangement clip at
+QN 160–192 → isolated `HAS_SIGNAL` WAV (RMS −21.14 dBFS). The working copy was
+saved; `pista.als` was unchanged. The earlier 32-bar `READY` demo was corrected
+to `FAILED / SILENT_PREVIEW_LEGACY` after measuring its zero-signal WAV. A
+separate preflight failure was rolled back before the successful run. This
+certifies editability and signal, not musical quality or harmonic correctness.
+See `docs/REFERENCE_BASS_VARIATION_AUDIT_2026-09-27.md` for evidence and limits.
+
+`MUSICAL_UNDERSTANDING_COMPLETION_P0` now has one canonical integration seam:
+existing read-only evidence projects through `CanonicalMusicModelViewV2`, then
+the deterministic `MusicalVariationIntent` enters the same `MusicPlan →
+ProductionCompiler → SafeWrite` path. Groove, bass/drums relationships,
+motifs/phrases and arrangement remain explicit domains; melody is reported as
+`INSUFFICIENT_EVIDENCE` because no authoritative melody source is attached.
+No analyzer or second write authority was added.
 
 ## What the product is
 

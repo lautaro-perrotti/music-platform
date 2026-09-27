@@ -13,11 +13,13 @@ from copilot.schemas.bass_musical_model import BassMusicalModel
 from copilot.schemas.canonical_music_model import (
     CanonicalDomainView,
     CanonicalMusicModelView,
+    CanonicalMusicModelViewV2,
     CanonicalSourceRef,
     CanonicalTimeline,
 )
 from copilot.schemas.harmonic_understanding import HarmonicUnderstanding
 from copilot.schemas.music_analysis import MusicAnalysisPack
+from copilot.schemas.musical_understanding import MusicalUnderstanding
 from copilot.schemas.reference_analysis import ReferenceAnalysisPack
 
 
@@ -243,4 +245,102 @@ def build_canonical_music_model_view(
     )
 
 
-__all__ = ["build_canonical_music_model_view"]
+def build_canonical_music_model_view_v2(
+    pack: MusicAnalysisPack,
+    *,
+    reference_analysis: ReferenceAnalysisPack | None = None,
+    bass_model: BassMusicalModel | None = None,
+    harmonic_understanding: HarmonicUnderstanding | None = None,
+    musical_understanding: MusicalUnderstanding | None = None,
+    stem_analysis: Any | None = None,
+    arrangement_plan: Any | None = None,
+) -> CanonicalMusicModelViewV2:
+    """Project existing evidence artifacts into the consolidated P0 view.
+
+    This adapter does not rerun analyzers or promote weak evidence.  Missing
+    domains remain explicitly unavailable/insufficient.
+    """
+    base = build_canonical_music_model_view(
+        pack,
+        reference_analysis=reference_analysis,
+        bass_model=bass_model,
+        harmonic_understanding=harmonic_understanding,
+        stem_analysis=stem_analysis,
+    )
+    understanding_payload = musical_understanding.model_dump(mode="json") if musical_understanding else {}
+    bass_payload = understanding_payload.get("bass") or {}
+    drums_payload = understanding_payload.get("drums") or {}
+    relationship_payload = understanding_payload.get("relationships") or {}
+    understanding_refs = _collect_evidence_refs(understanding_payload)
+
+    if musical_understanding is None:
+        bass = base.bass
+        groove = CanonicalDomainView(status="NOT_AVAILABLE", limitations=["MUSICAL_UNDERSTANDING_NOT_ATTACHED"])
+        melody = CanonicalDomainView(status="INSUFFICIENT_EVIDENCE", limitations=["NO_AUTHORITATIVE_MELODY_SOURCE_ATTACHED"])
+        motifs = CanonicalDomainView(status="NOT_AVAILABLE", limitations=["MUSICAL_UNDERSTANDING_NOT_ATTACHED"])
+        relationships = CanonicalDomainView(status="NOT_AVAILABLE", limitations=["MUSICAL_UNDERSTANDING_NOT_ATTACHED"])
+    else:
+        bass = base.bass
+        if bass_model is None:
+            bass = CanonicalDomainView(
+                status=str(bass_payload.get("status") or "INSUFFICIENT_EVIDENCE"),
+                value=bass_payload,
+                source_artifacts=["MusicalUnderstanding"],
+                evidence_refs=understanding_refs,
+                limitations=list(bass_payload.get("limitations") or []),
+            )
+        groove = CanonicalDomainView(
+            status=str(drums_payload.get("status") or "INSUFFICIENT_EVIDENCE"),
+            value={"drums": drums_payload, "bass_rhythm": bass_payload.get("rhythmic_structure") or {}},
+            source_artifacts=["MusicalUnderstanding"], evidence_refs=understanding_refs,
+            limitations=list(drums_payload.get("limitations") or []),
+        )
+        melody = CanonicalDomainView(
+            status="INSUFFICIENT_EVIDENCE", value={"source": None, "available_pitch_events": 0},
+            source_artifacts=["MusicalUnderstanding"], evidence_refs=understanding_refs,
+            limitations=["NO_AUTHORITATIVE_MELODY_SOURCE_ATTACHED"],
+        )
+        bass_model_payload = bass_model.model_dump(mode="json") if bass_model else {}
+        motif_rows = list(bass_model_payload.get("motifs") or bass_payload.get("motifs") or [])
+        phrase_rows = list(bass_model_payload.get("phrases") or bass_payload.get("phrase_structure") or [])
+        motifs = CanonicalDomainView(
+            status="SUPPORTED" if motif_rows or phrase_rows else "INSUFFICIENT_EVIDENCE",
+            value={"motifs": motif_rows, "phrases": phrase_rows},
+            source_artifacts=["BassMusicalModel" if bass_model else "MusicalUnderstanding"],
+            evidence_refs=understanding_refs,
+            limitations=list(bass_model.limitations if bass_model else []),
+        )
+        relationships = CanonicalDomainView(
+            status="SUPPORTED" if relationship_payload else "INSUFFICIENT_EVIDENCE",
+            value=relationship_payload, source_artifacts=["MusicalUnderstanding"],
+            evidence_refs=understanding_refs,
+            limitations=list(understanding_payload.get("global_limitations") or []),
+        )
+
+    if arrangement_plan is None:
+        arrangement = CanonicalDomainView(
+            status="EVIDENCE_ONLY" if base.structure.status == "SUPPORTED" else "NOT_AVAILABLE",
+            value=base.structure.value, source_artifacts=list(base.structure.source_artifacts),
+            evidence_refs=list(base.structure.evidence_refs),
+            limitations=["ARRANGEMENT_DECISION_PLAN_NOT_ATTACHED"],
+        )
+    else:
+        payload = _dump(arrangement_plan)
+        arrangement = CanonicalDomainView(
+            status="SUPPORTED" if payload.get("decisions") else "INSUFFICIENT_EVIDENCE",
+            value=payload, source_artifacts=["ArrangementEnginePlan"],
+            evidence_refs=list(payload.get("evidence_refs") or []),
+            limitations=list(payload.get("limitations") or []),
+        )
+
+    base_payload = base.model_dump(mode="json")
+    base_payload["schema_version"] = "canonical-music-model-view-v2"
+    base_payload["bass"] = bass.model_dump(mode="json")
+    return CanonicalMusicModelViewV2(
+        **base_payload,
+        groove=groove, melody=melody, motifs=motifs,
+        arrangement=arrangement, relationships=relationships,
+    )
+
+
+__all__ = ["build_canonical_music_model_view", "build_canonical_music_model_view_v2"]

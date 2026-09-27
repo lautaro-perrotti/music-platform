@@ -5,7 +5,7 @@
 // refuses with GENERATION_BACKEND_NOT_AVAILABLE, it shows that state and nothing else.
 import { esc } from './lib/define.js';
 
-const ui = { scope: 'REGION', instruction: '', count: 1, length: 16, busy: false, refusal: null, error: '', live: null, liveAt: 0, playing: null };
+const ui = { scope: 'REGION', instruction: '', count: 1, length: 8, busy: false, refusal: null, error: '', live: null, liveAt: 0, playing: null };
 let liveRequest = null;
 
 const C = { bg: '#0F1012', panel: '#17181B', raised: '#1D1F23', control: '#24262B', line: '#26292E', line2: '#34373D', t1: '#EDEBE7', t2: '#B0ADA7', t3: '#8D8A85', cue: '#5EC6D3', ok: '#5CC08C', warn: '#E2BE5A', ivory: '#ECE8E1' };
@@ -45,25 +45,26 @@ function referencePanel(live) {
 }
 
 function instructionPanel() {
-  return panel(`<label style="display:flex;flex-direction:column;gap:6px">${label('Instruction')}<textarea id="produce-instruction" rows="2" placeholder="Analyze this bass and make 5 similar variations" style="width:100%;padding:12px 14px;border-radius:8px;background:${C.raised};border:1px solid ${C.line2};resize:none;outline:none;font-size:16px;line-height:1.5;color:${C.t1}">${esc(ui.instruction)}</textarea></label>
-<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span style="font-size:12px;color:${C.t3}">Variations</span>${seg('count', [[1, '1'], [3, '3'], [5, '5']], ui.count)}<span style="font-size:12px;color:${C.t3}">Length</span>${seg('length', [[8, '8'], [16, '16'], [32, '32'], ['auto', 'Auto']], ui.length)}<span style="flex:1"></span><button data-p="generate" ${ui.busy ? 'disabled' : ''} style="height:44px;padding:0 26px;border-radius:6px;border:0;background:${ui.busy ? '#2A2C32' : C.ivory};color:${ui.busy ? '#5E5C59' : '#141518'};font-weight:700;font-size:14px;letter-spacing:.02em;cursor:pointer">${ui.busy ? 'Generating…' : 'Generate'}</button></div>`);
+  return panel(`<label style="display:flex;flex-direction:column;gap:6px">${label('Instruction')}<textarea id="produce-instruction" rows="2" placeholder="Create one 8-bar bass variation from this verified reference" style="width:100%;padding:12px 14px;border-radius:8px;background:${C.raised};border:1px solid ${C.line2};resize:none;outline:none;font-size:16px;line-height:1.5;color:${C.t1}">${esc(ui.instruction)}</textarea></label>
+<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span style="font-size:12px;color:${C.t3}">Variation</span>${seg('count', [[1, '1']], ui.count)}<span style="font-size:12px;color:${C.t3}">Bars</span>${seg('length', [[8, '8']], ui.length)}<span style="flex:1"></span><button data-p="generate" ${ui.busy ? 'disabled' : ''} style="height:44px;padding:0 26px;border-radius:6px;border:0;background:${ui.busy ? '#2A2C32' : C.ivory};color:${ui.busy ? '#5E5C59' : '#141518'};font-weight:700;font-size:14px;letter-spacing:.02em;cursor:pointer">${ui.busy ? 'Generating…' : 'Generate'}</button></div>`);
 }
 
 function refusalPanel() {
   if (!ui.refusal) return '';
-  return `<section role="alert" style="background:#1D1B15;border:1px solid #3F3822;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:center;gap:10px"><span style="color:${C.warn}">⊘</span><b style="font-size:14px;font-weight:600">Generation in Ableton isn’t available yet</b></div><div style="font-size:12.5px;color:#D9D0B5;line-height:1.5">Variations can’t be created as clips in your Working Copy with this build. Nothing was generated and nothing was simulated.</div><div style="font-family:'Geist Mono',monospace;font-size:11.5px;color:${C.t3}">${esc(ui.refusal.error)}</div>${debug(`Missing backend capabilities (${(ui.refusal.missing || []).length})`, ui.refusal.missing)}</section>`;
+  const reason = ui.refusal.reason || ui.refusal.error || 'Unknown reason';
+  return `<section role="alert" style="background:#1D1B15;border:1px solid #3F3822;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:center;gap:10px"><span style="color:${C.warn}">⊘</span><b style="font-size:14px;font-weight:600">Ableton could not complete this action</b></div><div style="font-size:12.5px;color:#D9D0B5;line-height:1.5">${esc(ui.refusal.detail || reason)}</div>${debug('Technical details', ui.refusal)}</section>`;
 }
 
 function resultsPanel(variations) {
   if (!variations.length) return '';
   const rows = variations.map(v => {
-    const ready = v.preview_url && ['READY', 'KEPT'].includes(v.status);
+    const ready = v.preview_url && v.preview?.signal_status === 'HAS_SIGNAL' && ['READY', 'KEPT'].includes(v.status);
     const kept = v.status === 'KEPT';
-    const preview = ready ? `<audio data-variation="${esc(v.variation_id)}" preload="none" src="${esc(v.preview_url)}"></audio><button data-p="preview" data-id="${esc(v.variation_id)}" style="height:30px;padding:0 12px;border-radius:15px;border:0;background:${ui.playing === v.variation_id ? C.ivory : C.control};color:${ui.playing === v.variation_id ? '#141518' : C.t1};font-size:12.5px;font-weight:600;cursor:pointer">${ui.playing === v.variation_id ? '❚❚ Pause' : '▶ Preview'}</button>` : `<span style="font-size:12px;color:${C.cue}">● ${esc(String(v.status).replace(/_/g, ' ').toLowerCase())}</span>`;
-    const bars = v.preview ? `${v.preview.bars} bars` : '';
+    const preview = ready ? `<audio data-variation="${esc(v.variation_id)}" preload="none" src="${esc(v.preview_url)}"></audio><button data-p="preview" data-id="${esc(v.variation_id)}" style="height:30px;padding:0 12px;border-radius:15px;border:0;background:${ui.playing === v.variation_id ? C.ivory : C.control};color:${ui.playing === v.variation_id ? '#141518' : C.t1};font-size:12.5px;font-weight:600;cursor:pointer">${ui.playing === v.variation_id ? '❚❚ Pause' : '▶ Preview'}</button>` : `<span style="font-size:12px;color:${C.cue}">● ${esc(v.failure_reason || (v.status === 'READY' ? 'PREVIEW_NOT_VERIFIED' : String(v.status).replace(/_/g, ' ').toLowerCase()))}</span>`;
+    const bars = ready ? `${v.preview.bars} bars · signal ${Number(v.preview.rms_dbfs).toFixed(1)} dBFS` : '';
     return `<div style="display:flex;align-items:center;gap:14px;height:52px;border-bottom:1px solid #222429"><span style="width:92px;font-size:13.5px;font-weight:500">Variation ${v.index}</span>${preview}<span style="flex:1"></span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:${C.t3}">${bars}</span>${ready ? (kept ? `<span style="font-size:12.5px;color:${C.ok}">✓ Kept</span>` : btn('Keep', 'keep', `data-id="${esc(v.variation_id)}"`) + btn('Discard', 'discard', `data-id="${esc(v.variation_id)}"`)) + btn('Open in Ableton', 'open', `data-id="${esc(v.variation_id)}"`) : ''}</div>`;
   }).join('');
-  return panel(`<div>${rows}</div><div style="display:flex;align-items:center;gap:12px">${btn('Regenerate', 'generate')}<span style="font-size:12px;color:${C.t3}">Previews are captured from the clips created in Ableton.</span></div>${debug('Debug · variations', variations)}`, 'padding:6px 16px 12px');
+  return panel(`<div>${rows}</div><div style="display:flex;align-items:center;gap:12px">${btn('Regenerate', 'generate')}<span style="font-size:12px;color:${C.t3}">Discard requires the Studio process that created the variation; it is unavailable after restart.</span></div>${debug('Debug · variations', variations)}`, 'padding:6px 16px 12px');
 }
 
 function rail(project, live) {

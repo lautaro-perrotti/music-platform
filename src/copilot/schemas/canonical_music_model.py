@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 CANONICAL_MUSIC_MODEL_SCHEMA_VERSION = "canonical-music-model-view-v1"
+CANONICAL_MUSIC_MODEL_SCHEMA_VERSION_V2 = "canonical-music-model-view-v2"
 
 
 class CanonicalSourceRef(BaseModel):
@@ -99,10 +100,29 @@ class CanonicalMusicModelView(BaseModel):
         return self
 
 
+class CanonicalMusicModelViewV2(CanonicalMusicModelView):
+    """Consolidated read-only product view for musical understanding P0.
+
+    The V2 fields are projections of already persisted artifacts.  They are
+    deliberately domains, not a second analyzer or a second source of truth.
+    A domain can therefore be ``SUPPORTED``, ``EVIDENCE_ONLY`` or
+    ``INSUFFICIENT_EVIDENCE`` without inventing a musical conclusion.
+    """
+
+    schema_version: str = CANONICAL_MUSIC_MODEL_SCHEMA_VERSION_V2
+    groove: CanonicalDomainView = Field(default_factory=CanonicalDomainView)
+    melody: CanonicalDomainView = Field(default_factory=CanonicalDomainView)
+    motifs: CanonicalDomainView = Field(default_factory=CanonicalDomainView)
+    arrangement: CanonicalDomainView = Field(default_factory=CanonicalDomainView)
+    relationships: CanonicalDomainView = Field(default_factory=CanonicalDomainView)
+
+
 __all__ = [
     "CANONICAL_MUSIC_MODEL_SCHEMA_VERSION",
+    "CANONICAL_MUSIC_MODEL_SCHEMA_VERSION_V2",
     "CanonicalDomainView",
     "CanonicalMusicModelView",
+    "CanonicalMusicModelViewV2",
     "CanonicalSourceRef",
     "CanonicalTimeline",
 ]

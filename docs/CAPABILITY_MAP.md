@@ -47,6 +47,8 @@ reproducible bug.
 | `EVIDENCE_SYSTEM_V2` | VERIFIED / FROZEN | Graph above immutable packs. Fusion keeps contradictions. Limitations propagate. |
 | `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
 | `PRODUCER_EXECUTION_V1` | VERIFIED / FROZEN | `MusicPlan → ProductionCompiler → SafeWrite` six-action minimum passed Live readback/rollback on the controlled working copy. |
+| `REFERENCE_BASS_VARIATION_8_BAR` | VERIFIED / BOUNDED | One real `pista Project` run: reconciled MIDI pitches, 21-note rhythmic variant, new Operator track, Session + Arrangement clip at QN 160–192, isolated WAV `HAS_SIGNAL` at −21.14 dBFS, saved working copy. The earlier silent 32-bar preview was reclassified `FAILED`; human musical verdict is pending. Studio discard after process restart is not certified. |
+| `MUSICAL_UNDERSTANDING_COMPLETION_P0` | IMPLEMENTED / REAL SLICE EVIDENCE INHERITED | Existing bass MIDI, groove/relationship, motif/phrase, arrangement and harmony artifacts now project through `CanonicalMusicModelViewV2`; `MusicalVariationIntent` is deterministic and NO_WRITE, then reuses the existing bounded variation path. Melody remains explicitly `INSUFFICIENT_EVIDENCE`; the real 8-bar SafeWrite/readback/preview evidence is recorded in the reference variation audit. |
 | `LUCAS_CORE_INTEGRATION_V1` | VERIFIED / FROZEN | Lucas `build_plan_from_prompt` and `critique_track` are called through typed Core handoff; Astra remains internal to Lucas planning. Real Live bounded run verified 2 execution writes, 2 rollback mutations, authoritative readback, and post-analysis with 0 writes. `SAMPLE_LOAD` is Lucas input vocabulary; compiler emits canonical SafeWrite `LOAD_SAMPLE`. No Lucas-owned files were changed. |
 | `PRODUCER_INTELLIGENCE_P0` | IMPLEMENTED / NOT VERIFIED | Typed `TrackSpec` and persistent producer decision ledger are available. Astra `track_spec` responses can drive validated dynamic sections; Core intent gating accepts their roles. No new Ableton authority or automatic musical write path. |
 | `MIXING_MASTERING_EXECUTION_V1` | VERIFIED / FROZEN | Core-owned bounded mix/master execution maps volume, device load, and parameter intent through ProductionCompiler and SafeWrite. Generic active-region selection fixed the silent-region bug; real working-copy validation produced non-silent comparable captures, measurable mix consequence, 4 verified writes, authoritative readback, rollback, and 0 direct Lucas writes. Validation strategy provenance was `CONTROLLED_FIXTURE`, not `build_plan_from_prompt` output; this freezes execution/audio verification, not autonomous Lucas mix/master planning. |
@@ -87,8 +89,8 @@ Development fixtures and untitled sets are not that test.
 
 ## Explicitly not capabilities yet
 
-EQ, compressor, MIDI editing, arrangement editing, unbounded plugin control,
-web UI, silent mock success, collapsing producer statuses, autonomous writes on
+EQ, compressor, general MIDI editing, general arrangement editing, unbounded plugin control,
+general web UI generation without bound reference artifacts, silent mock success, collapsing producer statuses, autonomous writes on
 an unvalidated external song, Music Flamingo semantic-ear descriptions, and
 autonomous Lucas mix/master planning from a real producer request.
 

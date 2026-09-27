@@ -19,6 +19,7 @@ import numpy as np
 import soundfile as sf
 
 from copilot.audio.arrangement_active_source_isolation import capture_source_post_mixer
+from copilot.audio.capture_preflight import generic_capture_preflight
 from copilot.audio.harmonic_review_audio_fix_v1 import (
     _build_project_track_inventory,
     _build_track_source_coverage,
@@ -113,39 +114,8 @@ def _persist(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _generic_capture_preflight(report: dict[str, Any]) -> dict[str, Any]:
-    """Adapt the frozen source-specific preflight to generic track capture.
-
-    ``preflight_session`` intentionally certifies the historical Kick/Bass
-    validation setup.  This milestone captures arbitrary tracks and the
-    capture primitive rewrites/restores that host per target itself.  Only the
-    two source-specific diagnostics may be waived; project identity, host/tap
-    topology, working-copy and transport failures remain blocking.
-    """
-    if report.get("pass"):
-        return report
-    missing = list(report.get("missing") or [])
-    source_specific = all(
-        item.startswith("TARGET_SOURCE_UNSUPPORTED:")
-        or item.startswith("Copilot Capture Bass routing claim=")
-        for item in missing
-    )
-    structural = [
-        item
-        for item in missing
-        if not (
-            item.startswith("TARGET_SOURCE_UNSUPPORTED:")
-            or item.startswith("Copilot Capture Bass routing claim=")
-        )
-    ]
-    if not missing or not source_specific or structural:
-        return report
-    adapted = dict(report)
-    adapted["pass"] = True
-    adapted["status"] = "GENERIC_TRACK_CAPTURE_READY"
-    adapted["waived_source_specific_checks"] = missing
-    adapted["missing"] = []
-    adapted["instruction"] = "Generic track capture may proceed; each target routing is verified and restored per capture."
-    return adapted
+    """Compatibility wrapper for the existing review-audio API."""
+    return generic_capture_preflight(report)
 
 
 def capture_track_level_review_audio(

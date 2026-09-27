@@ -1,9 +1,4 @@
-"""REFERENCE_TO_VARIATION_V1: one reference-bound MIDI variation.
-
-Core owns measured evidence.  This module converts that evidence into a new,
-editable bass pattern.  It deliberately does not copy source MIDI (the
-reference may be audio-only) and never talks to Ableton.
-"""
+"""Build one bounded bass variation from authoritative, read-only MIDI evidence."""
 
 from __future__ import annotations
 
@@ -13,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from copilot.schemas.music_analysis import MusicAnalysisPack
+from copilot.schemas.musical_understanding import MusicalUnderstanding
 from copilot.schemas.session import MidiNote
 
 
@@ -29,6 +25,47 @@ def load_reference_pack(path: Path | str) -> MusicAnalysisPack:
         return MusicAnalysisPack.model_validate(body)
     except Exception as exc:  # noqa: BLE001
         raise ReferenceVariationError(f"REFERENCE_PACK_INVALID: {source}") from exc
+
+
+def load_musical_understanding(path: Path | str) -> MusicalUnderstanding:
+    source = Path(path)
+    if not source.is_file():
+        raise ReferenceVariationError(f"MUSICAL_UNDERSTANDING_NOT_FOUND: {source}")
+    try:
+        return MusicalUnderstanding.model_validate_json(source.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise ReferenceVariationError(f"MUSICAL_UNDERSTANDING_INVALID: {source}") from exc
+
+
+def validate_midi_reference(
+    pack: MusicAnalysisPack,
+    understanding: MusicalUnderstanding,
+    *,
+    pack_path: Path,
+    understanding_path: Path,
+    project_identity: str,
+) -> None:
+    """Refuse facts from a different project, analysis, or MIDI source."""
+    if not pack.no_write or not understanding.no_write:
+        raise ReferenceVariationError("REFERENCE_NOT_READ_ONLY")
+    if pack.project_id != project_identity:
+        raise ReferenceVariationError("REFERENCE_PROJECT_MISMATCH")
+    if understanding.reference_id != pack.reference_id or understanding.source_analysis_id != pack_path.stem:
+        raise ReferenceVariationError("REFERENCE_ANALYSIS_MISMATCH")
+    if understanding.bass.source_kind != "ABLETON_MIDI" or understanding.bass.status != "SUPPORTED":
+        raise ReferenceVariationError("AUTHORITATIVE_BASS_MIDI_REQUIRED")
+    diagnostics = understanding.bass.source_diagnostics
+    if (
+        diagnostics.get("expected_project_identity") != project_identity
+        or diagnostics.get("actual_project_identity") != project_identity
+        or (diagnostics.get("reconciliation") or {}).get("ok") is not True
+    ):
+        raise ReferenceVariationError("MIDI_PROJECT_IDENTITY_MISMATCH")
+    declared_pack = understanding.provenance.get("midi_pack_path")
+    if not declared_pack or Path(str(declared_pack)).resolve() != pack_path.resolve():
+        raise ReferenceVariationError("MIDI_PACK_PROVENANCE_MISMATCH")
+    if not understanding_path.is_file():
+        raise ReferenceVariationError("MUSICAL_UNDERSTANDING_NOT_FOUND")
 
 
 def load_astra_interpretation(path: Path | str) -> dict[str, Any]:
@@ -63,102 +100,85 @@ def _raw_summary(raw: str) -> str:
     return str(value.get("summary") or "")[:1000]
 
 
-def _reference_features(pack: MusicAnalysisPack) -> dict[str, Any]:
-    windows = list(pack.windows)
-    if not windows:
-        raise ReferenceVariationError("REFERENCE_FEATURES_INSUFFICIENT: no measured windows")
-    events: list[float] = []
-    densities: list[float] = []
-    repetitions: list[float] = []
-    variations: list[float] = []
-    energies: list[float] = []
-    centroids: list[float] = []
-    for window in windows:
-        events.extend(window.groove.event_locations)
-        for value, target in (
-            (window.groove.onset_density_per_s, densities),
-            (window.groove.repetition_strength, repetitions),
-            (window.groove.variation_score, variations),
-            (window.energy_db, energies),
-            (window.timbre.spectral_centroid_hz, centroids),
-        ):
-            if value is not None:
-                target.append(float(value))
-    if not events:
-        raise ReferenceVariationError("REFERENCE_FEATURES_INSUFFICIENT: no measured events")
-    low = [float(w.low_band_energy) for w in windows if w.low_band_energy is not None]
-    return {
-        "event_locations": sorted(set(round(float(item), 3) for item in events)),
-        "event_count": len(events),
-        "onset_density_per_s": sum(densities) / len(densities) if densities else None,
-        "repetition_strength": sum(repetitions) / len(repetitions) if repetitions else None,
-        "variation_score": sum(variations) / len(variations) if variations else None,
-        "energy_db": sum(energies) / len(energies) if energies else None,
-        "spectral_centroid_hz": sum(centroids) / len(centroids) if centroids else None,
-        "relative_low_band_energy": sum(low) / len(low) if low else None,
-        "evidence_refs": list(dict.fromkeys(pack.evidence_refs + [ref for w in windows for ref in w.evidence_refs])),
-    }
-
-
 def build_reference_bound_bass_notes(
     pack: MusicAnalysisPack,
+    understanding: MusicalUnderstanding,
     *,
+    start_qn: float,
     length_beats: float,
-    transformation_seed: str,
 ) -> tuple[list[MidiNote], dict[str, Any]]:
-    """Generate new notes from measured rhythm/register, not a fixed motif.
-
-    The reference event grid is rotated on alternating bars, lightly thinned,
-    and assigned a measured-register bass vocabulary.  This preserves
-    high-level behavior while guaranteeing a different note sequence.
-    """
-    if length_beats <= 0:
-        raise ReferenceVariationError("REFERENCE_LENGTH_INVALID")
-    features = _reference_features(pack)
-    source_span = max(
-        float(pack.timeline.get("end_qn") or 0.0)
-        - float(pack.timeline.get("start_qn") or 0.0),
-        4.0,
+    """Move secondary onsets by a quarter beat; retain evidenced pitches."""
+    source_start = float(pack.timeline.get("start_qn") or 0.0)
+    source_end = float(pack.timeline.get("end_qn") or 0.0)
+    if length_beats <= 0 or start_qn < source_start or start_qn + length_beats > source_end:
+        raise ReferenceVariationError("REFERENCE_REGION_OUT_OF_BOUNDS")
+    local_start = start_qn - source_start
+    source_events = sorted(
+        (
+            event for event in understanding.bass.pitch_events
+            if event.source_kind == "ABLETON_MIDI"
+            and event.status == "RELIABLE"
+            and event.midi_note is not None
+            and event.onset_qn is not None
+            and event.duration_qn is not None
+            and local_start <= event.onset_qn < local_start + length_beats
+        ),
+        key=lambda event: (float(event.onset_qn), event.event_id),
     )
-    normalized = [((event - float(pack.timeline.get("start_qn") or 0.0)) % source_span) for event in features["event_locations"]]
-    grid = sorted(set(round((event / source_span) * length_beats * 2.0) / 2.0 for event in normalized))
-    # Never produce an unmusical wall of onsets from full-mix detection.
-    grid = [item for index, item in enumerate(grid) if index % 2 == 0 and item < length_beats]
-    if not grid:
-        raise ReferenceVariationError("REFERENCE_FEATURES_INSUFFICIENT: no usable rhythmic grid")
-
-    centroid = features.get("spectral_centroid_hz")
-    base_pitch = 36 if centroid is None or centroid < 500.0 else 40
-    pattern = (0, 0, 3, 5, 0, 7, 5, 3)
+    if not source_events:
+        raise ReferenceVariationError("AUTHORITATIVE_BASS_EVENTS_MISSING")
+    # The authoritative bass track may contain simultaneous ornaments and
+    # overlapping notes. Select one event per near-simultaneous attack so the
+    # new pattern has a playable monophonic line without inventing pitches.
+    events = []
+    for event in source_events:
+        if events and float(event.onset_qn) - float(events[-1].onset_qn) < 0.1:
+            previous = events[-1]
+            if (float(event.duration_qn), -int(event.midi_note)) > (float(previous.duration_qn), -int(previous.midi_note)):
+                events[-1] = event
+        else:
+            events.append(event)
+    original = [float(event.onset_qn) - local_start for event in events]
+    shifted = original.copy()
+    first_by_bar: set[int] = set()
+    moved = 0
+    for index, onset in enumerate(original):
+        bar = int(onset // 4)
+        if bar not in first_by_bar:
+            first_by_bar.add(bar)
+            continue
+        if index % 2 == 0:
+            continue
+        previous = shifted[index - 1]
+        following = original[index + 1] if index + 1 < len(original) else length_beats
+        bar_start, bar_end = bar * 4.0, min((bar + 1) * 4.0, length_beats)
+        for candidate in (onset + 0.25, onset - 0.25):
+            if max(previous, bar_start) + 0.05 < candidate < min(following, bar_end) - 0.05:
+                shifted[index] = candidate
+                moved += 1
+                break
+    if not moved:
+        raise ReferenceVariationError("BASS_VARIATION_NO_SAFE_TRANSFORM")
     notes: list[MidiNote] = []
-    for index, start in enumerate(grid):
-        # Alternating bar rotation creates new material instead of copying the
-        # reference's exact event positions.
-        transformed = (start + (0.5 if int(start // 4) % 2 else 0.0)) % length_beats
-        if transformed + 1.0 > length_beats:
-            transformed = max(0.0, length_beats - 1.0)
-        pitch = base_pitch + pattern[(index + len(transformation_seed)) % len(pattern)]
-        duration = 1.0 if index % 3 else 1.5
+    for index, event in enumerate(events):
+        onset = shifted[index]
+        next_onset = shifted[index + 1] if index + 1 < len(events) else length_beats
+        duration = min(float(event.duration_qn), next_onset - onset, length_beats - onset)
+        if duration <= 0.05:
+            raise ReferenceVariationError("BASS_VARIATION_INVALID_DURATION")
         notes.append(MidiNote(
-            pitch=pitch,
-            start_time=round(transformed, 3),
-            duration=duration,
-            velocity=96 if index % 4 else 108,
+            pitch=int(event.midi_note), start_time=round(onset, 4),
+            duration=round(duration, 4), velocity=100,
         ))
-    notes.sort(key=lambda note: (note.start_time, note.pitch))
-    deduped: list[MidiNote] = []
-    seen: set[tuple[float, int]] = set()
-    for note in notes:
-        key = (note.start_time, note.pitch)
-        if key not in seen:
-            deduped.append(note)
-            seen.add(key)
-    features.update({
-        "source_span_beats": source_span,
-        "generated_event_count": len(deduped),
-        "register_base_pitch": base_pitch,
-        "transformation": "quantized_reference_events_plus_alternating_half_beat_rotation_and_thinning",
+    return notes, {
+        "source_kind": "ABLETON_MIDI",
+        "source_event_count": len(source_events),
+        "generated_event_count": len(notes),
+        "simultaneous_events_merged": len(source_events) - len(events),
+        "shifted_onsets": moved,
+        "source_region_qn": [start_qn, start_qn + length_beats],
+        "transformation": "secondary_onsets_quarter_qn_within_bar",
         "source_not_copied": True,
-    })
-    return deduped, features
+        "evidence_refs": list(dict.fromkeys(ref for event in events for ref in event.evidence_refs)),
+    }
 

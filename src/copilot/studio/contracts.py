@@ -114,6 +114,8 @@ class VariationPreview(BaseModel):
     bars: int
     duration_s: float
     capture_region_id: str | None = None
+    signal_status: str | None = None
+    rms_dbfs: float | None = None
 
     @property
     def audio_url(self) -> str:
@@ -133,6 +135,7 @@ class VariationRecord(BaseModel):
     ownership: dict[str, Any] = Field(default_factory=dict)
     safe_write: dict[str, Any] = Field(default_factory=dict)
     region: dict[str, Any] = Field(default_factory=dict)
+    failure_reason: str | None = None
     created_at: str
 
 
@@ -144,4 +147,5 @@ class ProduceRequest(BaseModel):
     start_qn: float = 0.0
     end_qn: float | None = None
     reference_analysis_path: str | None = None
+    musical_understanding_path: str | None = None
     astra_interpretation_path: str | None = None

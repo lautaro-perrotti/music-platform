@@ -77,15 +77,14 @@ class ProductionCompiler:
         # optionally load one native instrument, and put one editable pattern
         # on it. This is still one SafeWrite intent and one durable
         # transaction, not a general multi-action escape hatch.
-        if (
-            len(plan.actions) in {2, 3}
-            and plan.actions[0].action_type is ProductionActionKind.CREATE_TRACK
-            and plan.actions[-1].action_type is ProductionActionKind.CREATE_PATTERN
-            and (
-                len(plan.actions) == 2
-                or plan.actions[1].action_type
-                in {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD}
-            )
+        kinds = [action.action_type for action in plan.actions]
+        if kinds in (
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.CREATE_PATTERN],
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.LOAD_DEVICE, ProductionActionKind.CREATE_PATTERN],
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.DEVICE_LOAD, ProductionActionKind.CREATE_PATTERN],
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.CREATE_PATTERN, ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT],
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.LOAD_DEVICE, ProductionActionKind.CREATE_PATTERN, ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT],
+            [ProductionActionKind.CREATE_TRACK, ProductionActionKind.DEVICE_LOAD, ProductionActionKind.CREATE_PATTERN, ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT],
         ):
             return self._compile_midi_variation(plan, session=session)
         if len(plan.actions) != 1:
@@ -294,8 +293,9 @@ class ProductionCompiler:
     ) -> ProductionCompileResult:
         """Compile one bounded, audible MIDI variation compound plan."""
         create = plan.actions[0]
-        device = plan.actions[1] if len(plan.actions) == 3 else None
-        pattern = plan.actions[-1]
+        arrangement = plan.actions[-1] if plan.actions[-1].action_type is ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT else None
+        pattern = plan.actions[-2] if arrangement is not None else plan.actions[-1]
+        device = plan.actions[1] if plan.actions[1].action_type in {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD} else None
         create_validated = validate_create_track_plan(
             plan.model_copy(update={"actions": [create]}), session=session
         )
@@ -335,6 +335,17 @@ class ProductionCompiler:
                 return ProductionCompileResult(
                     status="PLAN_REJECTED", reasons=("VARIATION_DEVICE_ROLLBACK_REQUIRED",)
                 )
+        if arrangement is not None:
+            arrangement_params = arrangement.params
+            if (
+                getattr(arrangement_params, "kind", None) != "duplicate_clip_to_arrangement"
+                or arrangement_params.clip_index != params.clip_index
+                or arrangement_params.length is not None
+                or arrangement_params.destination_time < 0
+            ):
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("VARIATION_ARRANGEMENT_PARAMS_INVALID",))
+            if not arrangement.rollback or not arrangement.rollback.prepared:
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("VARIATION_ARRANGEMENT_ROLLBACK_REQUIRED",))
 
         track_name = create.params.track_name
         create_id = create.action_id
@@ -429,6 +440,33 @@ class ProductionCompiler:
             )
         )
         targets.append(pattern_target)
+        if arrangement is not None:
+            arrangement_params = arrangement.params
+            targets.append(MutationTarget(
+                action_id=arrangement.action_id,
+                ref=dict(pattern_target.ref),
+                name_at_plan=track_name,
+                fingerprint=TargetFingerprint(),
+                locator=None,
+                session_incarnation_id=session.session_incarnation_id or "",
+            ))
+            executions.append(MutationExecution(
+                action_id=arrangement.action_id,
+                action_type="DUPLICATE_CLIP_TO_ARRANGEMENT",
+                operation="duplicate_clip_to_arrangement",
+                arguments={
+                    "clip_index": int(arrangement_params.clip_index),
+                    "destination_time": float(arrangement_params.destination_time),
+                    "length": None,
+                },
+                expected_before={}, expected_after={}, certified=True,
+                rollback=MutationRollback(
+                    inverse_operation="delete_arrangement_clips",
+                    depends_on=[create_id, pattern_id],
+                    reversibility=RollbackReversibility.DEPENDENT,
+                    prepared=True,
+                ),
+            ))
         intent = MutationIntent(
             plan_id=plan.plan_id,
             kind=KIND_PRODUCER_EXECUTION_V1,
@@ -445,5 +483,5 @@ class ProductionCompiler:
         return ProductionCompileResult(
             status="COMPILED",
             intent=intent,
-            certified_action_ids=(create_id, pattern_id),
+            certified_action_ids=tuple(action.action_id for action in plan.actions),
         )

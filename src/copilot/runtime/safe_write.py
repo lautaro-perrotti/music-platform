@@ -19,7 +19,7 @@ from copilot.agent.recovery import classify_journal
 from copilot.agent.tools import AgentTools
 from copilot.agent.transactions import TransactionManager
 from copilot.audio.m4l_control_contract_v1 import APPLY_RESULTS, APPLY_VOCABULARY
-from copilot.daw.identities import fingerprint_track
+from copilot.daw.identities import fingerprint_track, fingerprints_equal
 from copilot.daw.mutation_protocol import KIND_TEMPORARY_CAPTURE_HOST
 from copilot.daw.object_ref import (
     PersistentObjectRef,
@@ -877,10 +877,13 @@ class SafeWriteExecutor:
                 # created track receives its PersistentObjectRef after write.
                 resolved[target.action_id] = None  # type: ignore[assignment]
                 continue
-            if step is not None and step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"}:
+            if step is not None and step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE", "DUPLICATE_CLIP_TO_ARRANGEMENT"}:
                 dependencies = set(step.rollback.depends_on)
-                if len(dependencies) == 1:
-                    dependency = next(iter(dependencies))
+                if dependencies:
+                    dependency = next((item for item in dependencies if any(
+                        candidate.action_id == item and candidate.action_type == "CREATE_TRACK"
+                        for candidate in intent.executions
+                    )), None)
                     dependency_step = next(
                         (item for item in intent.executions if item.action_id == dependency), None
                     )
@@ -915,14 +918,22 @@ class SafeWriteExecutor:
                 "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
             }
         if (
-            step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"}
+            step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE", "DUPLICATE_CLIP_TO_ARRANGEMENT"}
             and session.track_by_name(target_name) is None
-            and len(step.rollback.depends_on) == 1
+            and step.rollback.depends_on
         ):
-            return {
+            guard = {
                 "track_ids": [item.stable_id for item in session.tracks],
+                "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
                 "pattern_absent": True,
+                "device_ids": [],
             }
+            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
+                guard["arrangement_ids"] = [
+                    str(item.get("id", ""))
+                    for item in self.tools.daw.get_arrangement_clips().get("clips", [])
+                ]
+            return guard
         track = session.track_by_name(target_name)
         if track is None:
             return snapshot_guard_state(session, target_name)
@@ -989,10 +1000,16 @@ class SafeWriteExecutor:
                 continue
             if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
                 if track is None:
-                    return (MutationFailure.TARGET_NOT_FOUND, "arrangement target track missing")
-                clip_index = int(step.arguments["clip_index"])
-                if not any(item.slot_index == clip_index for item in track.clips):
-                    return (MutationFailure.PRECONDITION_FAILED, "source clip missing")
+                    dependency_types = {
+                        candidate.action_type for candidate in intent.executions
+                        if candidate.action_id in step.rollback.depends_on
+                    }
+                    if dependency_types != {"CREATE_TRACK", "CREATE_PATTERN"}:
+                        return (MutationFailure.TARGET_NOT_FOUND, "arrangement target track missing")
+                else:
+                    clip_index = int(step.arguments["clip_index"])
+                    if not any(item.slot_index == clip_index for item in track.clips):
+                        return (MutationFailure.PRECONDITION_FAILED, "source clip missing")
                 try:
                     self.tools.daw.get_arrangement_clips()
                 except Exception as exc:  # noqa: BLE001
@@ -1806,7 +1823,7 @@ class SafeWriteExecutor:
                         continue
                     unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
                 continue
-            if step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE"} and step.rollback.depends_on:
+            if step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE", "DUPLICATE_CLIP_TO_ARRANGEMENT"} and step.rollback.depends_on:
                 continue
             post = snapshot_guard_state(restored, target.name_at_plan)
             diff = diff_guard_state(
@@ -1843,6 +1860,38 @@ class SafeWriteExecutor:
             if set(remaining) != group:
                 return "not independently reversible; compound group incomplete"
         if self.transactions._open is not None:
+            txn = self.transactions._open
+            # A dependent clip/device changes the newly created track's
+            # fingerprint while the compound transaction is still open. On
+            # partial failure the ledger has not reached its commit-time
+            # target refresh. Refresh only this exclusive new-track group,
+            # and only when the last recorded content state still matches
+            # authoritative Live readback. Existing user tracks stay strict.
+            if txn.actions and not result.unknown_action_ids:
+                created = next(
+                    (action for action in txn.actions if action.inverse_operation == "delete_track"), None
+                )
+                if created is not None and all(
+                    action.target_stable_id == created.target_stable_id for action in txn.actions
+                ):
+                    current = self.tools.get_session_snapshot()
+                    track = next(
+                        (item for item in current.tracks if item.stable_id == created.target_stable_id), None
+                    )
+                    content = next(
+                        (action for action in reversed(txn.actions)
+                         if action.inverse_operation in {"delete_clip", "delete_device", "delete_track"}), None
+                    )
+                    if (
+                        track is not None
+                        and content is not None
+                        and current.session_incarnation_id == txn.session_incarnation_id
+                        and track.name == created.target_name_at_apply
+                        and fingerprints_equal(
+                            fingerprint_track(track), content.target_fingerprint.model_dump()
+                        )
+                    ):
+                        self.transactions._refresh_targets(txn, current)
             txn = self.transactions.abort("safe-write rollback")
             if txn.status is TransactionStatus.IN_DOUBT:
                 return txn.error or "rollback in doubt"

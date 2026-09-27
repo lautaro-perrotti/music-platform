@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import threading
@@ -10,11 +11,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
+import soundfile as sf
+
 from copilot.music_generation.ace_step import AceStepProvider
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider
 from copilot.music_generation.schemas import GenerationBrief, GeneratorRequest
 from copilot.music_generation.benchmark import validate_generated_audio
 from copilot.audio.session_diagnose import preflight_session
+from copilot.audio.capture_preflight import generic_capture_preflight
 from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
 from copilot.audio.working_copy_policy_v1 import evaluate_working_copy
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
@@ -25,13 +30,17 @@ from copilot.integration.reference_variation_v1 import (
     ReferenceVariationError,
     build_reference_bound_bass_notes,
     load_astra_interpretation,
+    load_musical_understanding,
     load_reference_pack,
+    validate_midi_reference,
 )
 from copilot.musicplan import build_create_track_action
+from copilot.music_model import build_bass_variation_intent, build_canonical_music_model_view_v2
 from copilot.runtime.production_compiler import ProductionCompiler
 from copilot.runtime.safe_write import build_safe_write_executor
 from copilot.schemas.musicplan import (
     ActionTarget,
+    ArrangementDuplicateActionParams,
     DiagnosisBinding,
     DeviceLoadActionParams,
     ExpectedEffect,
@@ -46,7 +55,6 @@ from copilot.schemas.musicplan import (
     RollbackSpec,
     VerificationSpec,
 )
-from copilot.schemas.session import MidiNote
 from copilot.studio.contracts import (
     ArtifactRecord,
     CandidateRecord,
@@ -90,6 +98,35 @@ class ProduceExecutionBlocked(RuntimeError):
 
     def to_dict(self) -> dict[str, Any]:
         return {"error": self.code, "reason": self.reason, "detail": self.detail, "evidence": self.evidence}
+
+
+def _inspect_variation_wav(path: Path) -> dict[str, Any]:
+    """Measure the isolated preview independently of capture metadata."""
+    try:
+        info = sf.info(str(path))
+        if info.frames <= 0 or info.samplerate <= 0:
+            raise ValueError("empty WAV")
+        square_sum = 0.0
+        sample_count = 0
+        peak = 0.0
+        for block in sf.blocks(str(path), blocksize=65536, dtype="float32", always_2d=True):
+            if not np.isfinite(block).all():
+                raise ValueError("non-finite WAV sample")
+            peak = max(peak, float(np.max(np.abs(block))))
+            square_sum += float(np.sum(np.square(block, dtype=np.float64)))
+            sample_count += block.size
+        rms = math.sqrt(square_sum / sample_count) if sample_count else 0.0
+        return {
+            "sample_rate": info.samplerate,
+            "duration_s": info.frames / info.samplerate,
+            "peak": peak,
+            "rms": rms,
+            "rms_dbfs": 20.0 * math.log10(rms) if rms > 0 else None,
+            "signal_status": "HAS_SIGNAL" if peak > 1e-4 and rms > 1e-5 else "SILENCE",
+            "audio_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        raise ProduceExecutionBlocked("PREVIEW_WAV_INVALID", detail=str(exc)) from exc
 
 
 class StudioService:
@@ -417,14 +454,14 @@ class StudioService:
         ("TRACK_REGION_CAPTURE", CapabilityState.REAL, "copilot.audio.source_capture_pool_v1.capture_source_post_mixer_ref"),
         ("SAFE_WRITE_KEEP_ROLLBACK", CapabilityState.REAL, "SAFE_WRITE_FOUNDATION_V2, certified producer actions only"),
         ("READ_SELECTION", CapabilityState.PARTIAL, "V1 accepts an explicit region; Live selection is not required for this slice"),
-        ("SINGLE_VARIATION_PLAN", CapabilityState.REAL, "typed bass plan: explicit region + instruction -> one CREATE_TRACK/CREATE_PATTERN MusicPlan"),
+        ("SINGLE_VARIATION_PLAN", CapabilityState.REAL, "one 8-bar bass variation from explicit, project-bound MIDI evidence paths"),
         ("VARIATION_PLANNER_N", CapabilityState.MISSING, "no planner returns N distinct plans from reference + instruction"),
-        ("WRITE_MIDI_CLIP", CapabilityState.REAL, "ProductionCompiler -> SafeWrite CREATE_TRACK + CREATE_PATTERN -> authoritative MIDI readback"),
-        ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded two-action compound only: CREATE_TRACK -> CREATE_PATTERN"),
+        ("WRITE_MIDI_CLIP", CapabilityState.REAL, "ProductionCompiler -> SafeWrite -> authoritative MIDI and Arrangement readback"),
+        ("MULTI_ACTION_PLAN_COMPILE", CapabilityState.REAL, "bounded create -> instrument -> pattern -> Arrangement compound"),
         ("COPILOT_OWNED_TRACK_POLICY", CapabilityState.REAL, "new deterministic Copilot Variation track plus persisted ownership registry"),
-        ("VARIATION_PREVIEW_CAPTURE", CapabilityState.REAL, "created Copilot track -> source_capture_post_mixer_ref -> artifact"),
+        ("VARIATION_PREVIEW_CAPTURE", CapabilityState.REAL, "created Arrangement clip -> isolated capture; READY requires measured signal"),
         ("STUDIO_PRODUCER_BRIDGE", CapabilityState.REAL, "POST /api/projects/{id}/produce calls the real Core compiler/executor"),
-        ("KEEP_VARIATION", CapabilityState.REAL, "same SafeWrite transaction handle supports KEEP and owned rollback"),
+        ("KEEP_VARIATION", CapabilityState.REAL, "keep persists; owned discard rollback requires the originating Studio process"),
         ("FOCUS_CLIP", CapabilityState.PARTIAL, "select_clip / set_detail_clip only via untyped bridge_command"),
     )
 
@@ -445,6 +482,9 @@ class StudioService:
             "missing": missing,
             "required_for_one_variation_missing": required_missing,
             "scope": "ONE_BASS_VARIATION_ONLY",
+            "reference_evidence_required": ["reference_analysis_path", "musical_understanding_path"],
+            "reference_evidence_sources": ["explicit request", "project configuration"],
+            "discard_after_studio_restart": "UNAVAILABLE",
         }
 
     def _require_generation_backend(self, operation: str) -> None:
@@ -454,8 +494,13 @@ class StudioService:
 
     def produce_generate(self, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.get_project(project_id)
-        start_qn = float(payload.get("start_qn", 0.0) or 0.0)
-        end_qn = payload.get("end_qn")
+        configured = self.store.get_state(project_id, "reference_variation_config", {}) or {}
+        if not isinstance(configured, dict):
+            configured = {}
+        start_qn = float(payload.get("start_qn", configured.get("start_qn", 0.0)) or 0.0)
+        end_qn = payload.get("end_qn", configured.get("end_qn"))
+        reference_path = payload.get("reference_analysis_path") or configured.get("reference_analysis_path")
+        understanding_path = payload.get("musical_understanding_path") or configured.get("musical_understanding_path")
         request = ProduceRequest(
             scope=str(payload.get("scope") or "REGION").upper(),
             instruction=str(payload.get("instruction") or "").strip(),
@@ -463,7 +508,8 @@ class StudioService:
             length_bars=int(payload["length_bars"]) if payload.get("length_bars") not in (None, "", "auto", "AUTO") else None,
             start_qn=start_qn,
             end_qn=float(end_qn) if end_qn not in (None, "") else None,
-            reference_analysis_path=str(payload["reference_analysis_path"]) if payload.get("reference_analysis_path") else None,
+            reference_analysis_path=str(reference_path) if reference_path else None,
+            musical_understanding_path=str(understanding_path) if understanding_path else None,
             astra_interpretation_path=str(payload["astra_interpretation_path"]) if payload.get("astra_interpretation_path") else None,
         )
         if request.scope not in {"TRACK", "REGION"}:
@@ -474,50 +520,53 @@ class StudioService:
             raise ValueError("PRODUCE_VARIATION_COUNT_INVALID")
         if request.variations != 1:
             raise ValueError("PRODUCE_VARIATION_COUNT_UNSUPPORTED_FOR_V1")
-        if request.length_bars not in {None, 8, 16, 32}:
+        if request.length_bars not in {None, 8}:
             raise ValueError("PRODUCE_LENGTH_INVALID")
+        if not request.reference_analysis_path or not request.musical_understanding_path:
+            raise ReferenceVariationError("AUTHORITATIVE_REFERENCE_MIDI_REQUIRED")
+        if payload.get("start_qn") is None and configured.get("start_qn") is None:
+            request.start_qn = float(load_reference_pack(request.reference_analysis_path).timeline.get("start_qn") or 0.0)
         self._require_generation_backend("produce.generate")
         return self._produce_one_real_variation(project_id, request)
-
-    @staticmethod
-    def _bass_notes(length_beats: float) -> list[MidiNote]:
-        """Small deterministic bass vocabulary used only for this slice."""
-        motif = (36, 36, 39, 41, 36, 43, 41, 39)
-        notes: list[MidiNote] = []
-        cursor = 0.0
-        index = 0
-        while cursor + 1.5 <= length_beats:
-            notes.append(MidiNote(
-                pitch=motif[index % len(motif)],
-                start_time=cursor,
-                duration=1.5,
-                velocity=92 if index % 4 else 104,
-            ))
-            cursor += 2.0
-            index += 1
-        return notes
 
     def _build_variation_plan(self, *, request: ProduceRequest, session: Any, variation_id: str) -> MusicPlan:
         bars = request.length_bars or 8
         length_beats = float(bars * 4)
         track_name = f"Copilot Variation {variation_id[-8:]}"
-        reference_features: dict[str, Any] | None = None
-        astra_evidence: dict[str, Any] | None = None
-        if request.reference_analysis_path:
-            try:
-                reference_pack = load_reference_pack(request.reference_analysis_path)
-                if not request.astra_interpretation_path:
-                    raise ReferenceVariationError("ASTRA_INTERPRETATION_REQUIRED_FOR_REFERENCE_VARIATION")
-                astra_evidence = load_astra_interpretation(request.astra_interpretation_path)
-                notes, reference_features = build_reference_bound_bass_notes(
-                    reference_pack,
-                    length_beats=length_beats,
-                    transformation_seed=variation_id,
-                )
-            except ReferenceVariationError:
-                raise
-        else:
-            notes = self._bass_notes(length_beats)
+        pack_path = Path(request.reference_analysis_path or "").resolve()
+        understanding_path = Path(request.musical_understanding_path or "").resolve()
+        working_root = Path(session.project_path).resolve().parent
+        if not pack_path.is_relative_to(working_root) or not understanding_path.is_relative_to(working_root):
+            raise ReferenceVariationError("REFERENCE_OUTSIDE_WORKING_COPY")
+        reference_pack = load_reference_pack(pack_path)
+        understanding = load_musical_understanding(understanding_path)
+        validate_midi_reference(
+            reference_pack, understanding, pack_path=pack_path,
+            understanding_path=understanding_path,
+            project_identity=session.project_identity or "",
+        )
+        if request.end_qn is not None and abs(request.end_qn - request.start_qn - length_beats) > 1e-6:
+            raise ReferenceVariationError("REFERENCE_REGION_LENGTH_MISMATCH")
+        notes, reference_features = build_reference_bound_bass_notes(
+            reference_pack, understanding, start_qn=request.start_qn,
+            length_beats=length_beats,
+        )
+        canonical_view = build_canonical_music_model_view_v2(
+            reference_pack,
+            musical_understanding=understanding,
+        )
+        variation_intent = build_bass_variation_intent(
+            canonical_view,
+            intent_id=f"intent_{variation_id}",
+            start_qn=request.start_qn,
+            length_bars=bars,
+            instruction=request.instruction,
+        )
+        reference_features["canonical_music_model"] = canonical_view.model_dump(mode="json")
+        reference_features["musical_variation_intent"] = variation_intent.model_dump(mode="json")
+        astra_evidence = load_astra_interpretation(request.astra_interpretation_path) if request.astra_interpretation_path else None
+        reference_features["pack_sha256"] = hashlib.sha256(pack_path.read_bytes()).hexdigest()
+        reference_features["understanding_sha256"] = hashlib.sha256(understanding_path.read_bytes()).hexdigest()
         create = build_create_track_action(
             project_identity=session.project_identity,
             track_name=track_name,
@@ -567,6 +616,26 @@ class StudioService:
             ),
             rollback=RollbackSpec(parameter="pattern", unit="clip", restore_value=-1.0, prepared=True),
         )
+        arrangement = PlanAction(
+            action_id=f"arrangement_{variation_id}",
+            action_type=ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+            target=ActionTarget(ref=dict(create.target.ref)),
+            params=ArrangementDuplicateActionParams(
+                clip_index=0, destination_time=request.start_qn, length=None,
+            ),
+            reason="place the generated bass clip in the exact region to be captured",
+            evidence_refs=list(create.evidence_refs),
+            expected_effect=ExpectedEffect(
+                affected_target=f"{track_name}.arrangement", direction="add",
+                description="place the editable bass clip at the reference region",
+                measurement_to_compare_after="authoritative arrangement clip readback",
+            ),
+            verification=VerificationSpec(
+                execution=ExecutionVerificationSpec(parameter="arrangement.clip", expected_after=1.0, unit="present"),
+                musical=MusicalVerificationSpec(comparison="isolated_preview_capture", deferred=True),
+            ),
+            rollback=RollbackSpec(parameter="arrangement.clip", unit="clip", restore_value=0.0, prepared=True),
+        )
         return MusicPlan(
             plan_id=f"variation_plan_{variation_id}",
             status=PlanStatus.DRAFT,
@@ -580,14 +649,16 @@ class StudioService:
             project_state_token=session.project_token or session.project_identity or "",
             audible_state_token=session.audible_token or "",
             created_at=utc_now(),
-            actions=[create, device, pattern],
+            actions=[create, device, pattern, arrangement],
             notes=[
                 "V1 bounded planner: one bass variation only; no N-variation claims.",
-                *(["Reference-bound: generated from measured reference rhythm/register; source notes are not copied."] if reference_features else []),
+                "Authoritative source MIDI pitches preserved; secondary onsets varied within their bars.",
+                "Variation intent is derived from the canonical read-only musical model view.",
             ],
             gate={
                 "reference_region": {"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats},
-                **({"reference_features": reference_features, "astra_interpretation": astra_evidence} if reference_features else {}),
+                "reference_features": reference_features,
+                "astra_interpretation_advisory": astra_evidence,
             },
         )
 
@@ -668,50 +739,83 @@ class StudioService:
                 item for item in compiled.intent.executions
                 if item.action_type == "CREATE_PATTERN"
             )
+            arrangement_step = next(
+                item for item in compiled.intent.executions
+                if item.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT"
+            )
             track = live_after.track_by_id(create_target.stable_id)
             clip_ref = f"{track.stable_id}:clip:{int(pattern_step.arguments['clip_index'])}"
 
-            preflight = preflight_session(daw, lab_track_exclusions=frozenset({"AI Test"}))
+            def fail_preview(reason: str, *, detail: str = "", evidence: dict[str, Any] | None = None) -> None:
+                rollback_error = executor._rollback_applied(result, compiled.intent)
+                if rollback_error:
+                    raise ProduceExecutionBlocked(
+                        "VARIATION_ROLLBACK_FAILED", detail=rollback_error,
+                        evidence={"reason": reason, "safe_write": result.to_dict()},
+                    )
+                failed = VariationRecord(
+                    variation_id=variation_id, project_id=project_id, request_id=variation_id,
+                    index=1, status="FAILED", ableton_track_ref=track.stable_id,
+                    ableton_clip_ref=clip_ref, plan_id=plan.plan_id, failure_reason=reason,
+                    safe_write={"result": result.to_dict(), "rollback_verified": True},
+                    region={"start_qn": request.start_qn, "end_qn": request.start_qn + length_beats, "bars": bars},
+                    created_at=utc_now(),
+                )
+                self.store.set_state(project_id, "variations", [
+                    *self.store.get_state(project_id, "variations", []), failed.model_dump(mode="json"),
+                ])
+                self.store.add_activity(project_id, "variation.failed", reason, {"variation_id": variation_id, "rollback_verified": True})
+                raise ProduceExecutionBlocked(reason, detail=detail, evidence=evidence)
+
+            if not arrangement_step.expected_after.get("arrangement_clip_ids"):
+                fail_preview("ARRANGEMENT_READBACK_MISSING")
+
+            try:
+                preflight = generic_capture_preflight(
+                    preflight_session(daw, lab_track_exclusions=frozenset({"AI Test"}))
+                )
+            except Exception as exc:  # noqa: BLE001
+                fail_preview("CAPTURE_PREFLIGHT_FAILED", detail=str(exc))
             if not preflight.get("pass"):
-                rollback_error = executor._rollback_applied(result, compiled.intent)
-                if rollback_error:
-                    raise ProduceExecutionBlocked(
-                        "VARIATION_ROLLBACK_FAILED",
-                        detail=rollback_error,
-                        evidence={"preflight": preflight, "safe_write": result.to_dict()},
-                    )
-                raise ProduceExecutionBlocked("CAPTURE_PREFLIGHT_NOT_READY", detail="; ".join(preflight.get("missing") or []), evidence={"preflight": preflight})
+                fail_preview("CAPTURE_PREFLIGHT_NOT_READY", detail="; ".join(preflight.get("missing") or []), evidence={"preflight": preflight})
             capture_root = self.data_dir / "variation_captures" / variation_id
-            capture = capture_source_post_mixer_ref(
-                daw,
-                session=live_after,
-                preflight={**preflight, "project_token": live_after.project_token, "audible_token": live_after.audible_token},
-                target_ref=ref_from_track(track, project_identity=live_after.project_identity),
-                start_qn=request.start_qn,
-                end_qn=request.end_qn or request.start_qn + length_beats,
-                region_id=f"region_{variation_id}",
-                tempo=float(live_after.transport.tempo),
-                dest_root=capture_root,
-            )
+            try:
+                capture = capture_source_post_mixer_ref(
+                    daw,
+                    session=live_after,
+                    preflight={**preflight, "project_token": live_after.project_token, "audible_token": live_after.audible_token},
+                    target_ref=ref_from_track(track, project_identity=live_after.project_identity),
+                    start_qn=request.start_qn,
+                    end_qn=request.end_qn or request.start_qn + length_beats,
+                    region_id=f"region_{variation_id}",
+                    tempo=float(live_after.transport.tempo),
+                    dest_root=capture_root,
+                )
+            except Exception as exc:  # noqa: BLE001
+                fail_preview("PREVIEW_CAPTURE_FAILED", detail=str(exc))
             if not capture.get("ok") or not capture.get("wav_path"):
-                rollback_error = executor._rollback_applied(result, compiled.intent)
-                if rollback_error:
-                    raise ProduceExecutionBlocked(
-                        "VARIATION_ROLLBACK_FAILED",
-                        detail=rollback_error,
-                        evidence={"capture": capture, "safe_write": result.to_dict()},
-                    )
-                raise ProduceExecutionBlocked("PREVIEW_CAPTURE_FAILED", detail=str(capture.get("error") or "capture returned no WAV"), evidence={"capture": capture})
+                fail_preview("PREVIEW_CAPTURE_FAILED", detail=str(capture.get("error") or "capture returned no WAV"), evidence={"capture": capture})
             wav_path = Path(str(capture["wav_path"]))
             if not wav_path.is_file():
-                rollback_error = executor._rollback_applied(result, compiled.intent)
-                if rollback_error:
-                    raise ProduceExecutionBlocked(
-                        "VARIATION_ROLLBACK_FAILED",
-                        detail=rollback_error,
-                        evidence={"capture": capture, "safe_write": result.to_dict()},
-                    )
-                raise ProduceExecutionBlocked("PREVIEW_ARTIFACT_MISSING", detail=str(wav_path), evidence={"capture": capture})
+                fail_preview("PREVIEW_ARTIFACT_MISSING", detail=str(wav_path), evidence={"capture": capture})
+            try:
+                measured = _inspect_variation_wav(wav_path)
+            except ProduceExecutionBlocked as exc:
+                fail_preview(exc.reason, detail=exc.detail)
+            captured_ref = capture.get("ref") or {}
+            if (
+                captured_ref.get("name") != track.name
+                or captured_ref.get("project_identity") != live_after.project_identity
+                or not any(int(count) > 0 for count in captured_ref.get("note_counts") or [])
+            ):
+                fail_preview("CAPTURE_SOURCE_MISMATCH", evidence={"capture_ref": captured_ref})
+            if capture.get("audio_sha256") != measured["audio_sha256"]:
+                fail_preview("PREVIEW_HASH_MISMATCH")
+            if capture.get("signal_status") != "HAS_SIGNAL" or measured["signal_status"] != "HAS_SIGNAL":
+                fail_preview("SILENT_PREVIEW", evidence={"capture_signal_status": capture.get("signal_status"), "measured": measured})
+            expected_duration = length_beats * 60.0 / float(live_after.transport.tempo)
+            if abs(measured["duration_s"] - expected_duration) > 0.25:
+                fail_preview("PREVIEW_REGION_MISMATCH", evidence={"duration_s": measured["duration_s"], "expected_duration_s": expected_duration})
             preview_job_id = self._create_preview_job(project_id, variation_id)
             artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"
             # Browser-served artifacts must live below StudioStore.artifacts_root.
@@ -728,11 +832,11 @@ class StudioService:
                 job_id=preview_job_id,
                 filename=destination.name,
                 relative_path=relative.as_posix(),
-                sha256=hashlib.sha256(destination.read_bytes()).hexdigest(),
+                sha256=measured["audio_sha256"],
                 bytes=destination.stat().st_size,
-                duration_s=float(capture.get("duration_s") or (length_beats * 60.0 / live_after.transport.tempo)),
-                sample_rate=int(capture.get("sample_rate") or 44100),
-                provider_metadata={"kind": "VARIATION_PREVIEW", "capture": capture, "plan_id": plan.plan_id},
+                duration_s=measured["duration_s"],
+                sample_rate=measured["sample_rate"],
+                provider_metadata={"kind": "VARIATION_PREVIEW", "capture": capture, "measured_signal": measured, "plan_id": plan.plan_id},
                 rights={"source": "GENERATED_IN_ABLETON", "copilot_owned": True},
                 created_at=utc_now(),
             )
@@ -745,9 +849,9 @@ class StudioService:
                 status="READY",
                 ableton_track_ref=track.stable_id,
                 ableton_clip_ref=clip_ref,
-                preview={"artifact_id": artifact_id, "bars": bars, "duration_s": artifact.duration_s, "capture_region_id": f"region_{variation_id}"},
+                preview={"artifact_id": artifact_id, "bars": bars, "duration_s": artifact.duration_s, "capture_region_id": f"region_{variation_id}", "signal_status": measured["signal_status"], "rms_dbfs": measured["rms_dbfs"]},
                 plan_id=plan.plan_id,
-                ownership={"owner": "COPILOT", "track_stable_id": track.stable_id, "track_name": track.name, "clip_index": int(pattern_step.arguments["clip_index"])},
+                ownership={"owner": "COPILOT", "track_stable_id": track.stable_id, "track_name": track.name, "clip_index": int(pattern_step.arguments["clip_index"]), "arrangement_clip_ids": arrangement_step.expected_after["arrangement_clip_ids"]},
                 safe_write={"result": result.to_dict(), "journal_path": result.journal_path, "prestate_path": result.prestate_path},
                 region={"start_qn": request.start_qn, "end_qn": request.end_qn or request.start_qn + length_beats, "bars": bars, "scope": request.scope},
                 created_at=utc_now(),

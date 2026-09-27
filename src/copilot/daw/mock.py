@@ -526,7 +526,7 @@ class MockAbletonAdapter(DawAdapter):
         track = self._track(track_index)
         source = self._clip(track_index, clip_index)
         span = float(length if length is not None else source["length"])
-        copies = max(1, int(round(span / 4.0))) if span > 4.0 else 1
+        copies = max(1, int(round(span / 4.0))) if length is not None and span > 4.0 else 1
         created: list[dict[str, Any]] = []
         for offset in range(copies):
             item = {
