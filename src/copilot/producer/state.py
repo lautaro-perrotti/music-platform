@@ -25,6 +25,8 @@ class ProducerPhase(StrEnum):
     CRITIQUING = "CRITIQUING"
     ADJUSTING = "ADJUSTING"
     COMPLETE = "COMPLETE"
+    DRAFT = "DRAFT"
+    BLOCKED = "BLOCKED"
     ABSTAINED = "ABSTAINED"
 
 

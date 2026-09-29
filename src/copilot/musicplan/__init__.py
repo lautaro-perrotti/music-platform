@@ -1158,9 +1158,15 @@ def build_sample_load_action(
         reversible=True,
         preconditions=[
             ActionPrecondition(code="TARGET_EXISTS", detail="track must resolve uniquely"),
-            ActionPrecondition(code="SLOT_EMPTY", detail="clip_index slot must be empty"),
+            ActionPrecondition(
+                code="SLOT_EMPTY" if track.role == "audio" else "MIDI_INSTRUMENT_TARGET",
+                detail="audio slot must be empty; MIDI sample loads into a new instrument",
+            ),
             ActionPrecondition(code="TOKENS_CURRENT", detail="plan tokens must match live"),
-            ActionPrecondition(code="ROLLBACK_PREPARED", detail="delete_clip inverse prepared"),
+            ActionPrecondition(
+                code="ROLLBACK_PREPARED",
+                detail="delete_clip inverse prepared" if track.role == "audio" else "delete_device inverse prepared",
+            ),
             ActionPrecondition(code="VERIFICATION_SPEC_PRESENT", detail="execution + musical verification specs required"),
         ],
     )
@@ -1261,7 +1267,7 @@ def validate_sample_load_plan(
         plan.rejection_reason = f"CLIP_INDEX_INVALID {params.clip_index}"
         return plan
     existing = next((c for c in track.clips if c.slot_index == params.clip_index), None)
-    if existing is not None:
+    if existing is not None and track.role == "audio":
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = f"SLOT_OCCUPIED {params.clip_index} (use SAMPLE_SWAP)"
         return plan

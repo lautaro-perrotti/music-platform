@@ -66,6 +66,8 @@ def test_remote_script_install_is_idempotent_and_owned(tmp_path: Path) -> None:
     assert first["REMOTE_SCRIPT"] == "INSTALLED"
     script = dest / SCRIPT_FOLDER / "__init__.py"
     assert script.is_file()
+    units = dest / SCRIPT_FOLDER / "parameter_units.py"
+    assert units.is_file()
     assert (dest / SCRIPT_FOLDER / MANIFEST_NAME).is_file()
     digest = hashlib.sha256(script.read_bytes()).hexdigest()
     assert digest == first["sha256"]
@@ -73,6 +75,10 @@ def test_remote_script_install_is_idempotent_and_owned(tmp_path: Path) -> None:
     assert second["status"] == "ALREADY_CURRENT"
     copies = list(dest.rglob("__init__.py"))
     assert len(copies) == 1
+    units.unlink()
+    repaired = install_remote_script(dest_parent=dest)
+    assert repaired["status"] == "UPDATED"
+    assert units.is_file()
 
 
 def test_remote_script_blocks_unknown_user_file(tmp_path: Path) -> None:

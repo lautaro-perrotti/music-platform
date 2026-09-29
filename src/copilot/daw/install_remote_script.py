@@ -17,12 +17,13 @@ VENDOR_SCRIPT = (
     / "AbletonMCP"
     / "__init__.py"
 )
+VENDOR_UNITS = VENDOR_SCRIPT.with_name("parameter_units.py")
 SCRIPT_FOLDER = "AbletonMCP"
 MANIFEST_NAME = "copilot_remote_script.json"
 SCRIPT_PORT = 9877
 SCRIPT_PROTOCOL = "tcp-json"
 SCRIPT_HOST = "127.0.0.1"
-OWNED_FILES = {"__init__.py", MANIFEST_NAME}
+OWNED_FILES = {"__init__.py", "parameter_units.py", MANIFEST_NAME}
 
 
 def source_digest() -> str:
@@ -65,7 +66,7 @@ def resolve_remote_scripts_parent(*, dest_parent: Path | None = None) -> dict[st
 
 def install_remote_script(*, dest_parent: Path | None = None) -> dict:
     detection = None if dest_parent is not None else detect_ableton(SCRIPT_PORT, include_start_menu=False)
-    if not VENDOR_SCRIPT.exists():
+    if not VENDOR_SCRIPT.exists() or not VENDOR_UNITS.exists():
         return {
             "status": "FAILED",
             "REMOTE_SCRIPT": "BLOCKED",
@@ -102,9 +103,21 @@ def install_remote_script(*, dest_parent: Path | None = None) -> dict:
     dest = dest_dir / "__init__.py"
     dest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = dest_dir / MANIFEST_NAME
+    units_dest = dest_dir / VENDOR_UNITS.name
+    units_digest = hashlib.sha256(VENDOR_UNITS.read_bytes()).hexdigest()
+    owned = _copilot_owned(manifest_path)
+    if units_dest.is_file() and hashlib.sha256(units_dest.read_bytes()).hexdigest() != units_digest and not owned:
+        return {
+            "status": "BLOCKED", "REMOTE_SCRIPT": "BLOCKED",
+            "error": "USER_OWNED_CONFLICT", "install_path": str(units_dest),
+        }
+    if dest.is_file() and not units_dest.is_file() and not owned:
+        return {
+            "status": "BLOCKED", "REMOTE_SCRIPT": "BLOCKED",
+            "error": "USER_OWNED_CONFLICT", "install_path": str(dest),
+        }
     if dest.is_file():
         current = hashlib.sha256(dest.read_bytes()).hexdigest()
-        owned = _copilot_owned(manifest_path)
         if current == digest:
             status = "ALREADY_CURRENT"
         elif owned:
@@ -127,8 +140,12 @@ def install_remote_script(*, dest_parent: Path | None = None) -> dict:
     else:
         _atomic_copy(VENDOR_SCRIPT, dest)
         status = "INSTALLED"
+    if not units_dest.is_file() or hashlib.sha256(units_dest.read_bytes()).hexdigest() != units_digest:
+        _atomic_copy(VENDOR_UNITS, units_dest)
+        if status == "ALREADY_CURRENT":
+            status = "UPDATED"
     installed_digest = hashlib.sha256(dest.read_bytes()).hexdigest()
-    if installed_digest != digest:
+    if installed_digest != digest or hashlib.sha256(units_dest.read_bytes()).hexdigest() != units_digest:
         return {
             "status": "FAILED",
             "REMOTE_SCRIPT": "BLOCKED",
@@ -243,10 +260,13 @@ def _retire_duplicate_copies(detection: Any, kept: Path, digest: str) -> list[st
         except OSError:
             continue
         current = hashlib.sha256(extra.read_bytes()).hexdigest()
-        if current != digest:
+        sibling = extra.with_name(VENDOR_UNITS.name)
+        if current != digest or not sibling.is_file() or hashlib.sha256(sibling.read_bytes()).hexdigest() != hashlib.sha256(VENDOR_UNITS.read_bytes()).hexdigest():
             continue
         extra.unlink()
         retired.append(str(extra))
+        sibling.unlink()
+        retired.append(str(sibling))
         manifest = extra.with_name(MANIFEST_NAME)
         if manifest.is_file():
             manifest.unlink()
@@ -275,7 +295,8 @@ def _remove_owned_script_dir(dest_dir: Path) -> dict[str, list[str]]:
         for child in dest_dir.iterdir()
         if child.name not in OWNED_FILES and child.suffix != ".part"
     ]
-    for name in ("__init__.py", MANIFEST_NAME, "__init__.py.part"):
+    for name in ("__init__.py", "parameter_units.py", MANIFEST_NAME,
+                 "__init__.py.part", "parameter_units.py.part"):
         path = dest_dir / name
         if path.is_file():
             path.unlink()

@@ -480,8 +480,14 @@ def build_sample_set_context(
                 "filename": a.filename,
                 "relative_path": a.relative_path,
                 "bpm": a.bpm.value,
+                "pitch": a.pitch.value,
+                "sample_type": a.sample_type.value,
                 "duration_s": a.descriptors.duration_s,
                 "centroid_hz": a.descriptors.spectral_centroid_hz,
+                "rms": a.descriptors.rms,
+                "peak": a.descriptors.peak,
+                "license": a.provenance.get("license", "UNKNOWN"),
+                "available": Path(a.path).is_file(),
                 "confidence": a.classification_confidence,
             }
             role_list.append(summary)

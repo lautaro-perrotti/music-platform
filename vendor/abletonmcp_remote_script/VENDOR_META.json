@@ -8,10 +8,12 @@
     "protocol_hello handshake",
     "echo request_id",
     "LIVE-2 master track_index=-1 + transport/capture capabilities",
-    "LIVE-2.2 input/output routing channels + create_audio_clip + clip warping"
+    "LIVE-2.2 input/output routing channels + create_audio_clip + clip warping",
+    "device.physical_units_v1 native/display Hz/dB and bounded EQ Eight Q attestation via parameter_units.py"
   ],
   "protocol_version": "1",
-  "checksum_sha256": "dcba4316546f787346bd637802570434ad95bc2b2128b0dfd1aa611014fa6724",
+  "checksum_sha256": "74fe0cd8c5f99139680aaf435c72f5e5a2a67226a35fc2a77cf0300486d9d570",
+  "parameter_units_checksum_sha256": "6179bd779da913ea98f7fba54e909bff0f5209dd8eb40ab40b819f6525fb0929",
   "auto_update": false,
   "idempotency_decision": "Reconciliation at the Copilot layer. No Remote Script command dedup. Upstream does not advertise idempotency; retries of NON_IDEMPOTENT writes are allowed only after a read proves the postcondition is absent."
 }

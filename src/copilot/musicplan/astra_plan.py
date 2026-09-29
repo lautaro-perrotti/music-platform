@@ -9,7 +9,9 @@ unavailable or returns an invalid plan.
 from __future__ import annotations
 
 import json
+import math
 import re
+from pathlib import Path
 
 from copilot.sample_library.schemas import LibraryIndex
 from copilot.schemas.session import SessionState
@@ -18,7 +20,7 @@ ASTRA_TIMEOUT_S = 180.0
 
 
 def build_candidate_context(
-    index: LibraryIndex, top_k: int = 3
+    index: LibraryIndex, top_k: int = 3, *, bpm: float | None = None
 ) -> dict[str, list[dict]]:
     """Retrieve top-K candidates per role (keyed by track_name)."""
     from copilot.musicplan.tech_house import GROOVY_LATIN_GROOVE
@@ -26,20 +28,29 @@ def build_candidate_context(
 
     retriever = SampleRetriever(index)
     candidates: dict[str, list[dict]] = {}
-    for role, track_name, sample_type, bpm, text_query in GROOVY_LATIN_GROOVE:
+    for role, track_name, sample_type, bpm_filter, text_query in GROOVY_LATIN_GROOVE:
         results = retriever.search_samples(
-            role=role, one_shot_or_loop=sample_type, bpm=bpm,
+            role=role, one_shot_or_loop=sample_type, bpm=bpm if bpm is not None else bpm_filter,
             text_query=text_query, top_k=top_k,
         )
         candidates[track_name] = [
-            {"sha256": r.asset.sha256, "filename": r.asset.filename, "bpm": r.asset.bpm.value}
-            for r in results
+            {
+                "sha256": r.asset.sha256, "filename": r.asset.filename,
+                "bpm": r.asset.bpm.value, "pitch": r.asset.pitch.value,
+                "duration_s": r.asset.descriptors.duration_s,
+                "sample_type": r.asset.sample_type.value,
+                "spectral_centroid_hz": r.asset.descriptors.spectral_centroid_hz,
+                "license": r.asset.provenance.get("license", "UNKNOWN"),
+                "available": Path(r.asset.path).is_file(),
+            }
+            for r in results if Path(r.asset.path).is_file()
         ]
     return candidates
 
 
 def build_astra_prompt(
-    *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0
+    *, candidates: dict[str, list[dict]], intent: str, bpm: float = 127.0,
+    strict: bool = False,
 ) -> str:
     from copilot.musicplan.decision_system import build_decision_context
     from copilot.musicplan.fx import FX_PHILOSOPHY
@@ -49,14 +60,18 @@ def build_astra_prompt(
     lines = [
         astra_context,
         "",
-        "You are the PRODUCER of a groovy/latin tech house track (underground, percussive,",
-        "hypnotic, dark/warm). You DECIDE samples AND the arrangement, like a real producer.",
+        ("You are the producer of a new original tech-house track. Let the user's "
+         "super prompt and available library determine its substyle, palette and arrangement."
+         if strict else
+         "You are the PRODUCER of a groovy/latin tech house track (underground, percussive, "
+         "hypnotic, dark/warm). You DECIDE samples AND the arrangement, like a real producer."),
         f"Tempo {bpm} BPM. Percussion-first; fewer elements, more identity.",
         "Musical elements are rhythmic instruments, not melody: short stabs/plucks/guitar chops/sax hits/vocal chops.",
         f"Musical principles: {'; '.join(SYNTH_PHILOSOPHY[:4])}",
         "FX: felt more than noticed; short/rhythmic/dark (no EDM risers). Impacts/downlifters/textures support the groove.",
         f"FX principles: {'; '.join(FX_PHILOSOPHY[:4])}",
-        "Call-and-response: guitar <-> conga, vocal <-> sax; don't stack every hook at once.",
+        ("Choose a distinctive hook and leave it room; do not assume specific instruments."
+         if strict else "Call-and-response: guitar <-> conga, vocal <-> sax; don't stack every hook at once."),
         "",
         "Available elements (roles): " + ", ".join(candidates.keys()) + ".",
         "Every active element goes DIRECT to Main on its own channel (no buses).",
@@ -64,7 +79,13 @@ def build_astra_prompt(
         "Sample candidates per role (pick one number per role, or omit a role):",
     ]
     for track_name, cands in candidates.items():
-        opts = "  ".join(f"{i + 1}. {c['filename']}" for i, c in enumerate(cands))
+        opts = "  ".join(
+            f"{i + 1}. {c['filename']} (BPM={c.get('bpm')}, "
+            f"pitch={c.get('pitch')}, duration={c.get('duration_s')}s, "
+            f"type={c.get('sample_type')}, license={c.get('license')}, "
+            f"A/B facts={json.dumps(c.get('ab_facts') or {}, sort_keys=True)})"
+            for i, c in enumerate(cands)
+        )
         lines.append(f"{track_name}: {opts}")
     lines += [
         "",
@@ -73,6 +94,24 @@ def build_astra_prompt(
         "Decide ONE sample per role AND a typed TrackSpec arrangement. Return ONLY a JSON object:",
         """{
   "selections": {"TrackName": <1-based index>, ...},
+  "selection_reasons": {"TrackName": "<why this sample fits its role and the other elements>"},
+  "rejected_candidates": {"TrackName": {"2": "<why rejected against the selected candidate>"}},
+  "patterns": {"Shaker": {"length_beats": 4,
+    "notes": [{"pitch": 60, "start_time": 0, "duration": 0.25, "velocity": 92}]}},
+  "mix_decisions": {"eq_eight": {"decision": "NONE", "reason": "<evidence or no need>"},
+                    "limiter": {"decision": "NONE", "reason": "<evidence or no need>"}},
+  "producer_criteria": {
+    "primary_hook": "<same as track_spec>",
+    "hook_role": "<same as track_spec>",
+    "uncertainty": "<what these facts cannot establish>",
+    "sections": [
+      {"section_name": "<same as track_spec>", "perceptual_goal": "<intent, not measured>",
+       "lead_role": "Kick", "low_end_owner": "Kick", "space_roles": ["Bass"],
+       "hook_usage": "foreground", "energy_rationale": "<why>",
+       "variation_hypothesis": "<what changes within this phase>",
+       "claim_kind": "ARTISTIC_PREFERENCE", "evidence_refs": ["<selected sample SHA256>"]}
+    ]
+  },
   "track_spec": {
     "title": "<short title>",
     "intent": "<restatement of the user's musical intent>",
@@ -80,6 +119,7 @@ def build_astra_prompt(
     "key": "<optional key>",
     "style": "<optional style>",
     "primary_hook": "<optional primary hook>",
+    "hook_role": "<active TrackName that carries the hook>",
     "sections": [
       {"name": "<producer-defined name>", "bars": 8, "energy": 0.25,
        "active_roles": ["TrackName"], "variation": "", "transition": ""}
@@ -102,11 +142,33 @@ def build_astra_prompt(
         "",
         "TrackSpec rules: sections are producer-defined measurement/planning units, not a fixed genre template;",
         "each section must declare energy 0..1 and active_roles; use subtraction and variation rather than stacking;",
-        "Arrangement rules: 5-8 sections; Kick must be active in at least the backbone sections;",
-        "build up (drums/percussion first), reach a DROP, and return subdued at the end (DJ exit);",
+        ("Arrangement rules: choose the number and lengths of sections to match the exact requested duration;"
+         if strict else "Arrangement rules: 5-8 sections; Kick must be active in at least the backbone sections;"),
+        ("make each transition and energy change intentional."
+         if strict else "build up (drums/percussion first), reach a DROP, and return subdued at the end (DJ exit);"),
         "subtract by omission across sections, never stack everything.",
-        "If you omit 'arrangement', the deterministic structure is used.",
+        ("The track_spec, sample selections and exact requested duration are mandatory; "
+         "no default structure or samples will be substituted."
+         if strict else "If you omit 'arrangement', the deterministic structure is used."),
+        ("producer_criteria must describe each section in the same order; "
+         "space_roles must be silent there; cite only selected SHA256 hashes, "
+         "and distinguish intention from factual audio measurement."
+         if strict else ""),
         "Patch contracts must be conservative: few params, small deltas, no power toggles.",
+        ("For an APPLY mix decision include a testable 'hypothesis', an 'objective' "
+         "(reduce_low_band/reduce_high_band for EQ Eight; reduce_peak for Limiter), "
+         "and exactly one 'action' with track_name "
+         "(an active role for EQ Eight; Master for Limiter), control "
+         "(frequency/gain/q for EQ Eight, ceiling for Limiter), band (1..8 for EQ), "
+         "value in physical units and unit (hz/db/q). NONE must have no action. "
+         "Core will abstain if Live does not attest native physical units."
+         if strict else ""),
+        ("A/B previews are deterministic one-bar source files at matched peak, NOT an "
+         "audition within the Live groove; no semantic listening is available. "
+         "Compare candidates by measured transients, tail, low-end and spectrum. "
+         "Give selection_reasons and rejected_candidates for every alternative with a factual comparison and explicitly state "
+         "what the metrics cannot judge. Never claim to have heard a preview."
+         if strict else ""),
     ]
     return "\n".join(lines)
 
@@ -217,11 +279,16 @@ def build_plan_from_prompt(
     top_k: int = 3,
     plan_id: str = "astra_groove",
     timeout_s: float = ASTRA_TIMEOUT_S,
+    goal=None,
+    preview_root: Path | None = None,
+    authorized_library_root: Path | None = None,
 ):
-    """prompt -> Astra -> MusicPlan. Falls back to the deterministic recipe on error."""
+    """Prompt -> Astra -> MusicPlan; goal mode refuses fallback and invalid choices."""
     from copilot.musicplan.tech_house import build_tech_house_plan
 
     if provider is None:
+        if goal is not None:
+            raise ValueError("PRODUCER_PROVIDER_UNAVAILABLE")
         from copilot.reasoning.provider import configured_http_provider
 
         provider = configured_http_provider()
@@ -233,8 +300,17 @@ def build_plan_from_prompt(
             "reasoning": "no provider configured; deterministic fallback",
         }
 
-    candidates = build_candidate_context(index, top_k=top_k)
-    prompt = build_astra_prompt(candidates=candidates, intent=intent)
+    candidates = build_candidate_context(index, top_k=top_k, bpm=goal.bpm if goal else None)
+    if goal is not None:
+        if preview_root is None or authorized_library_root is None:
+            raise ValueError("PRODUCER_AB_PREVIEW_CONTEXT_REQUIRED")
+        from copilot.sample_library.context_comparison import compare_shortlist
+
+        candidates = compare_shortlist(
+            index, candidates, authorized_root=authorized_library_root,
+            preview_root=preview_root, bpm=goal.bpm,
+        )
+    prompt = build_astra_prompt(candidates=candidates, intent=intent, bpm=goal.bpm if goal else 127.0, strict=goal is not None)
 
     try:
         fn = getattr(provider, "reason_json_object", None) or provider.reason
@@ -261,12 +337,105 @@ def build_plan_from_prompt(
                 )
                 arrangement = arrangement_plan.to_sections()
             except Exception as exc:  # noqa: BLE001
+                if goal is not None:
+                    raise ValueError(f"PRODUCER_TRACK_SPEC_INVALID: {exc}") from exc
                 track_spec_error = str(exc)
                 arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
                 arrangement_plan = None
         else:
+            if goal is not None:
+                raise ValueError("PRODUCER_TRACK_SPEC_REQUIRED")
             arrangement = validate_arrangement(arrangement_raw) if arrangement_raw else None
             arrangement_plan = None
+        if goal is not None:
+            goal.validate_track_spec(track_spec)
+            mix = data.get("mix_decisions")
+            if not isinstance(mix, dict) or set(mix) != {"eq_eight", "limiter"}:
+                raise ValueError("PRODUCER_EQ_LIMITER_DECISIONS_REQUIRED")
+            for name, decision in mix.items():
+                if (
+                    not isinstance(decision, dict)
+                    or not {"decision", "reason"}.issubset(decision)
+                    or set(decision) - {"decision", "reason", "action", "hypothesis", "objective"}
+                    or decision["decision"] not in {"NONE", "APPLY"}
+                    or not isinstance(decision["reason"], str)
+                    or not decision["reason"].strip()
+                ):
+                    raise ValueError(f"PRODUCER_MIX_DECISION_INVALID: {name}")
+                action = decision.get("action")
+                if decision["decision"] == "NONE":
+                    if action is not None or "objective" in decision or "hypothesis" in decision:
+                        raise ValueError(f"PRODUCER_MIX_DECISION_INVALID: {name}")
+                    continue
+                if (
+                    not isinstance(decision.get("hypothesis"), str)
+                    or len(decision["hypothesis"].strip()) < 8
+                    or decision.get("objective") not in (
+                        {"reduce_low_band", "reduce_high_band"} if name == "eq_eight"
+                        else {"reduce_peak"}
+                    )
+                ):
+                    raise ValueError(f"PRODUCER_MIX_HYPOTHESIS_INVALID: {name}")
+                expected = {"track_name", "control", "value", "unit"}
+                if (
+                    not isinstance(action, dict)
+                    or not expected.issubset(action)
+                    or set(action) - (expected | {"band"})
+                    or not isinstance(action["track_name"], str)
+                    or not isinstance(action["control"], str)
+                    or type(action["value"]) not in (float, int)
+                    or not math.isfinite(action["value"])
+                ):
+                    raise ValueError(f"PRODUCER_MIX_ACTION_INVALID: {name}")
+                if name == "eq_eight":
+                    if (
+                        action["track_name"] not in {role for section in track_spec.sections for role in section.active_roles}
+                        or action["control"] not in {"frequency", "gain", "q"}
+                        or type(action.get("band")) is not int
+                        or not 1 <= action["band"] <= 8
+                        or action["unit"] != {"frequency": "hz", "gain": "db", "q": "q"}[action["control"]]
+                    ):
+                        raise ValueError("PRODUCER_EQ_ACTION_INVALID")
+                elif (
+                    action["track_name"] != "Master" or action["control"] != "ceiling"
+                    or "band" in action or action["unit"] != "db"
+                ):
+                    raise ValueError("PRODUCER_LIMITER_ACTION_INVALID")
+            selected_roles = {
+                role for section in track_spec.sections for role in section.active_roles
+            }
+            if not selected_roles or not selected_roles.issubset(candidates):
+                raise ValueError("PRODUCER_UNAVAILABLE_SECTION_ROLE")
+            if not selected_roles.issubset(selections):
+                raise ValueError("PRODUCER_SECTION_SAMPLE_SELECTION_MISSING")
+            if set(selections) - set(candidates):
+                raise ValueError("PRODUCER_UNKNOWN_SAMPLE_ROLE")
+            if any(
+                type(selections[role]) is not int
+                or not 1 <= selections[role] <= len(candidates[role])
+                for role in selected_roles
+            ):
+                raise ValueError("PRODUCER_SAMPLE_SELECTION_UNRESOLVED")
+            reasons = data.get("selection_reasons")
+            if not isinstance(reasons, dict) or any(
+                not isinstance(reasons.get(role), str) or not reasons[role].strip()
+                for role in selected_roles
+            ):
+                raise ValueError("PRODUCER_SAMPLE_SELECTION_REASONS_MISSING")
+            rejected = data.get("rejected_candidates") or {}
+            if not isinstance(rejected, dict):
+                raise ValueError("PRODUCER_AB_REJECTIONS_INVALID")
+            for role in selected_roles:
+                alternatives = rejected.get(role, {})
+                selected = selections[role]
+                if not isinstance(alternatives, dict) or set(alternatives) != {
+                    str(number) for number in range(1, len(candidates[role]) + 1)
+                    if number != selected
+                } or any(
+                    not isinstance(reason, str) or len(reason.strip()) < 8
+                    for reason in alternatives.values()
+                ):
+                    raise ValueError(f"PRODUCER_AB_REJECTIONS_MISSING: {role}")
         patch_contracts_raw = data.get("patch_contracts")
         patch_contracts = validate_patch_contracts(
             patch_contracts_raw,
@@ -275,17 +444,89 @@ def build_plan_from_prompt(
         sample_map: dict[str, str] = {}
         for track_name, num in selections.items():
             cands = candidates.get(track_name, [])
-            idx = int(num) - 1
+            if type(num) is not int or not 1 <= num <= len(cands):
+                if goal is not None:
+                    raise ValueError(f"PRODUCER_SAMPLE_SELECTION_UNRESOLVED: {track_name}")
+                continue
+            idx = num - 1
             if 0 <= idx < len(cands):
                 sample_map[track_name] = cands[idx]["sha256"]
+        if goal is not None:
+            from copilot.sample_library.schemas import AssetStatus
+            from copilot.producer.criteria import ProducerCriteria
+
+            for role, digest in sample_map.items():
+                asset = index.assets.get(digest)
+                if asset is None or asset.status is not AssetStatus.INDEXED:
+                    raise ValueError(f"PRODUCER_SAMPLE_UNAVAILABLE: {role}")
+            criteria = ProducerCriteria.model_validate(data.get("producer_criteria"))
+            criteria.validate_against(track_spec, selected_digests=set(sample_map.values()))
         plan = build_tech_house_plan(
             index=index, session=session, plan_id=plan_id, sample_map=sample_map or None
         )
+        if goal is not None:
+            plan.actions = [
+                action for action in plan.actions
+                if (action.target.ref or {}).get("name") in selected_roles
+                and action.action_type.value in {"CREATE_TRACK", "SAMPLE_LOAD", "CREATE_PATTERN"}
+            ]
+            from copilot.musicplan.tech_house import MIDI_PERCUSSION
+            from copilot.schemas.session import MidiNote
+
+            patterns = data.get("patterns") or {}
+            if not isinstance(patterns, dict):
+                raise ValueError("PRODUCER_PATTERNS_INVALID")
+            updated = []
+            for action in plan.actions:
+                if action.action_type.value == "CREATE_PATTERN":
+                    role = str(action.target.ref.get("name") or "")
+                    pattern = patterns.get(role)
+                    if not isinstance(pattern, dict):
+                        raise ValueError(f"PRODUCER_MIDI_PATTERN_REQUIRED: {role}")
+                    length = pattern.get("length_beats")
+                    notes = pattern.get("notes")
+                    if (
+                        not isinstance(length, (int, float)) or isinstance(length, bool)
+                        or not 0 < length <= 16 or not isinstance(notes, list)
+                        or not 1 <= len(notes) <= 128
+                    ):
+                        raise ValueError(f"PRODUCER_MIDI_PATTERN_INVALID: {role}")
+                    validated = [MidiNote.model_validate(note) for note in notes]
+                    if any(
+                        not 0 <= note.pitch <= 127
+                        or not 1 <= note.velocity <= 127
+                        or not 0 <= note.start_time < length
+                        or not 0 < note.duration <= length - note.start_time
+                        for note in validated
+                    ):
+                        raise ValueError(f"PRODUCER_MIDI_NOTES_OUT_OF_RANGE: {role}")
+                    action = action.model_copy(update={
+                        "params": action.params.model_copy(update={
+                            "length_beats": float(length), "notes": validated,
+                        }),
+                    })
+                updated.append(action)
+            plan.actions = updated
+            if set(patterns) - (selected_roles & set(MIDI_PERCUSSION)):
+                raise ValueError("PRODUCER_UNKNOWN_MIDI_PATTERN_ROLE")
+            for role in selected_roles:
+                if not any(
+                    action.action_type.value == "SAMPLE_LOAD"
+                    and (action.target.ref or {}).get("name") == role
+                    for action in plan.actions
+                ):
+                    raise ValueError(f"PRODUCER_SELECTED_SAMPLE_NOT_LOADED: {role}")
         return plan, {
             "astra_used": True,
             "reasoning": data.get("reasoning", ""),
             "selections": selections,
             "sample_map": sample_map,
+            "selection_reasons": data.get("selection_reasons") or {},
+            "rejected_candidates": data.get("rejected_candidates") or {},
+            "sample_comparisons": candidates if goal is not None else {},
+            "producer_criteria": criteria.model_dump(mode="json") if goal is not None else None,
+            "patterns": data.get("patterns") or {},
+            "mix_decisions": data.get("mix_decisions") or {},
             "arrangement": arrangement,
             "track_spec": track_spec.model_dump(mode="json") if track_spec else None,
             "track_spec_error": track_spec_error,
@@ -294,5 +535,7 @@ def build_plan_from_prompt(
             "patch_contracts": patch_contracts,
         }
     except Exception as exc:  # noqa: BLE001
+        if goal is not None:
+            raise ValueError(f"PRODUCER_PLANNER_REJECTED: {exc}") from exc
         plan = build_tech_house_plan(index=index, session=session, plan_id=plan_id)
         return plan, {"astra_used": False, "reasoning": f"astra error -> fallback: {exc}"}

@@ -2,6 +2,48 @@
 
 Date: 2026-09-27. Runtime > this file when they disagree.
 
+## Experimental new-project producer (offline only, 2026-09-29)
+
+`produce-tech-house` now validates a super prompt's mandatory BPM/duration
+before Live, copies a verifiably empty saved template to a unique authorized
+working directory, and refuses missing provider strategy, samples, hook,
+section duration, or sample-selection reasons. It stages only digest-checked
+chosen assets, routes selected MIDI patterns and arrangement actions through
+MusicPlan -> ProductionCompiler -> SafeWrite, captures section Main and
+source evidence, and has a bounded typed volume-revision path with rollback.
+Typed EQ Eight/Limiter APPLY uses SafeWrite only when the vendored bridge
+attests native/display physical-unit parity and fresh parameter readback;
+the mix pass also requires before/after Main captures and another verified
+Save/reopen. Empty Return tracks are allowed in the template, but musical
+tracks, clips and Return devices remain forbidden.
+The producer criteria records phase goals, hook/low-end/space roles,
+variation hypotheses, cited sample hashes and uncertainty separately from
+the technical gate. A/B source/context previews are reproducible one-bar
+proxies, not evidence of semantic audition in Live. Section listening
+requires independent opening, middle and ending windows across transitions.
+EQ/Limiter intents require measured objectives and rollback on no improvement;
+blind A/B review is optional and `artistic_quality_human_verified` remains
+false without human feedback. The adapter now preserves a native Limiter
+`max=0.0` instead of changing it to `1.0`.
+Promised section-level MIDI phrase variation on an already sample-backed track
+has no certified edit/readback/rollback path. Such sections are now recorded
+as essential `EXECUTION_DEFERRED` with
+`PHRASE_MIDI_VARIATION_NOT_CERTIFIED`, then saved as `DRAFT` where possible;
+repeating slot-0 clips cannot count as verified phrase variation.
+The owned-Windows-window Save fallback requires foreground/process/path
+checks, changed disk content, a distinct reopened process, and matching
+authoritative identity; uncertainty returns `DRAFT` or `BLOCKED`.
+
+Focused offline tests pass. **No real Live production or UI Save has been
+certified on this change.** Template BPM must already match the goal (tempo
+write is not certified); the installed bridge's missing browser.load and
+missing physical EQ Eight/Limiter units can block essential actions. The
+vendored bridge extension does not prove the installed bridge supports it;
+unsupported APPLY decisions remain deferred. Arrangement geometry,
+full active-role coverage, source audibility and post-save identity must pass
+the delivery gate before `COMPLETE`; the old Alpha pass below remains a
+separate controlled-project result, not evidence for a new song.
+
 ## Latest bounded variation (pista Project)
 
 `REFERENCE_BASS_VARIATION_8_BAR` passed one real controlled-working-copy run:
@@ -177,6 +219,21 @@ and kept direct Lucas writes at zero. The mix consequence was measurable
 constructed Core `CONTROLLED_FIXTURE`, not output from
 `build_plan_from_prompt`; autonomous Lucas mix/master planning remains an
 Alpha requirement.
+
+Typed mix parameter requests in `mixing_mastering_v1` use
+`operation=set_typed_parameter` with a unique device target, `control`
+(`enabled`, EQ Eight `frequency`/`gain`/`q` with `band` 1–8, or Limiter
+`ceiling`), `value`, and `unit` (`boolean`, `hz`, `db`, or `q`).
+They require a fresh device-parameter read matching the session snapshot,
+unambiguous parameter name/index, finite native bounds, and explicit physical
+unit metadata; SafeWrite still owns readback and rollback. The current Live
+bridge does **not** expose physical units for EQ Eight or Limiter, so those
+physical controls are deferred as `PHYSICAL_UNIT_UNCERTIFIED` in real Live
+sessions, not inferred from 0–1 ranges. `enabled` is possible only when
+`Device On` is explicitly reported as a quantized 0/1 parameter. This is
+offline-tested conditional support, **not** real-Live certification of
+frequency, gain, Q or ceiling. Legacy native parameter actions remain separate
+and do not claim engineering units.
 
 `LUCAS_POST_CHANGE_CRITIQUE_PROVIDER` is `PROVIDER_LIMITED`. The unchanged
 Lucas critique contract and Core bounded provider failover are implemented and

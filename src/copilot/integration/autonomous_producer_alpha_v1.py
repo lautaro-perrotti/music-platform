@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from copilot.integration.lucas_core_v1 import (
 from copilot.integration.mixing_mastering_v1 import capture_and_analyze_master
 from copilot.importing.working_copy_manager_v1 import is_copilot_working_copy
 from copilot.musicplan import build_duplicate_clip_to_arrangement_action
+from copilot.producer.goal import ProducerGoal
 from copilot.producer.state import ProducerPhase, ProducerState, ProducerStateStore
 from copilot.sample_library.library_v1 import (
     build_sample_set_context,
@@ -57,6 +59,7 @@ SUPPORTED_ALPHA_ACTIONS = frozenset(
         ProductionActionKind.DEVICE_TWEAK,
         ProductionActionKind.SET_TRACK_VOLUME,
         ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT,
+        ProductionActionKind.CREATE_PATTERN,
     }
 )
 
@@ -169,6 +172,99 @@ class LucasPlanningProviderAdapter:
             "type": "object",
             "properties": {
                 "selections": {"type": "object", "additionalProperties": {"type": "integer"}},
+                "selection_reasons": {"type": "object", "additionalProperties": {"type": "string"}},
+                "rejected_candidates": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object", "additionalProperties": {"type": "string"},
+                    },
+                },
+                "patterns": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "length_beats": {"type": "number"},
+                            "notes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pitch": {"type": "integer"},
+                                        "start_time": {"type": "number"},
+                                        "duration": {"type": "number"},
+                                        "velocity": {"type": "integer"},
+                                    },
+                                    "required": ["pitch", "start_time", "duration", "velocity"],
+                                },
+                            },
+                        },
+                        "required": ["length_beats", "notes"],
+                    },
+                },
+                "mix_decisions": {
+                    "type": "object",
+                    "properties": {
+                        name: {
+                            "type": "object",
+                            "properties": {
+                                "decision": {"type": "string"},
+                                "reason": {"type": "string"},
+                                "hypothesis": {"type": "string"},
+                                "objective": {"type": "string"},
+                                "action": {
+                                    "type": "object",
+                                    "properties": {
+                                        "track_name": {"type": "string"},
+                                        "control": {"type": "string"},
+                                        "band": {"type": "integer"},
+                                        "value": {"type": "number"},
+                                        "unit": {"type": "string"},
+                                    },
+                                    "producer_criteria": {
+                                        "type": "object",
+                                        "properties": {
+                                            "primary_hook": {"type": "string"},
+                                            "hook_role": {"type": "string"},
+                                            "uncertainty": {"type": "string"},
+                                            "sections": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "section_name": {"type": "string"},
+                                                        "perceptual_goal": {"type": "string"},
+                                                        "lead_role": {"type": "string"},
+                                                        "low_end_owner": {"type": "string"},
+                                                        "space_roles": {"type": "array", "items": {"type": "string"}},
+                                                        "hook_usage": {"type": "string"},
+                                                        "energy_rationale": {"type": "string"},
+                                                        "variation_hypothesis": {"type": "string"},
+                                                        "claim_kind": {"type": "string"},
+                                                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                                                    },
+                                                    "required": [
+                                                        "section_name", "perceptual_goal", "lead_role",
+                                                        "low_end_owner", "space_roles", "hook_usage",
+                                                        "energy_rationale", "variation_hypothesis",
+                                                        "claim_kind", "evidence_refs",
+                                                    ],
+                                                    "additionalProperties": False,
+                                                },
+                                            },
+                                        },
+                                        "required": ["primary_hook", "hook_role", "uncertainty", "sections"],
+                                        "additionalProperties": False,
+                                    },
+                                    "required": ["track_name", "control", "value", "unit"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "required": ["decision", "reason"],
+                        } for name in ("eq_eight", "limiter")
+                    },
+                    "required": ["eq_eight", "limiter"],
+                },
                 "arrangement": {
                     "type": "array",
                     "items": {
@@ -183,6 +279,34 @@ class LucasPlanningProviderAdapter:
                     },
                 },
                 "reasoning": {"type": "string"},
+                "track_spec": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "intent": {"type": "string"},
+                        "bpm": {"type": "number"},
+                        "duration_bars": {"type": "integer"},
+                        "primary_hook": {"type": "string"},
+                        "hook_role": {"type": "string"},
+                        "style": {"type": "string"},
+                        "sections": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "bars": {"type": "integer"},
+                                    "energy": {"type": "number"},
+                                    "active_roles": {"type": "array", "items": {"type": "string"}},
+                                    "variation": {"type": "string"},
+                                    "transition": {"type": "string"},
+                                },
+                                "required": ["name", "bars", "energy", "active_roles"],
+                            },
+                        },
+                    },
+                    "required": ["bpm", "sections"],
+                },
                 "patch_contracts": {
                     "type": "array",
                     "items": {
@@ -219,7 +343,11 @@ class LucasPlanningProviderAdapter:
                     },
                 },
             },
-            "required": ["selections", "arrangement", "reasoning", "patch_contracts"],
+            "required": [
+                "selections", "selection_reasons", "rejected_candidates",
+                "arrangement", "reasoning", "patch_contracts", "producer_criteria",
+                "mix_decisions",
+            ],
             "additionalProperties": False,
         }
 
@@ -427,7 +555,10 @@ def _execute_one(action: Any, *, daw: Any, persist_dir: Path) -> dict[str, Any]:
     return row
 
 
-def _arrangement_actions(plan: MusicPlan, metadata: dict[str, Any], daw: Any) -> list[Any]:
+def _arrangement_actions(
+    plan: MusicPlan, metadata: dict[str, Any], daw: Any, *, strict: bool = False,
+    missing: list[str] | None = None,
+) -> list[Any]:
     sections = metadata.get("arrangement") or []
     if not sections:
         return []
@@ -445,11 +576,17 @@ def _arrangement_actions(plan: MusicPlan, metadata: dict[str, Any], daw: Any) ->
             bars = int(section.bars)
             active_names = list(section.active)
         if bars <= 0:
+            if strict:
+                raise ValueError(f"ARRANGEMENT_INVALID_SECTION: {section_name}")
             continue
         length = float(bars * 4)
         for name in active_names:
             track = session.track_by_name(str(name))
             if track is None or not any(clip.slot_index == 0 for clip in track.clips):
+                if strict:
+                    if missing is None:
+                        raise ValueError(f"ARRANGEMENT_SOURCE_CLIP_MISSING: {section_name}:{name}")
+                    missing.append(f"{section_name}:{name}")
                 continue
             actions.append(build_duplicate_clip_to_arrangement_action(
                 track=track,
@@ -465,6 +602,63 @@ def _arrangement_actions(plan: MusicPlan, metadata: dict[str, Any], daw: Any) ->
     return actions
 
 
+def _execute_midi_pattern(
+    create: Any, pattern: Any, *, daw: Any, persist_dir: Path
+) -> dict[str, Any]:
+    """Use the compiler's single certified create+pattern transaction."""
+    from copilot.runtime.production_compiler import ProductionCompiler
+    from copilot.runtime.safe_write import build_safe_write_executor
+
+    current = daw.snapshot()
+    attach_tokens(current)
+    combined = _single_action_plan(
+        create, session=current, plan_id=f"alpha_pattern_{create.action_id}"
+    ).model_copy(update={"actions": [create, pattern]})
+    compiled = ProductionCompiler().compile(combined, session=current)
+    if compiled.status != "COMPILED" or compiled.intent is None:
+        return {
+            "action_id": pattern.action_id, "action_type": "CREATE_PATTERN",
+            "status": "EXECUTION_DEFERRED",
+            "reason": "; ".join(compiled.reasons) or compiled.status,
+        }
+    result = build_safe_write_executor(
+        daw,
+        journal_path=persist_dir / f"{create.action_id}_pattern_safe_write.jsonl",
+        persist_dir=persist_dir,
+    ).run(compiled.intent)
+    return {
+        "action_id": pattern.action_id, "action_type": "CREATE_PATTERN",
+        "compound_action_ids": [create.action_id, pattern.action_id],
+        "status": "VERIFIED" if result.ok else "FAILED",
+        "error": None if result.ok else result.error or "SAFE_WRITE_FAILED",
+        "readbacks": [item.model_dump(mode="json") for item in result.readbacks],
+    }
+
+
+def _uncertified_phrase_variations(spec: Any, plan: MusicPlan) -> list[dict[str, Any]]:
+    """A repeated slot-0 MIDI pattern cannot substantiate a distinct phrase."""
+    midi_roles = {
+        str(action.target.ref.get("name") or "")
+        for action in plan.actions
+        if action.action_type is ProductionActionKind.CREATE_PATTERN
+    }
+    return [
+        {
+            "action_id": f"phrase_variation:{section.name}:{role}",
+            "action_type": "CREATE_PATTERN",
+            "status": "EXECUTION_DEFERRED",
+            "reason": "PHRASE_MIDI_VARIATION_NOT_CERTIFIED",
+            "section": section.name,
+            "role": role,
+            "source": "PRODUCER_SECTION_VARIATION",
+        }
+        for section in spec.sections
+        if section.variation.strip()
+        for role in section.active_roles
+        if role in midi_roles
+    ]
+
+
 def _build_sample_index(project_path: Path, evidence: Path) -> tuple[LibraryIndex, dict[str, Any]]:
     roots = [project_path.parent / "Samples"]
     roots = [root for root in roots if root.is_dir()]
@@ -478,8 +672,278 @@ def _build_sample_index(project_path: Path, evidence: Path) -> tuple[LibraryInde
     return index, counts
 
 
-def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
-    """Run one bounded Alpha pass against the currently authorized Live set."""
+def _stage_selected_samples(
+    *, index: LibraryIndex, selections: dict[str, str],
+    authorized_root: Path, project_path: Path,
+) -> list[dict[str, Any]]:
+    """Materialize only selected, digest-verified indexed assets in this copy."""
+    from copilot.sample_library.schemas import AssetStatus
+
+    root = authorized_root.resolve(strict=True)
+    samples = (project_path.parent / "Samples").resolve()
+    staged: list[dict[str, Any]] = []
+    for role, digest in selections.items():
+        asset = index.assets.get(digest)
+        if asset is None or asset.status is not AssetStatus.INDEXED:
+            raise ValueError(f"SELECTED_ASSET_NOT_INDEXED: {role}")
+        source = Path(asset.path).resolve(strict=True)
+        relative = Path(asset.relative_path.replace("\\", "/"))
+        if (
+            not source.is_file() or not source.is_relative_to(root)
+            or relative.is_absolute() or ".." in relative.parts
+        ):
+            raise ValueError(f"SELECTED_ASSET_OUTSIDE_AUTHORIZED_LIBRARY: {role}")
+        if relative.parts and relative.parts[0].casefold() == "samples":
+            relative = Path(*relative.parts[1:])
+        target = (samples / relative).resolve()
+        if not target.is_relative_to(samples):
+            raise ValueError(f"SELECTED_ASSET_TARGET_UNSAFE: {role}")
+        sha = hashlib.sha256(source.read_bytes()).hexdigest()
+        if sha != digest:
+            raise ValueError(f"SELECTED_ASSET_DIGEST_MISMATCH: {role}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_file():
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"SELECTED_ASSET_COLLISION: {role}")
+        else:
+            shutil.copy2(source, target)
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"SELECTED_ASSET_COPY_MISMATCH: {role}")
+        staged.append({
+            "role": role, "sha256": digest, "path": str(target),
+            "license": asset.provenance.get("license", "UNKNOWN"),
+        })
+    return staged
+
+
+def _capture_sections(
+    *, daw: Any, session: Any, spec: Any,
+) -> dict[str, dict[str, Any]]:
+    """Capture bounded Main excerpts at the model's actual section boundaries."""
+    from copilot.audio.live_capture import capture_master_segment
+    from copilot.producer.quality_gate import section_window_specs
+
+    observed: dict[str, dict[str, Any]] = {}
+    for section, windows in section_window_specs(spec).items():
+        captured = {}
+        for position, (start, end) in windows.items():
+            asset = capture_master_segment(daw, start, end, require_signal=True)
+            if (
+                not asset.capture_id or not asset.file_path.is_file()
+                or not (0 < float(asset.rms or 0))
+                or not (0 < float(asset.peak or 0) < 1.0)
+            ):
+                raise RuntimeError(f"SECTION_AUDIO_SILENT_OR_CLIPPING: {section}:{position}")
+            current = daw.snapshot(include_notes=False)
+            attach_tokens(current)
+            if current.project_identity != session.project_identity:
+                raise RuntimeError("PROJECT_IDENTITY_CHANGED_DURING_LISTENING")
+            captured[position] = {
+                "capture_id": asset.capture_id, "path": str(asset.file_path),
+                "rms": float(asset.rms), "peak": float(asset.peak),
+                "start_qn": start, "end_qn": end,
+                "project_identity": current.project_identity,
+            }
+        observed[section] = {**captured["opening"], "windows": captured}
+    return observed
+
+
+def _capture_goal_sources(
+    *, daw: Any, session: Any, spec: Any, evidence: Path,
+) -> dict[str, dict[str, Any]]:
+    from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
+    from copilot.daw.object_ref import ref_from_track
+
+    wanted = {"Kick", "Bass", spec.hook_role}
+    captures: dict[str, dict[str, Any]] = {}
+    timeline = {}
+    cursor = 0.0
+    for section in spec.sections:
+        for role in section.active_roles:
+            timeline.setdefault(role, (cursor, cursor + section.bars * 4.0))
+        cursor += section.bars * 4.0
+    for role in sorted(wanted):
+        track = session.track_by_name(role)
+        if track is None or role not in timeline:
+            captures[role] = {"ok": False, "reason": "SOURCE_TRACK_OR_SECTION_MISSING"}
+            continue
+        start, section_end = timeline[role]
+        result = capture_source_post_mixer_ref(
+            daw, session=session,
+            preflight={"pass": True, "revision": session.revision},
+            target_ref=ref_from_track(track, project_identity=session.project_identity),
+            start_qn=start, end_qn=min(start + 16.0, section_end),
+            region_id=f"producer_{role.lower().replace(' ', '_')}",
+            tempo=session.transport.tempo,
+            dest_root=evidence / "sources",
+        )
+        current = daw.snapshot(include_notes=False)
+        attach_tokens(current)
+        if current.project_identity != session.project_identity:
+            raise RuntimeError("PROJECT_IDENTITY_CHANGED_DURING_SOURCE_CAPTURE")
+        captures[role] = result
+    return captures
+
+
+def _execute_goal_mix(
+    *, daw: Any, spec: Any, decisions: dict[str, dict[str, Any]],
+    persist_dir: Path, project_identity: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Audition typed model intent using the existing MusicPlan/SafeWrite mixer."""
+    import numpy as np
+    import soundfile as sf
+
+    from copilot.audio.live_capture import capture_master_segment
+    from copilot.integration.mixing_mastering_v1 import execute_lucas_mix_master_iteration
+
+    selected = {name: row for name, row in decisions.items() if row["decision"] == "APPLY"}
+    if not selected:
+        return {"status": "NO_MIX_WRITE_REQUESTED"}, []
+
+    def measure(path: Path) -> dict[str, float]:
+        with sf.SoundFile(path) as source:
+            data = source.read(
+                frames=min(source.frames, source.samplerate * 16),
+                always_2d=True, dtype="float32",
+            )
+            sr = source.samplerate
+        mono = data.mean(axis=1)
+        if not len(mono) or not np.isfinite(mono).all():
+            raise RuntimeError("MIX_AUDIO_UNMEASURABLE")
+        rms = float(np.sqrt(np.mean(mono ** 2)))
+        if rms <= 1e-6:
+            raise RuntimeError("MIX_AUDIO_SILENT")
+        spectrum = np.abs(np.fft.rfft(mono)) ** 2
+        frequencies = np.fft.rfftfreq(len(mono), 1 / sr)
+        total = float(np.sum(spectrum))
+        return {
+            "crest": float(np.max(np.abs(mono))) / rms,
+            "low_band": float(np.sum(spectrum[frequencies < 150]) / total),
+            "high_band": float(np.sum(spectrum[frequencies > 5000]) / total),
+            "rms": rms,
+        }
+
+    def observe() -> dict[str, Any]:
+        audio = capture_master_segment(
+            daw, 0.0, min(16.0, float(spec.sections[0].bars * 4)),
+            require_signal=True,
+        )
+        current = daw.snapshot()
+        attach_tokens(current)
+        if (
+            current.project_identity != project_identity
+            or not audio.capture_id or not audio.file_path.is_file()
+            or not 0 < float(audio.rms or 0)
+            or not 0 < float(audio.peak or 0) < 1
+        ):
+            raise RuntimeError("MIX_AUDIO_OR_PROJECT_IDENTITY_UNVERIFIED")
+        return {
+            "capture_id": audio.capture_id, "path": str(audio.file_path),
+            "rms": float(audio.rms), "peak": float(audio.peak),
+            "sha256": hashlib.sha256(audio.file_path.read_bytes()).hexdigest(),
+            "physical": measure(audio.file_path),
+        }
+
+    before = observe()
+    captures: dict[str, dict[str, Any]] = {"before": before, "comparison": before}
+
+    def post_apply(phase, plan, pre, post):
+        if pre.project_identity != project_identity or post.project_identity != project_identity:
+            return {"decision": "ROLLBACK", "reason": "PROJECT_IDENTITY_CHANGED"}
+        if not plan.actions:
+            return {"decision": "KEEP", "reason": "NO_ACTIONS"}
+        after = observe()
+        previous = captures["comparison"]
+        if (
+            after["capture_id"] == previous["capture_id"]
+            or after["sha256"] == previous["sha256"]
+        ):
+            return {"decision": "ROLLBACK", "reason": "MIX_CAPTURE_NOT_FRESH"}
+        captures[phase] = after
+        objective = selected["eq_eight" if phase == "mix" else "limiter"]["objective"]
+        dimension = {
+            "reduce_low_band": "low_band",
+            "reduce_high_band": "high_band",
+            "reduce_peak": "crest",
+        }[objective]
+        baseline = previous["physical"][dimension]
+        observed = after["physical"][dimension]
+        if not observed < baseline * 0.99:
+            return {"decision": "ROLLBACK", "reason": "MIX_OBJECTIVE_NOT_IMPROVED",
+                    "before": baseline, "after": observed, "objective": objective}
+        if (
+            phase == "mix"
+            and after["physical"]["crest"] < previous["physical"]["crest"] / 1.413
+        ):
+            return {"decision": "ROLLBACK", "reason": "MIX_TRANSIENT_LOSS"}
+        captures["comparison"] = after
+        return {
+            "decision": "KEEP", "reason": "MEASURED_OBJECTIVE_IMPROVED",
+            "objective": objective, "before": baseline, "after": observed,
+            "capture": after,
+            "limitation": "Factual spectral/crest proxy; no semantic musical verdict.",
+        }
+
+    strategy = {
+        "mix": {"parameter_actions": []},
+        "master": {"parameter_actions": []},
+    }
+    for device, decision in selected.items():
+        action = decision["action"]
+        strategy["mix" if device == "eq_eight" else "master"]["parameter_actions"].append({
+            "operation": "set_typed_parameter",
+            "track_name": action["track_name"],
+            "device_name": "EQ Eight" if device == "eq_eight" else "Limiter",
+            "control": action["control"],
+            "band": action.get("band"),
+            "value": action["value"],
+            "unit": action["unit"],
+            "reason": decision["reason"],
+            "evidence_refs": [before["capture_id"]],
+        })
+    session = daw.snapshot()
+    attach_tokens(session)
+    result = execute_lucas_mix_master_iteration(
+        strategy=strategy, daw=daw, session=session, persist_dir=persist_dir,
+        post_apply=post_apply,
+    )
+    rows = []
+    for device in selected:
+        phase = result["phases"].get("mix" if device == "eq_eight" else "master", {})
+        accepted = (
+            phase.get("writes_verified") == 1
+            and phase.get("decision") == "KEEP"
+            and not phase.get("deferred")
+            and phase.get("status") == "SAFE_WRITE_COMPLETE"
+        )
+        deferred = phase.get("deferred") or []
+        rows.append({
+            "action_id": f"mix:{device}", "action_type": "DEVICE_TWEAK",
+            "status": "VERIFIED" if accepted else (
+                "EXECUTION_DEFERRED" if deferred and not phase.get("writes_verified") else "FAILED"
+            ),
+            "reason": (
+                None if accepted else
+                deferred[0]["reason"] if deferred else
+                phase.get("error") or phase.get("rollback_error") or phase.get("post_apply", {}).get("reason")
+                or "MIX_NOT_RETAINED"
+            ),
+            "source": "REAL_LUCAS_MIX_DECISION",
+            "readbacks": phase.get("writes", []),
+        })
+    return {"result": result, "captures": captures}, rows
+
+
+def run_alpha(
+    *, evidence: Path = Path("logs"),
+    goal: ProducerGoal | None = None,
+    expected_project_path: Path | None = None,
+    library_index: LibraryIndex | None = None,
+    authorized_library_root: Path | None = None,
+    opened_project: dict[str, Any] | None = None,
+    reference_audio: Path | None = None,
+) -> dict[str, Any]:
+    """Run a bounded pass; goal mode never uses a deterministic fallback."""
     evidence.mkdir(parents=True, exist_ok=True)
     started = now_iso()
     artifact_path = evidence / "autonomous_producer_alpha_v1.json"
@@ -490,6 +954,9 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         "strategy_provenance": REAL_LUCAS,
         "lucas_owned_files_modified": 0,
     }
+    if goal is not None:
+        report["goal"] = goal.model_dump(mode="json")
+        report["status"] = "BLOCKED"
     producer_state: ProducerState | None = None
     producer_state_store: ProducerStateStore | None = None
 
@@ -513,6 +980,22 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         attach_tokens(session)
         if not session.project_path or not is_copilot_working_copy(session.project_path):
             raise RuntimeError("CONTROLLED_WORKING_COPY_REQUIRED")
+        if goal is not None:
+            if expected_project_path is None or Path(session.project_path).resolve() != expected_project_path.resolve():
+                raise RuntimeError("PRODUCER_WORKING_COPY_MISMATCH")
+            if (
+                opened_project is None
+                or opened_project.get("status") != "OPENED_EMPTY"
+                or opened_project.get("project_identity") != session.project_identity
+                or Path(str(opened_project.get("working_als") or "")).resolve() != expected_project_path.resolve()
+                or (opened_project.get("readiness") or {}).get("launch", {}).get("launch") != "started"
+                or not (opened_project.get("readiness") or {}).get("launch", {}).get("process_lifecycle", {}).get("owned")
+            ):
+                raise RuntimeError("PRODUCER_OWNED_SAVE_CAPABLE_SESSION_REQUIRED")
+            if session.tracks:
+                raise RuntimeError("PRODUCER_TEMPLATE_NOT_EMPTY")
+            if not abs(float(session.transport.tempo) - goal.bpm) < 1e-6:
+                raise RuntimeError("PRODUCER_TEMPLATE_TEMPO_MISMATCH_NO_CERTIFIED_TEMPO_WRITE")
         report["SESSION_READY"] = "VERIFIED"
         report["project"] = {
             "path": session.project_path,
@@ -520,6 +1003,20 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             "token": session.project_token,
             "track_count_before": len(session.tracks),
         }
+        if goal is not None:
+            from copilot.audio.cross_project_bootstrap_v1 import bootstrap_project
+
+            bootstrap = bootstrap_project(
+                daw, evidence=evidence / "capture_bootstrap.json",
+                journal_dir=evidence / "capture_bootstrap_journals",
+            )
+            report["capture_bootstrap"] = bootstrap
+            if bootstrap.get("CROSS_PROJECT_BOOTSTRAP_V1") != "VERIFIED":
+                raise RuntimeError(f"CAPTURE_BOOTSTRAP_NOT_VERIFIED: {bootstrap.get('reason') or bootstrap.get('status')}")
+            session = daw.snapshot(include_notes=False)
+            attach_tokens(session)
+            if session.project_identity != report["project"]["identity"]:
+                raise RuntimeError("PROJECT_IDENTITY_CHANGED_DURING_BOOTSTRAP")
         state_key = hashlib.sha256(
             f"autonomous-alpha:{session.project_identity}".encode("utf-8")
         ).hexdigest()[:20]
@@ -542,16 +1039,47 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         )
 
         project_path = Path(session.project_path)
-        reference_path = Path(os.environ["COPILOT_ALPHA_REFERENCE"]) if os.environ.get("COPILOT_ALPHA_REFERENCE") else discover_reference(evidence, project_path=project_path)
-        index, index_counts = _build_sample_index(project_path, evidence)
-        pack = analyze_reference_music(
-            reference_path,
-            reference_state_token=f"reference:alpha:{reference_path.stem}",
-            target_state_token=f"target:alpha:{session.project_identity}",
-            tempo_bpm=float(session.transport.tempo),
-            use_cache=False,
-        )
-        reference = build_reference_context(pack)
+        if goal is not None:
+            if library_index is None or authorized_library_root is None:
+                raise ValueError("PRODUCER_AUTHORIZED_INDEXED_LIBRARY_REQUIRED")
+            index = library_index
+            index_counts = {"indexed": len(index.assets), "source": str(authorized_library_root)}
+        else:
+            index, index_counts = _build_sample_index(project_path, evidence)
+        if goal is None:
+            reference_path = Path(os.environ["COPILOT_ALPHA_REFERENCE"]) if os.environ.get("COPILOT_ALPHA_REFERENCE") else discover_reference(evidence, project_path=project_path)
+            pack = analyze_reference_music(
+                reference_path,
+                reference_state_token=f"reference:alpha:{reference_path.stem}",
+                target_state_token=f"target:alpha:{session.project_identity}",
+                tempo_bpm=float(session.transport.tempo),
+                use_cache=False,
+            )
+            reference = build_reference_context(pack)
+        else:
+            from copilot.schemas.lucas_integration import ReferenceContext
+
+            reference_path = reference_audio
+            if reference_path is not None:
+                if not reference_path.is_file() or reference_path.suffix.lower() not in {
+                    ".wav", ".flac", ".aiff", ".aif",
+                }:
+                    raise ValueError("PRODUCER_REFERENCE_AUDIO_UNSUPPORTED")
+                pack = analyze_reference_music(
+                    reference_path,
+                    reference_state_token=f"external-comparison:{reference_path.stem}",
+                    target_state_token=f"target:{session.project_identity}",
+                    tempo_bpm=goal.bpm, use_cache=False,
+                )
+                reference = build_reference_context(pack)
+            else:
+                pack = None
+                reference = ReferenceContext(
+                    reference_state_token=f"no-reference:{session.project_identity}",
+                    identity="NO_USER_REFERENCE",
+                    tempo_bpm=goal.bpm,
+                    limitations=["No audio reference supplied; style is producer intent."],
+                )
         roles = [
             SampleRole.KICK, SampleRole.CLAP, SampleRole.CLOSED_HAT,
             SampleRole.SHAKER, SampleRole.PERCUSSION, SampleRole.TOP_LOOP,
@@ -563,13 +1091,13 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             per_role=3, bpm=float(session.transport.tempo),
         )
         context = build_lucas_input(
-            user_intent=UserIntent(description=(
+            user_intent=UserIntent(description=goal.prompt if goal else (
                 "CONTROLLED_ALPHA_INTENT: create and develop approximately 32 bars "
                 "of an electronic track using the available project, real sample "
                 "library, and reference context, with a coherent groove, bass/low-end "
                 "role, musical texture, and basic mix balance. You must make the "
                 "musical decisions and return a non-empty 5-to-8-section arrangement."
-            )),
+            ), requested_bpm=goal.bpm if goal else None),
             reference=reference,
             samples=samples,
             project=build_project_context(session),
@@ -579,12 +1107,22 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         if provider is None:
             raise RealLucasRequired("REAL_LUCAS_PROVIDER_UNAVAILABLE")
         planner_provider = LucasPlanningProviderAdapter(provider)
+        def strict_planner(**kwargs):
+            from copilot.musicplan.astra_plan import build_plan_from_prompt
+
+            return build_plan_from_prompt(
+                **kwargs, goal=goal,
+                preview_root=evidence / "sample_ab",
+                authorized_library_root=authorized_library_root,
+            )
+
         planner_run = run_lucas_planner(
             input_context=context,
             index=index,
             session=session,
             provider=planner_provider,
             plan_id="autonomous_producer_alpha_v1",
+            planner=strict_planner if goal else None,
         )
         report["lucas"] = {
             "entrypoint": "build_plan_from_prompt",
@@ -598,6 +1136,31 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             report["lucas"]["provider_raw_response"] = planner_provider.last_raw
             raise RealLucasRequired("LUCAS_PLANNER_FELL_BACK_TO_DETERMINISTIC_RECIPE")
         plan = planner_run.plan
+        if goal is not None:
+            from copilot.producer.track_spec import TrackSpec
+
+            spec = TrackSpec.model_validate(planner_run.planner_metadata["track_spec"])
+            goal.validate_track_spec(spec)
+            report["track_spec"] = spec.model_dump(mode="json")
+            report["mix_decisions"] = planner_run.planner_metadata["mix_decisions"]
+            report["producer_criteria"] = planner_run.planner_metadata["producer_criteria"]
+            report["selected_samples"] = _stage_selected_samples(
+                index=index,
+                selections=planner_run.planner_metadata["sample_map"],
+                authorized_root=authorized_library_root,
+                project_path=project_path,
+            )
+            report["sample_comparisons"] = planner_run.planner_metadata["sample_comparisons"]
+            producer_state = producer_state.model_copy(update={
+                "decisions": {
+                    "track_spec": report["track_spec"],
+                    "sample_selections": planner_run.planner_metadata["sample_map"],
+                    "selection_reasons": planner_run.planner_metadata["selection_reasons"],
+                    "rejected_candidates": planner_run.planner_metadata["rejected_candidates"],
+                    "mix_decisions": report["mix_decisions"],
+                    "producer_criteria": report["producer_criteria"],
+                },
+            })
         persist_producer_state(
             producer_state.record(
                 "PLAN_ACCEPTED",
@@ -612,11 +1175,14 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         )
         report.update({
             "reference": {
-                "path": str(reference_path),
+                "path": str(reference_path) if reference_path else None,
                 "identity": reference.identity,
-                "rights_state": "UNKNOWN_EXTERNAL_RECORDING",
-                "role": "groove_lowend_texture_analysis_only",
-                "pack": pack.model_dump(mode="json"),
+                "rights_state": "UNKNOWN_EXTERNAL_RECORDING" if pack else "NO_REFERENCE",
+                "role": (
+                    "aggregate_energy_groove_mix_comparison_only" if goal and pack
+                    else "groove_lowend_texture_analysis_only" if pack else "NONE"
+                ),
+                "pack": pack.model_dump(mode="json") if pack else None,
             },
             "sample_set_context": samples.model_dump(mode="json"),
             "sample_index": index_counts,
@@ -635,11 +1201,20 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
         persist_dir = evidence / "autonomous_producer_alpha_v1" / "safe_write"
         persist_dir.mkdir(parents=True, exist_ok=True)
         dispositions: list[dict[str, Any]] = []
+        report["execution"] = {"actions": dispositions}
+        midi_patterns = {
+            str(action.target.ref.get("name")): action
+            for action in plan.actions
+            if action.action_type is ProductionActionKind.CREATE_PATTERN
+        }
+        consumed_patterns: set[str] = set()
         ordered = sorted(
             plan.actions,
             key=lambda action: 0 if action.action_type is ProductionActionKind.CREATE_TRACK else 1 if action.action_type in {ProductionActionKind.SAMPLE_LOAD, ProductionActionKind.LOAD_SAMPLE} else 2,
         )
         for action in ordered:
+            if action.action_type is ProductionActionKind.CREATE_PATTERN and action.action_id in consumed_patterns:
+                continue
             if action.action_type not in SUPPORTED_ALPHA_ACTIONS:
                 dispositions.append({
                     "action_id": action.action_id,
@@ -648,15 +1223,49 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
                     "reason": "UNSUPPORTED_OR_NOT_CERTIFIED",
                 })
                 continue
-            row = _execute_one(action, daw=daw, persist_dir=persist_dir)
+            pattern = midi_patterns.get(str(action.target.ref.get("name")))
+            if action.action_type is ProductionActionKind.CREATE_TRACK and pattern is not None:
+                row = _execute_midi_pattern(action, pattern, daw=daw, persist_dir=persist_dir)
+                consumed_patterns.add(pattern.action_id)
+            else:
+                row = _execute_one(action, daw=daw, persist_dir=persist_dir)
             row["source"] = "REAL_LUCAS_MUSICPLAN"
             dispositions.append(row)
+            if row["status"] in {"VERIFIED", "FAILED"}:
+                report["MUSICAL_WRITES"] += 1
 
-        arrangement_actions = _arrangement_actions(plan, planner_run.planner_metadata, daw)
+        missing_sources: list[str] = []
+        arrangement_actions = _arrangement_actions(
+            plan, planner_run.planner_metadata, daw, strict=goal is not None,
+            missing=missing_sources,
+        )
+        arrangement_rows: list[dict[str, Any]] = []
         for action in arrangement_actions:
             row = _execute_one(action, daw=daw, persist_dir=persist_dir)
             row["source"] = "REAL_LUCAS_ARRANGEMENT"
             dispositions.append(row)
+            arrangement_rows.append({
+                "section": action.reason.split(" arrangement ", 1)[-1].split(" (", 1)[0],
+                "track": str(action.target.ref.get("name") or ""),
+                "status": row["status"],
+            })
+            if row["status"] in {"VERIFIED", "FAILED"}:
+                report["MUSICAL_WRITES"] += 1
+        for source in missing_sources:
+            dispositions.append({
+                "action_id": f"missing:{source}",
+                "action_type": "DUPLICATE_CLIP_TO_ARRANGEMENT",
+                "status": "EXECUTION_DEFERRED",
+                "reason": f"ARRANGEMENT_SOURCE_CLIP_MISSING: {source}",
+                "source": "REAL_LUCAS_ARRANGEMENT",
+            })
+        if goal is not None:
+            phrase_gaps = _uncertified_phrase_variations(spec, plan)
+            dispositions.extend(phrase_gaps)
+            report["phrase_variations"] = {
+                "status": "DRAFT" if phrase_gaps else "NO_MIDI_VARIATION_CLAIMED",
+                "unverified": phrase_gaps,
+            }
         report["execution"] = {
             "actions": dispositions,
             "executable_verified": sum(row.get("status") == "VERIFIED" for row in dispositions),
@@ -678,11 +1287,179 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             )
         )
         if report["execution"]["failed"]:
-            report["status"] = "FAILED_EXECUTION"
+            report["status"] = "DRAFT" if goal else "FAILED_EXECUTION"
             return report
+        if goal is not None:
+            from copilot.importing.new_project_v1 import save_new_project_via_windows_ui
+
+            daw.disconnect()
+            save = save_new_project_via_windows_ui(opened_project)
+            report["save"] = save
+            if save.get("status") != "SAVED_REOPENED":
+                report["status"] = "DRAFT"
+                report["blockers"] = [save.get("reason") or "SAVE_NOT_VERIFIED"]
+                persist_producer_state(
+                    producer_state.model_copy(update={
+                        "pending_issues": report["blockers"],
+                        "stop_reason": report["blockers"][0],
+                    }).record(
+                        "SAVE_BLOCKED",
+                        phase=ProducerPhase.DRAFT,
+                        detail=report["blockers"][0],
+                    )
+                )
+                return report
+            daw = AbletonTcpAdapter()
+            daw.connect()
+            reopened = daw.snapshot(include_notes=False)
+            attach_tokens(reopened)
+            if (
+                reopened.project_identity != session.project_identity
+                or Path(str(reopened.project_path or "")).resolve() != project_path.resolve()
+                or len(reopened.tracks) != save.get("track_count")
+            ):
+                raise RuntimeError("REOPENED_PROJECT_SNAPSHOT_MISMATCH")
+            if report["execution"]["deferred"]:
+                report["status"] = "DRAFT"
+                report["blockers"] = ["ESSENTIAL_ACTION_DEFERRED"]
+                persist_producer_state(
+                    producer_state.model_copy(update={
+                        "pending_issues": [
+                            row["reason"] for row in dispositions
+                            if row["status"] == "EXECUTION_DEFERRED"
+                        ],
+                        "stop_reason": "ESSENTIAL_ACTION_DEFERRED",
+                    }).record(
+                        "ESSENTIAL_ACTIONS_DEFERRED",
+                        phase=ProducerPhase.DRAFT,
+                        payload={"deferred": report["execution"]["deferred"]},
+                    )
+                )
+                return report
+            if any(row["decision"] == "APPLY" for row in report["mix_decisions"].values()):
+                report["mix_pass"], mix_rows = _execute_goal_mix(
+                    daw=daw, spec=spec, decisions=report["mix_decisions"],
+                    persist_dir=persist_dir, project_identity=session.project_identity,
+                )
+                dispositions.extend(mix_rows)
+                report["MUSICAL_WRITES"] += sum(
+                    row["status"] in {"VERIFIED", "FAILED"} for row in mix_rows
+                )
+                report["execution"]["deferred"] += sum(
+                    row["status"] == "EXECUTION_DEFERRED" for row in mix_rows
+                )
+                report["execution"]["failed"] += sum(
+                    row["status"] == "FAILED" for row in mix_rows
+                )
+                report["execution"]["executable_verified"] += sum(
+                    row["status"] == "VERIFIED" for row in mix_rows
+                )
+                persist_producer_state(
+                    producer_state.record(
+                        "TYPED_MIX_OBSERVED",
+                        phase=ProducerPhase.OBSERVING,
+                        payload={
+                            "actions": mix_rows,
+                            "capture_ids": {
+                                key: row["capture_id"]
+                                for key, row in report["mix_pass"]["captures"].items()
+                            },
+                        },
+                    )
+                )
+                mix_unverified = any(row["status"] != "VERIFIED" for row in mix_rows)
+                if mix_unverified:
+                    report["status"] = "DRAFT"
+                    report["blockers"] = [
+                        row["reason"] or "MIX_NOT_VERIFIED" for row in mix_rows
+                        if row["status"] != "VERIFIED"
+                    ]
+                    persist_producer_state(
+                        producer_state.model_copy(update={
+                            "pending_issues": report["blockers"],
+                            "stop_reason": report["blockers"][0],
+                        }).record("TYPED_MIX_BLOCKED", phase=ProducerPhase.DRAFT)
+                    )
+                    if not any(row["status"] == "VERIFIED" for row in mix_rows):
+                        return report
+                from copilot.producer.blind_review import prepare_blind_review
+
+                mix_captures = report["mix_pass"]["captures"]
+                latest = mix_captures.get("master") or mix_captures.get("mix")
+                try:
+                    report["blind_review"] = prepare_blind_review(
+                        mix_captures["before"], latest,
+                        destination=evidence / "blind_review",
+                    )
+                except (ValueError, OSError) as exc:
+                    report["blind_review"] = {
+                        "status": "NOT_AVAILABLE",
+                        "reason": f"{type(exc).__name__}: {exc}",
+                        "artistic_quality_human_verified": False,
+                    }
+                previous = report["save"]
+                ready = previous.get("readiness") or {}
+                daw.disconnect()
+                mix_save = save_new_project_via_windows_ui({
+                    "status": "OPENED_EMPTY",
+                    "working_als": str(project_path),
+                    "project_identity": session.project_identity,
+                    "saved_sha256": previous["sha256"],
+                    "process_pid": ready.get("same_process_pid"),
+                    "readiness": ready,
+                })
+                report["mix_save"] = mix_save
+                if mix_save.get("status") != "SAVED_REOPENED":
+                    report["status"] = "DRAFT"
+                    report["blockers"] = [mix_save.get("reason") or "MIX_SAVE_NOT_VERIFIED"]
+                    persist_producer_state(
+                        producer_state.model_copy(update={
+                            "pending_issues": report["blockers"],
+                            "stop_reason": report["blockers"][0],
+                        }).record("MIX_SAVE_BLOCKED", phase=ProducerPhase.DRAFT)
+                    )
+                    return report
+                report["save"] = mix_save
+                daw = AbletonTcpAdapter()
+                daw.connect()
+                verified_mix = daw.snapshot(include_notes=False)
+                attach_tokens(verified_mix)
+                if verified_mix.project_identity != session.project_identity:
+                    raise RuntimeError("MIX_REOPEN_IDENTITY_MISMATCH")
+                if mix_unverified:
+                    return report
 
         after_session = daw.snapshot(include_notes=False)
         attach_tokens(after_session)
+        section_captures = (
+            _capture_sections(daw=daw, session=after_session, spec=spec)
+            if goal is not None else {}
+        )
+        source_captures = (
+            _capture_goal_sources(
+                daw=daw, session=after_session, spec=spec, evidence=evidence
+            )
+            if goal is not None else {}
+        )
+        if goal is not None:
+            report["section_captures"] = section_captures
+            report["source_captures"] = source_captures
+            persist_producer_state(
+                producer_state.record(
+                    "SECTIONS_LISTENED",
+                    phase=ProducerPhase.CRITIQUING,
+                    payload={
+                        "section_capture_ids": {
+                            name: row["capture_id"]
+                            for name, row in section_captures.items()
+                        },
+                        "source_statuses": {
+                            name: row.get("signal_status", row.get("reason"))
+                            for name, row in source_captures.items()
+                        },
+                    },
+                )
+            )
         audio = capture_and_analyze_master(
             daw, after_session, label="alpha_initial_pass",
         )
@@ -696,11 +1473,13 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
                 "capture_id": audio["capture_id"], "path": audio["path"],
                 "rms": audio["rms"], "peak": audio["peak"], "region": audio["region"],
             },
+            "section_captures": section_captures,
+            "source_captures": source_captures,
             "music_analysis": audio["music_analysis"].model_dump(mode="json"),
             "physical_dsp": _jsonable(audio["dsp"]),
             "advanced_perception": perception.model_dump(mode="json"),
             "reference_identity": reference.identity,
-            "limitations": list(dict.fromkeys(reference.limitations + list(pack.limitations))),
+            "limitations": list(dict.fromkeys(reference.limitations + (list(pack.limitations) if pack else []))),
         }
         report["post_change_context"] = post_context
         critique = run_lucas_critique_with_provider_failover(
@@ -709,12 +1488,158 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             evidence_context=post_context,
             timeout_s=30.0,
         )
+        revisions: list[dict[str, Any]] = []
+        if goal is not None and critique.get("status") == "CRITIQUE_COMPLETE":
+            from copilot.musicplan import build_set_track_volume_action
+            from copilot.producer.revision import volume_revision_action
+            from copilot.schemas.musicplan import VolumeOperation
+
+            for iteration in range(1, 4):
+                result = critique["result"]
+                if result.verdict == "finalize":
+                    break
+                if result.verdict != "improve" or not result.top_3_issues:
+                    report["revision_stop_reason"] = "CRITIQUE_HAS_NO_ACTIONABLE_ISSUE"
+                    break
+                priority_issue = sorted(
+                    result.top_3_issues, key=lambda item: item.priority,
+                )[0]
+                current = daw.snapshot()
+                attach_tokens(current)
+                if current.project_identity != session.project_identity:
+                    report["revision_stop_reason"] = "PROJECT_IDENTITY_CHANGED"
+                    break
+                request = (
+                    "Return ONLY a JSON object with exactly track_name, target_volume "
+                    "(native Ableton mixer 0..1, within 0.08 of current), and reason. "
+                    "Propose one evidence-backed set_track_volume change, or return "
+                    "an empty object if volume cannot address the issue. No LOM, Python, "
+                    "routing, EQ or device commands. "
+                    f"Single highest priority issue: {json.dumps(priority_issue.model_dump())}. "
+                    f"Tracks: {json.dumps({t.name: t.mixer.volume for t in current.tracks if t.role in {'audio', 'midi'}})}. "
+                    f"Captures: {json.dumps({name: {'rms': row['rms'], 'peak': row['peak']} for name, row in section_captures.items()})}"
+                )
+                try:
+                    reason_fn = (
+                        getattr(provider, "reason_json_object", None)
+                        or getattr(provider, "_reason_chat_json_object", None)
+                        or provider.reason
+                    )
+                    raw = reason_fn(request, timeout_s=30.0)
+                    revision = volume_revision_action(
+                        raw, session=current,
+                        evidence_refs=[row["capture_id"] for row in section_captures.values()],
+                    )
+                except (ValueError, TypeError, KeyError, TimeoutError) as exc:
+                    report["revision_stop_reason"] = f"REVISION_PROVIDER_OR_CONTRACT_FAILED: {exc}"
+                    break
+                row = _execute_one(revision, daw=daw, persist_dir=persist_dir)
+                revisions.append({"iteration": iteration, "write": row})
+                if row["status"] != "VERIFIED":
+                    report["revision_stop_reason"] = row.get("error") or row.get("reason", "REVISION_UNVERIFIED")
+                    break
+                report["MUSICAL_WRITES"] += 1
+                new_session = daw.snapshot(include_notes=False)
+                attach_tokens(new_session)
+                new_captures = _capture_sections(daw=daw, session=new_session, spec=spec)
+                new_critique = run_lucas_critique_with_provider_failover(
+                    plan=plan, session=new_session, providers=[provider],
+                    evidence_context={"section_captures": new_captures, "previous": section_captures},
+                    timeout_s=30.0,
+                )
+                better = (
+                    new_critique.get("status") == "CRITIQUE_COMPLETE"
+                    and (
+                        new_critique["result"].verdict == "finalize"
+                        or (
+                            new_critique["result"].verdict == "improve"
+                            and not any(
+                                issue.area == priority_issue.area
+                                and issue.issue == priority_issue.issue
+                                for issue in new_critique["result"].top_3_issues
+                            )
+                            and len(new_critique["result"].top_3_issues) < len(result.top_3_issues)
+                        )
+                    )
+                    and all(
+                        new_captures[name]["windows"][position]["rms"]
+                        >= old["rms"] * 0.5
+                        for name, section in section_captures.items()
+                        for position, old in section["windows"].items()
+                    )
+                )
+                if not better:
+                    before = current.track_by_name(str(revision.target.ref.get("name")))
+                    fresh = daw.snapshot()
+                    attach_tokens(fresh)
+                    changed = fresh.track_by_name(before.name)
+                    restore = build_set_track_volume_action(
+                        track=changed, project_identity=fresh.project_identity,
+                        operation=VolumeOperation.SET,
+                        expected_before=changed.mixer.volume,
+                        target_value=before.mixer.volume,
+                        reason="Restore pre-revision volume; critique found no evidence of improvement",
+                        evidence_refs=[row["capture_id"] for row in section_captures.values()],
+                        session_incarnation_id=fresh.session_incarnation_id,
+                    )
+                    undo = _execute_one(restore, daw=daw, persist_dir=persist_dir)
+                    revisions[-1]["rollback"] = undo
+                    report["revision_stop_reason"] = (
+                        "NO_MEASURABLE_IMPROVEMENT"
+                        if undo["status"] == "VERIFIED"
+                        else "REVISION_ROLLBACK_UNVERIFIED"
+                    )
+                    break
+                section_captures = new_captures
+                source_captures = _capture_goal_sources(
+                    daw=daw, session=new_session, spec=spec, evidence=evidence
+                )
+                critique = new_critique
+                revisions[-1]["result"] = "IMPROVED_WITH_CAPTURE_AND_CRITIQUE"
+                persist_producer_state(
+                    producer_state.model_copy(update={"iteration": iteration}).record(
+                        "REVISION_ACCEPTED",
+                        phase=ProducerPhase.ADJUSTING,
+                        payload={"iteration": iteration, "action_id": revision.action_id,
+                                 "resolved_issue": priority_issue.model_dump(mode="json")},
+                    )
+                )
+            report["revisions"] = revisions
+            report["section_captures"] = section_captures
+            report["source_captures"] = source_captures
+            if any(row.get("result") == "IMPROVED_WITH_CAPTURE_AND_CRITIQUE" for row in revisions):
+                from copilot.importing.new_project_v1 import save_new_project_via_windows_ui
+
+                previous = report["save"]
+                ready = previous.get("readiness") or {}
+                reopened_owned = {
+                    "status": "OPENED_EMPTY",
+                    "working_als": str(project_path),
+                    "project_identity": session.project_identity,
+                    "saved_sha256": previous["sha256"],
+                    "process_pid": ready.get("same_process_pid"),
+                    "readiness": ready,
+                }
+                daw.disconnect()
+                revision_save = save_new_project_via_windows_ui(reopened_owned)
+                report["revision_save"] = revision_save
+                if revision_save.get("status") != "SAVED_REOPENED":
+                    report["status"] = "DRAFT"
+                    report["blockers"] = [revision_save.get("reason") or "REVISION_SAVE_NOT_VERIFIED"]
+                    return report
+                report["save"] = revision_save
+                daw = AbletonTcpAdapter()
+                daw.connect()
+                confirmed = daw.snapshot(include_notes=False)
+                attach_tokens(confirmed)
+                if confirmed.project_identity != session.project_identity:
+                    raise RuntimeError("REVISION_REOPEN_IDENTITY_MISMATCH")
         report["lucas_feedback"] = critique
         report["critique_provider_limited"] = critique.get("status") != "CRITIQUE_COMPLETE"
         final_phase = (
             ProducerPhase.ABSTAINED
             if report["critique_provider_limited"]
-            else ProducerPhase.COMPLETE
+            else ProducerPhase.DRAFT if goal is not None else ProducerPhase.COMPLETE
         )
         persist_producer_state(
             producer_state.record(
@@ -739,6 +1664,81 @@ def run_alpha(*, evidence: Path = Path("logs")) -> dict[str, Any]:
             "safe_write_authorities": 1,
             "transport_stopped": not bool(after_session.transport.playing),
         }
+        if goal is not None:
+            from copilot.producer.quality_gate import (
+                evaluate_delivery, verify_arrangement_timeline,
+            )
+
+            final_session = daw.snapshot(include_notes=False)
+            attach_tokens(final_session)
+            if final_session.project_identity != session.project_identity:
+                raise RuntimeError("PROJECT_IDENTITY_CHANGED_BEFORE_DELIVERY")
+            geometry = verify_arrangement_timeline(
+                spec,
+                tracks={track.name: track.index for track in final_session.tracks},
+                clips=daw.get_arrangement_clips().get("clips", []),
+            )
+            report["arrangement_geometry"] = {
+                "status": "VERIFIED" if not geometry else "BLOCKED",
+                "reasons": geometry,
+                "source": "authoritative_reopened_live_clip_readback",
+            }
+            revision_actions = [
+                item
+                for revision in revisions
+                for item in (revision.get("write"), revision.get("rollback"))
+                if item is not None
+            ]
+            report["final"]["transport_stopped"] = not final_session.transport.playing
+            report["quality_gate"] = evaluate_delivery(
+                goal=goal, spec=spec, project_path=project_path,
+                project_identity=final_session.project_identity,
+                reopened_identity=(
+                    final_session.project_identity
+                    if report.get("save", {}).get("status") == "SAVED_REOPENED"
+                    else None
+                ),
+                tempo_bpm=final_session.transport.tempo,
+                arrangement=arrangement_rows, captures=section_captures,
+                arrangement_geometry=geometry,
+                role_captures=source_captures,
+                actions=[*dispositions, *revision_actions],
+                critique_verdict=(
+                    critique["result"].verdict
+                    if critique.get("status") == "CRITIQUE_COMPLETE" else None
+                ),
+                transport_stopped=not final_session.transport.playing,
+            )
+            report["status"] = report["quality_gate"]["status"]
+            report["blockers"] = report["quality_gate"]["reasons"]
+            persist_producer_state(
+                producer_state.model_copy(update={
+                    "pending_issues": report["blockers"],
+                    "stop_reason": report["blockers"][0] if report["blockers"] else None,
+                }).record(
+                    "PRODUCTION_COMPLETE" if report["status"] == "COMPLETE" else "PRODUCTION_DRAFT",
+                    phase=ProducerPhase.COMPLETE if report["status"] == "COMPLETE" else ProducerPhase.DRAFT,
+                    detail="Delivery gates checked against project, audio, actions and critique",
+                    payload={"reasons": report["blockers"]},
+                )
+            )
+        return report
+    except Exception as exc:
+        if goal is None:
+            raise
+        report["status"] = "DRAFT" if report["MUSICAL_WRITES"] else "BLOCKED"
+        report["blockers"] = [f"{type(exc).__name__}: {exc}"]
+        if producer_state is not None:
+            persist_producer_state(
+                producer_state.model_copy(update={
+                    "pending_issues": report["blockers"],
+                    "stop_reason": report["blockers"][0],
+                }).record(
+                    "PRODUCTION_STOPPED",
+                    phase=ProducerPhase.DRAFT if report["MUSICAL_WRITES"] else ProducerPhase.BLOCKED,
+                    detail=str(exc)[:1000],
+                )
+            )
         return report
     finally:
         try:

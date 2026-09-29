@@ -53,3 +53,27 @@ def test_browser_sample_path_rejects_filesystem_escape_before_rpc() -> None:
 
     with pytest.raises(DawError, match="safe relative"):
         AbletonTcpAdapter().load_browser_item(0, "../outside.wav")
+
+
+@pytest.mark.parametrize("advertised", [set(), {"session.read", "device.load"}])
+def test_browser_load_is_not_sent_without_live_handshake_capability(advertised: set[str]) -> None:
+    from copilot.daw.ableton_tcp import AbletonTcpAdapter
+    from copilot.daw.adapter import DawError
+
+    daw = AbletonTcpAdapter()
+    daw._sock = object()  # capability check must precede any socket access
+    daw.capabilities = advertised
+    with pytest.raises(DawError, match="browser.load"):
+        daw.load_browser_item(0, "Samples/kick.wav")
+
+
+def test_unsupported_save_never_sends_transport_rpc() -> None:
+    from copilot.daw.ableton_tcp import AbletonTcpAdapter
+    from copilot.daw.adapter import DawError
+
+    daw = AbletonTcpAdapter()
+    daw._sock = object()
+    daw.capabilities = {"session.transport"}
+    with pytest.raises(DawError, match="SAVE_UNSUPPORTED"):
+        daw.save_session()
+    assert not daw.tcp_counts.get("save")

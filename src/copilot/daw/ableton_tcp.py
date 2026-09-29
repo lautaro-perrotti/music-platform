@@ -340,7 +340,7 @@ class AbletonTcpAdapter(DawAdapter):
                             name=str(parameter.get("name") or ""),
                             value=float(parameter.get("value", 0.0) or 0.0),
                             min=float(parameter.get("min", 0.0) or 0.0),
-                            max=float(parameter.get("max", 1.0) or 1.0),
+                            max=float(parameter.get("max", 1.0)),
                         )
                         for p_i, parameter in enumerate(device.get("parameters") or [])
                     ],
@@ -696,7 +696,10 @@ class AbletonTcpAdapter(DawAdapter):
         )
 
     def save_session(self) -> dict[str, Any]:
-        return self._command("save", {}, side_effect=True)
+        raise DawError(
+            "SAVE_UNSUPPORTED: the installed typed bridge has no verified save handler; "
+            "an unverified UI Save cannot establish durable project identity"
+        )
 
     def set_device_input_routing(
         self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""
@@ -1056,7 +1059,6 @@ class AbletonTcpAdapter(DawAdapter):
             raise DawError("Not connected")
         if (
             command_type != "protocol_hello"
-            and self.capabilities
             and self.strict_capabilities
         ):
             require_capability(self.capabilities, command_type)

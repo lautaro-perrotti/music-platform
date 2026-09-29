@@ -7,6 +7,42 @@ Statuses: `VERIFIED` | `COMMAND_VERIFIED` | `IMPLEMENTED` | `IN_FLIGHT` |
 `WAITING` | `DEFERRED` | `UNSUPPORTED`. Frozen means reopen only for a
 reproducible bug.
 
+## Empty-template new project
+
+`copilot.importing.new_project_v1.prepare_new_project(template_als=..., workspace=...)`
+requires an explicitly selected, saved, parseable empty `.als` with no musical
+tracks, clips, Return devices or project Samples. Empty Return tracks do not
+count as musical tracks. It creates a unique manifest-backed directory within
+the authorized workspace. `open_new_project(copy)` uses
+`ensure_ableton_ready`, requires an exact Live path, identity, zero tracks and
+fresh versioned bridge readback. `OPENED_EMPTY` does not mean finished.
+`browser_load_advertised` reflects only the *connected bridge's handshake*,
+not the installed Live version; real loading and clip readback remain unverified.
+The vendored script advertises `device.physical_units_v1`, but includes a
+unit on an individual parameter only when it attests native/display parity.
+The producer additionally checks device identity, parameter range, and
+post-write readback; the installed script and Live remain unverified.
+
+`save_new_project_via_windows_ui(opened)` is an opt-in, bounded Windows-only
+fallback. It requires a newly launched *Copilot-owned* PID, exact manifest and
+bridge project path, the expected executable and uniquely identifiable enabled
+Live window, verified foreground HWND/PID, and no visible same-process modal.
+Only then does it send Ctrl+S; it requires changed file mtime **and** digest,
+rechecks bridge/window, posts WM_CLOSE to that one window (never a broad kill),
+waits for that process to exit, and relaunches via `ensure_ableton_ready` with
+distinct PID, exact path, identity and matching track count. Any uncertain
+observation yields `BLOCKED`. An already-open or unowned Live process cannot
+use this fallback. No Save As or modal acceptance is automated.
+
+`reopen_and_verify_saved_project(opened)` attempts readiness after the caller
+has closed Live externally; it gates a changed on-disk `.als`, a different
+known Live PID, exact reopened path, matching identity and fresh bridge readback.
+`verify_saved_project(opened, reopened=...)` is the lower-level check for a
+readiness report obtained separately. The bridge has no implemented `save`
+handler. The UI fallback is not certified on a real Live window yet; it blocks
+where platform focus, title, PID or persistence cannot be proven. Neither a
+keystroke nor a changed file alone establishes a finished editable project.
+
 ## Live session
 
 | ID | Status | Notes |

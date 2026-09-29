@@ -58,6 +58,7 @@ class TrackSpec(BaseModel):
     vocals: str = Field(default="unspecified", max_length=32)
     style: str = Field(default="", max_length=160)
     primary_hook: str | None = Field(default=None, max_length=160)
+    hook_role: str | None = Field(default=None, max_length=64)
     sections: list[SectionSpec] = Field(min_length=1, max_length=32)
     sound_palette: dict[str, list[str]] = Field(default_factory=dict)
     reference_targets: dict[str, Any] = Field(default_factory=dict)

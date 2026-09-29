@@ -72,6 +72,7 @@ CANONICAL_COMMANDS = (
     "analyze-project",
     "producer-analyze",
     "producer-run",
+    "produce-tech-house",
     "cross-project-validate",
     "import-project",
     "regression-v1",
@@ -151,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             "producer-analyze",
             "analyze-project",
             "producer-run",
+            "produce-tech-house",
             "cross-project-validate",
             "import-project",
             "install",
@@ -163,6 +165,12 @@ def main(argv: list[str] | None = None) -> int:
         ],
     )
     parser.add_argument("eval_argv", nargs="*", default=[])
+    parser.add_argument("--prompt-file", default=None, help="produce-tech-house: UTF-8 super prompt file")
+    parser.add_argument("--template", default=None, help="produce-tech-house: saved empty .als template")
+    parser.add_argument("--sample-index", default=None, help="produce-tech-house: indexed sample-library JSON")
+    parser.add_argument("--sample-root", default=None, help="produce-tech-house: authorized sample-library directory")
+    parser.add_argument("--workspace", default=None, help="produce-tech-house: authorized output directory")
+    parser.add_argument("--reference", default=None, help="produce-tech-house: optional read-only external comparison audio")
     parser.add_argument("--track", default="AI Test")
     parser.add_argument("--log", default="logs/copilot.log")
     parser.add_argument(
@@ -422,6 +430,17 @@ def main(argv: list[str] | None = None) -> int:
             region_id=args.region,
             start_qn=args.start_qn,
             end_qn=args.end_qn,
+        )
+    if args.command == "produce-tech-house":
+        return _produce_tech_house(
+            evidence,
+            prompt_file=args.prompt_file,
+            prompt_words=args.eval_argv,
+            template=args.template,
+            sample_index=args.sample_index,
+            sample_root=args.sample_root,
+            workspace=args.workspace,
+            reference=args.reference,
         )
     if args.command == "cross-project-validate":
         return _cross_project_validate(evidence, logger)
@@ -2751,6 +2770,71 @@ def _producer_run(
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     status = str(report.get("status") or "BLOCKED")
     return 0 if status in PRESERVED_STATUSES else 2
+
+
+def _produce_tech_house(
+    evidence: Path, *, prompt_file: str | None, prompt_words: list[str],
+    template: str | None, sample_index: str | None,
+    sample_root: str | None, workspace: str | None,
+    reference: str | None = None,
+) -> int:
+    """New-project production; reject an incomplete goal before opening Live."""
+    from uuid import uuid4
+
+    from copilot.human_eval.store import atomic_write
+    from copilot.producer.goal import ProducerGoal
+
+    report: dict = {"status": "BLOCKED", "MUSICAL_WRITES": 0}
+    run_dir = evidence / "producer" / uuid4().hex
+    try:
+        if not prompt_file and not prompt_words:
+            raise ValueError("PRODUCER_SUPER_PROMPT_REQUIRED")
+        if prompt_file and prompt_words:
+            raise ValueError("PRODUCER_PROMPT_INPUT_AMBIGUOUS")
+        prompt = (
+            Path(prompt_file).read_text(encoding="utf-8")
+            if prompt_file else " ".join(prompt_words)
+        )
+        goal = ProducerGoal.from_prompt(prompt)
+        if not all((template, sample_index, sample_root, workspace)):
+            raise ValueError("PRODUCER_TEMPLATE_LIBRARY_AND_WORKSPACE_REQUIRED")
+        from copilot.importing.new_project_v1 import open_new_project, prepare_new_project
+        from copilot.integration.autonomous_producer_alpha_v1 import run_alpha
+        from copilot.sample_library.library_v1 import load_index
+
+        index = load_index(Path(sample_index))
+        if index is None or not index.assets:
+            raise ValueError("PRODUCER_SAMPLE_INDEX_MISSING_OR_EMPTY")
+        library_root = Path(sample_root).resolve(strict=True)
+        if not library_root.is_dir():
+            raise ValueError("PRODUCER_SAMPLE_LIBRARY_ROOT_INVALID")
+        copy = prepare_new_project(template_als=template, workspace=workspace)
+        report["copy"] = copy
+        if copy.get("status") != "CREATED":
+            report["reason"] = copy.get("reason", "NEW_PROJECT_COPY_FAILED")
+            return 2
+        opened = open_new_project(copy)
+        report["opened"] = opened
+        if opened.get("status") != "OPENED_EMPTY":
+            report["reason"] = opened.get("reason", "PROJECT_NOT_READY")
+            return 2
+        report = run_alpha(
+            evidence=run_dir, goal=goal,
+            expected_project_path=Path(copy["working_als"]),
+            library_index=index, authorized_library_root=library_root,
+            opened_project=opened,
+            reference_audio=Path(reference).resolve(strict=True) if reference else None,
+        )
+        report["copy"] = copy
+        report["opened"] = opened
+        return 0 if report.get("status") == "COMPLETE" else 2
+    except (OSError, ValueError) as exc:
+        report["reason"] = f"{type(exc).__name__}: {exc}"
+        return 2
+    finally:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write(run_dir / "report.json", report)
+        print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
 
 
 def _doctor(evidence: Path, logger) -> int:

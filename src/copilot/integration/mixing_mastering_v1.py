@@ -9,6 +9,7 @@ mixing taste or a second DAW writer.
 from __future__ import annotations
 
 from pathlib import Path
+from math import isfinite
 from typing import Any, Callable
 
 from copilot.daw.state_tokens import attach_tokens
@@ -22,6 +23,7 @@ from copilot.musicplan import (
     build_device_tweak_action,
     build_set_track_volume_action,
 )
+from copilot.producer.parameter_registry import introspect_mix_parameter
 from copilot.runtime.production_compiler import ProductionCompiler
 from copilot.runtime.safe_write import build_safe_write_executor
 from copilot.schemas.musicplan import (
@@ -226,7 +228,7 @@ class MasterAwareDaw:
                     name=str(row.get("name") or ""),
                     value=float(row.get("value", 0.0) or 0.0),
                     min=float(row.get("min", 0.0) or 0.0),
-                    max=float(row.get("max", 1.0) or 1.0),
+                    max=float(row.get("max", 1.0)),
                 )
                 for position, row in enumerate(params_payload.get("parameters") or [])
             ]
@@ -307,7 +309,65 @@ def _native_value(parameter: DeviceParameter, spec: dict[str, Any]) -> float:
     return float(parameter.min) + normalized * (float(parameter.max) - float(parameter.min))
 
 
-def _action_from_spec(spec: dict[str, Any], *, phase: str, session: SessionState) -> tuple[Any | None, str | None]:
+def _typed_mix_value(spec: dict[str, Any], *, daw, track: TrackState, device: DeviceState) -> tuple[DeviceParameter | None, float | None, str | None]:
+    if (
+        "device.physical_units_v1" not in getattr(daw, "capabilities", set())
+        or getattr(daw, "handshake_info", {}).get("mode") == "LEGACY"
+    ):
+        return None, None, "PHYSICAL_UNIT_CAPABILITY_UNAVAILABLE"
+    control = str(spec.get("control") or "")
+    band = spec.get("band")
+    if band is not None and (isinstance(band, bool) or not isinstance(band, int)):
+        return None, None, "CONTROL_UNSUPPORTED"
+    try:
+        payload = daw.get_device_parameters(track.index, device.index)
+    except Exception:
+        return None, None, "PARAMETER_INTROSPECTION_UNAVAILABLE"
+    if not isinstance(payload, dict) or payload.get("device_class") != device.class_name or payload.get("device_name") != device.name:
+        return None, None, "DEVICE_IDENTITY_UNCERTIFIED"
+    if payload.get("track_index") != track.index or payload.get("device_index") != device.index:
+        return None, None, "DEVICE_IDENTITY_UNCERTIFIED"
+    rows = payload.get("parameters")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return None, None, "PARAMETER_INTROSPECTION_UNAVAILABLE"
+    certified, reason = introspect_mix_parameter(device.class_name, rows, control=control, band=band)
+    if certified is None:
+        return None, None, reason
+    matches = [p for p in device.parameters if p.index == certified.index and p.name == certified.name]
+    if len(matches) != 1:
+        return None, None, "PARAMETER_SNAPSHOT_MISMATCH"
+    parameter = matches[0]
+    if (
+        device.index < 0 or device.index >= len(track.devices)
+        or track.devices[device.index] is not device
+        or certified.index >= len(device.parameters)
+        or device.parameters[certified.index] is not parameter
+    ):
+        return None, None, "PARAMETER_INDEX_UNCERTIFIED"
+    if any(abs(a - b) > 1e-6 for a, b in (
+        (parameter.value, certified.value), (parameter.min, certified.minimum), (parameter.max, certified.maximum),
+    )):
+        return None, None, "PARAMETER_SNAPSHOT_MISMATCH"
+    if certified.unit == "boolean":
+        if not isinstance(spec.get("value"), bool) or spec.get("unit") not in (None, "boolean"):
+            return None, None, "VALUE_UNIT_UNCERTIFIED"
+        intended = float(spec["value"])
+    else:
+        if str(spec.get("unit") or "").lower() != certified.unit:
+            return None, None, "VALUE_UNIT_UNCERTIFIED"
+        value = spec.get("value")
+        if isinstance(value, bool):
+            return None, None, "VALUE_OUT_OF_RANGE"
+        try:
+            intended = float(value)
+        except (TypeError, ValueError):
+            return None, None, "VALUE_OUT_OF_RANGE"
+    if not isfinite(intended) or not certified.minimum <= intended <= certified.maximum:
+        return None, None, "VALUE_OUT_OF_RANGE"
+    return parameter, intended, None
+
+
+def _action_from_spec(spec: dict[str, Any], *, phase: str, session: SessionState, daw=None) -> tuple[Any | None, str | None]:
     operation = str(spec.get("operation") or "set_device_parameter")
     if operation == "set_track_volume":
         track = _track_by_stable_or_name(session, spec)
@@ -348,22 +408,34 @@ def _action_from_spec(spec: dict[str, Any], *, phase: str, session: SessionState
             session_incarnation_id=session.session_incarnation_id,
         ), None
 
-    if operation in {"set_device_parameter", "parameter_patch"}:
+    if operation in {"set_device_parameter", "parameter_patch", "set_typed_parameter"}:
         track = session.track_by_name("Master") if phase == "master" and not spec.get("track_name") else _track_by_stable_or_name(session, spec)
         if track is None:
             return None, "TARGET_NOT_FOUND_OR_AMBIGUOUS"
         device = _device_by_stable_or_name(track, spec)
         if device is None:
             return None, "DEVICE_NOT_FOUND_OR_AMBIGUOUS"
-        parameter = _parameter_by_identity(device, spec)
-        if parameter is None:
-            return None, "PARAMETER_NOT_FOUND_OR_AMBIGUOUS"
-        try:
-            intended = _native_value(parameter, spec)
-        except (KeyError, TypeError, ValueError) as exc:
-            return None, str(exc)
+        if operation == "set_typed_parameter":
+            if daw is None:
+                return None, "PARAMETER_INTROSPECTION_UNAVAILABLE"
+            parameter, intended, reason = _typed_mix_value(spec, daw=daw, track=track, device=device)
+            if reason:
+                return None, reason
+        else:
+            if device.class_name.lower() in {"eq8", "eq eight", "limiter"} and str(spec.get("unit") or "").lower() in {"hz", "db", "q", "boolean"}:
+                return None, "PHYSICAL_UNIT_UNCERTIFIED"
+            parameter = _parameter_by_identity(device, spec)
+            if parameter is None:
+                return None, "PARAMETER_NOT_FOUND_OR_AMBIGUOUS"
+            try:
+                intended = _native_value(parameter, spec)
+            except (KeyError, TypeError, ValueError) as exc:
+                return None, str(exc)
+        if not isfinite(intended):
+            return None, "VALUE_OUT_OF_RANGE"
         span = float(parameter.max) - float(parameter.min)
-        if span > 0 and abs(intended - float(parameter.value)) / span > float(spec.get("max_delta_norm", 0.35)):
+        max_delta = 1.0 if operation == "set_typed_parameter" and str(spec.get("control") or "") == "enabled" else float(spec.get("max_delta_norm", 0.35))
+        if span > 0 and abs(intended - float(parameter.value)) / span > max_delta:
             return None, "MAX_DELTA_EXCEEDED"
         return build_device_tweak_action(
             track=track,
@@ -372,7 +444,7 @@ def _action_from_spec(spec: dict[str, Any], *, phase: str, session: SessionState
             parameter_name=parameter.name,
             expected_before=float(parameter.value),
             intended_after=intended,
-            unit=str(spec.get("unit") or "native"),
+            unit=("native" if operation == "set_typed_parameter" else str(spec.get("unit") or "native")),
             reason=str(spec.get("reason") or f"Lucas {phase} device strategy"),
             evidence_refs=list(spec.get("evidence_refs") or []),
             session_incarnation_id=session.session_incarnation_id,
@@ -451,7 +523,7 @@ def execute_lucas_mix_master_iteration(
         for index, action_spec in enumerate(specs):
             current = proxy.snapshot()
             attach_tokens(current)
-            action, reason = _action_from_spec(action_spec, phase=phase, session=current)
+            action, reason = _action_from_spec(action_spec, phase=phase, session=current, daw=proxy)
             if action is None:
                 deferred.append({"index": index, "status": "EXECUTION_DEFERRED", "reason": reason})
                 continue
@@ -466,6 +538,26 @@ def execute_lucas_mix_master_iteration(
                 failure = result.error or "SAFE_WRITE_FAILED"
                 break
             applied.append((result, compiled.intent))
+            if action_spec.get("operation") == "set_typed_parameter":
+                observed = proxy.snapshot()
+                observed_track = (
+                    observed.track_by_name("Master")
+                    if phase == "master" and not action_spec.get("track_name")
+                    else _track_by_stable_or_name(observed, action_spec)
+                )
+                observed_device = (
+                    _device_by_stable_or_name(observed_track, action_spec)
+                    if observed_track is not None else None
+                )
+                if observed_device is None:
+                    failure = "POST_WRITE_DEVICE_IDENTITY_UNCERTIFIED"
+                    break
+                physical, target, reason = _typed_mix_value(
+                    action_spec, daw=proxy, track=observed_track, device=observed_device,
+                )
+                if reason or physical is None or abs(physical.value - target) > 0.001:
+                    failure = reason or "POST_WRITE_PHYSICAL_READBACK_MISMATCH"
+                    break
             writes.append({
                 "action_type": refreshed.action_type.value,
                 "action_id": refreshed.action_id,

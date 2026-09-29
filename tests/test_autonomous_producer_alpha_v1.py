@@ -1,11 +1,19 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from copilot.integration.autonomous_producer_alpha_v1 import (
+    LucasPlanningProviderAdapter,
     LucasReasoningOutputAdapter,
     RealLucasRequired,
+    run_alpha,
+    _uncertified_phrase_variations,
 )
+from copilot.daw.mock import MockAbletonAdapter
+from copilot.producer.goal import ProducerGoal
+from copilot.producer.track_spec import TrackSpec
+from copilot.schemas.musicplan import ProductionActionKind
 
 
 def test_reasoning_candidate_strategies_are_unwrapped_without_core_choices():
@@ -22,6 +30,15 @@ def test_reasoning_candidate_strategies_are_unwrapped_without_core_choices():
         "arrangement": [{"name": "INTRO", "bars": 8, "active": ["Kick"]}],
         "reasoning": "kick first",
     }
+
+
+def test_producer_provider_schema_exposes_typed_goal_and_mix_decisions():
+    schema = LucasPlanningProviderAdapter._schema()
+    assert {"track_spec", "patterns", "mix_decisions", "selection_reasons"} <= set(
+        schema["properties"]
+    )
+    note = schema["properties"]["patterns"]["additionalProperties"]["properties"]["notes"]["items"]
+    assert "mix_decisions" not in note["properties"]
 
 
 def test_direct_lucas_contract_is_preserved():
@@ -71,3 +88,61 @@ def test_section_strategy_sentences_are_unwrapped():
     output = json.loads(LucasReasoningOutputAdapter.unwrap(raw))
     assert output["arrangement"][0]["active"] == ["Kick", "Clap"]
     assert output["arrangement"][1]["active"] == ["Kick", "Clap", "Stab"]
+
+
+def test_goal_blocks_wrong_template_tempo_before_musical_write(tmp_path, monkeypatch):
+    from copilot.integration import autonomous_producer_alpha_v1 as alpha
+
+    class SnapshotAdapter(MockAbletonAdapter):
+        def snapshot(self, **kwargs):
+            return super().snapshot()
+
+    daw = SnapshotAdapter()
+    daw.session_path = str(tmp_path / "copy.als")
+    daw.connect()
+    from copilot.daw.state_tokens import attach_tokens
+    identity = attach_tokens(daw.snapshot()).project_identity
+    daw.disconnect()
+    opened = {
+        "status": "OPENED_EMPTY", "project_identity": identity,
+        "working_als": daw.session_path,
+        "readiness": {"launch": {"launch": "started", "process_lifecycle": {"owned": True}}},
+    }
+    monkeypatch.setattr(alpha, "AbletonTcpAdapter", lambda: daw)
+    monkeypatch.setattr(alpha, "is_copilot_working_copy", lambda path: True)
+    goal = ProducerGoal.from_prompt("BPM: 127\nDuración: 8 compases")
+    report = run_alpha(
+        evidence=tmp_path / "logs", goal=goal,
+        expected_project_path=tmp_path / "copy.als",
+        opened_project=opened,
+    )
+    assert report["status"] == "BLOCKED"
+    assert report["MUSICAL_WRITES"] == 0
+    assert "TEMPLATE_TEMPO_MISMATCH" in report["blockers"][0]
+
+
+def test_promised_midi_phrase_variation_is_deferred_not_counted_as_verified():
+    spec = TrackSpec(
+        bpm=127, primary_hook="shaker rhythm", hook_role="Shaker",
+        sections=[
+            {"name": "Intro", "bars": 4, "energy": .4,
+             "active_roles": ["Kick", "Shaker"]},
+            {"name": "Drop", "bars": 4, "energy": .8,
+             "active_roles": ["Kick", "Shaker"],
+             "variation": "Alter shaker accents on the last bar"},
+        ],
+    )
+    plan = SimpleNamespace(actions=[
+        SimpleNamespace(
+            action_type=ProductionActionKind.CREATE_PATTERN,
+            target=SimpleNamespace(ref={"name": "Shaker"}),
+        ),
+    ])
+    rows = _uncertified_phrase_variations(spec, plan)
+    assert len(rows) == 1
+    assert rows[0]["section"] == "Drop"
+    assert rows[0]["role"] == "Shaker"
+    assert rows[0]["status"] == "EXECUTION_DEFERRED"
+    assert rows[0]["reason"] == "PHRASE_MIDI_VARIATION_NOT_CERTIFIED"
+    spec.sections[1].variation = ""
+    assert _uncertified_phrase_variations(spec, plan) == []

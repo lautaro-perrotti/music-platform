@@ -7,6 +7,7 @@ import time
 import traceback
 import queue
 import os
+from .parameter_units import attested_native_unit
 
 _clock = time
 
@@ -273,6 +274,7 @@ class AbletonMCP(ControlSurface):
                         "clip.write_notes",
                         "clip.fire",
                         "device.set_parameter",
+                        "device.physical_units_v1",
                         "device.load",
                         "browser.load",
                         "audio.capture_master",
@@ -2495,6 +2497,10 @@ class AbletonMCP(ControlSurface):
                 }
                 if param.is_quantized:
                     param_info["value_items"] = list(param.value_items) if hasattr(param, 'value_items') else []
+                if device.class_name in ("Eq8", "Eq Eight", "Limiter"):
+                    physical_unit = attested_native_unit(param, device_class=device.class_name)
+                    if physical_unit:
+                        param_info["unit"] = physical_unit
                 parameters.append(param_info)
 
             result = {
