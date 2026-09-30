@@ -17,11 +17,12 @@ from copilot.music_generation.benchmark import (
     TechnicalValidation,
     build_provider_comparison_benchmark,
     persist_human_evaluation,
+    run_best_of_n,
     validate_generated_audio,
 )
 from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext
 from copilot.music_generation.generated_asset_import import stage_generated_asset
-from copilot.music_generation.schemas import GeneratedAsset, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
+from copilot.music_generation.schemas import GeneratedAsset, GenerationBatch, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
 from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.music_generation.resources import StorageVolume, WorkerResources, choose_execution_route
 
@@ -97,6 +98,7 @@ def test_official_worker_request_is_dit_only_and_provenance_safe(tmp_path: Path,
     assert payload["model"] == "acestep-v15-turbo"
     assert payload["thinking"] is False
     assert payload["audio_format"] == "wav"
+    assert payload["task_type"] == "text2music"
     assert payload["seed"] == 7
 
 
@@ -268,6 +270,73 @@ def test_generated_asset_validation_is_factual_and_hash_bound(tmp_path: Path) ->
     assert result.status == "VALID"
     assert result.hash_matches is True
     assert result.provenance_complete is True
+
+
+def test_five_candidate_flow_preserves_identity_provenance_and_human_choice(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+
+    import numpy as np
+    import soundfile as sf
+
+    class FixtureProvider:
+        def generate(self, request: GeneratorRequest) -> GenerationBatch:
+            request.output_dir.mkdir(parents=True, exist_ok=True)
+            path = request.output_dir / f"{request.request_id}.wav"
+            level = 0.05 + (request.seed % 5) * 0.01
+            sf.write(path, np.full((4800, 2), level, dtype=np.float32), 48_000)
+            asset = GeneratedAsset(
+                asset_id=f"fixture-provider:{request.request_id}",
+                path=path,
+                sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                bytes=path.stat().st_size,
+                duration_s=0.1,
+                sample_rate=48_000,
+                non_silent=True,
+                model=ModelManifest(provider="fixture-provider", model_id="fixture-model", revision="fixture-v1"),
+                seed=request.seed,
+                prompt=request.brief.user_intent,
+                performance=PerformanceManifest(device="test-fixture"),
+                rights_manifest=request.brief.rights_manifest,
+                provider_request={"request_id": request.request_id, "seed": request.seed},
+                provider_metadata={"generation_id": f"fixture-generation-{request.seed}"},
+            )
+            return GenerationBatch(
+                batch_id=request.request_id,
+                status="GENERATED",
+                provider="fixture-provider",
+                model=asset.model,
+                brief_id=request.brief.brief_id,
+                assets=[asset],
+            )
+
+    # Keep this orchestration test local and deterministic; analysis is not its subject.
+    monkeypatch.setattr("copilot.music_generation.benchmark.analyze_candidate", lambda *args, **kwargs: None)
+    brief = GenerationBrief(
+        brief_id="five-candidate-boundary",
+        user_intent="instrumental electronic groove",
+        target_duration_s=0.1,
+        candidate_count=5,
+    )
+    report = run_best_of_n(
+        FixtureProvider(),
+        brief,
+        output_root=tmp_path / "five-candidate-run",
+        desired_candidates=brief.candidate_count,
+        max_generation_attempts=5,
+        seed_start=410,
+    )
+
+    assert len(report.attempts) == len(report.candidates) == 5
+    assert len({candidate.candidate_id for candidate in report.candidates}) == 5
+    assert len({candidate.asset.asset_id for candidate in report.candidates}) == 5
+    assert [candidate.asset.seed for candidate in report.candidates] == [410, 411, 412, 413, 414]
+    assert all(candidate.technical_validation.status == "VALID" for candidate in report.candidates)
+    assert report.musical_winner is None
+    assert report.quality_status == "CANDIDATES_READY / HUMAN_EVALUATION_PENDING"
+    for candidate in report.candidates:
+        assert (candidate.bundle_path / "raw.wav").is_file()
+        assert (candidate.bundle_path / "provider_request.json").is_file()
+        assert (candidate.bundle_path / "provider_metadata.json").is_file()
 
 
 def test_provider_comparison_benchmark_hides_identity_and_records_preference(tmp_path: Path) -> None:

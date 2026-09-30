@@ -248,7 +248,9 @@ class AceStepProvider:
             "use_random_seed": False,
             "seed": request.seed,
             "audio_format": "wav",
-            "task_type": brief.generation_mode,
+            # The provider-neutral brief uses a readable public identifier;
+            # ACE-Step's official API uses its native `text2music` task name.
+            "task_type": "text2music" if brief.generation_mode == "text_to_music" else brief.generation_mode,
             "use_cot_caption": False,
             "use_cot_language": False,
             "is_format_caption": False,
