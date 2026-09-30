@@ -6,7 +6,7 @@ from typing import Any
 
 
 def generic_capture_preflight(report: dict[str, Any]) -> dict[str, Any]:
-    """Waive only the legacy Kick/Bass routing checks.
+    """Waive only named pista-specific assumptions in generic track capture.
 
     The capture primitive verifies and restores routing for each target. Project
     identity, host topology, working-copy and transport failures remain blocking.
@@ -14,11 +14,20 @@ def generic_capture_preflight(report: dict[str, Any]) -> dict[str, Any]:
     if report.get("pass"):
         return report
     missing = list(report.get("missing") or [])
-    legacy_routing = (
+    from copilot.audio.session_diagnose import BASS_TARGET
+
+    legacy_project_checks = (
         "TARGET_SOURCE_UNSUPPORTED:",
         "Copilot Capture Bass routing claim=",
+        "Copilot Capture Bass source is Bassline chain;",
+        f"{BASS_TARGET} track not found",
+        "Drums track not found",
     )
-    if not missing or any(not item.startswith(legacy_routing) for item in missing):
+    if not missing or any(
+        not item.startswith(legacy_project_checks)
+        and not (item.startswith("Main first device is ") and "expected Patience Master" in item)
+        for item in missing
+    ):
         return report
     adapted = dict(report)
     adapted["pass"] = True

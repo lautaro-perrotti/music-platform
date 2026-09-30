@@ -34,11 +34,45 @@ def test_reasoning_candidate_strategies_are_unwrapped_without_core_choices():
 
 def test_producer_provider_schema_exposes_typed_goal_and_mix_decisions():
     schema = LucasPlanningProviderAdapter._schema()
-    assert {"track_spec", "patterns", "mix_decisions", "selection_reasons"} <= set(
+    assert {"track_spec", "patterns", "mix_decisions", "selection_reasons", "producer_criteria"} <= set(
         schema["properties"]
     )
+    for decision in schema["properties"]["mix_decisions"]["properties"].values():
+        assert "producer_criteria" not in decision["properties"]["action"]["properties"]
     note = schema["properties"]["patterns"]["additionalProperties"]["properties"]["notes"]["items"]
     assert "mix_decisions" not in note["properties"]
+
+
+def test_goal_capture_rejects_identity_failure_before_capture(tmp_path, monkeypatch):
+    from copilot.audio import session_diagnose
+    from copilot.audio import source_capture_pool_v1
+    from copilot.integration.autonomous_producer_alpha_v1 import _capture_goal_sources
+
+    capture_calls = []
+
+    class Session:
+        def track_by_name(self, _name):
+            raise AssertionError("track lookup must not follow failed preflight")
+
+    monkeypatch.setattr(
+        session_diagnose,
+        "preflight_session",
+        lambda _daw: {"pass": False, "missing": ["PROJECT_IDENTITY_MISSING"]},
+    )
+    monkeypatch.setattr(
+        source_capture_pool_v1,
+        "capture_source_post_mixer_ref",
+        lambda *args, **kwargs: capture_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="GENERIC_CAPTURE_PREFLIGHT_FAILED.*PROJECT_IDENTITY_MISSING"):
+        _capture_goal_sources(
+            daw=object(), session=Session(),
+            spec=SimpleNamespace(hook_role="Stab", sections=[]),
+            evidence=tmp_path,
+        )
+
+    assert capture_calls == []
 
 
 def test_direct_lucas_contract_is_preserved():

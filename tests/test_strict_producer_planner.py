@@ -182,3 +182,13 @@ def test_strict_planner_preserves_grounded_criteria_and_comparisons(producer_inp
     payload["producer_criteria"]["sections"][0]["evidence_refs"] = ["invented"]
     with pytest.raises(ValueError, match="CRITERIA_SECTION_UNGROUNDED"):
         build_plan_from_prompt(**producer_inputs, provider=PlanningProvider(payload))
+
+
+def test_planner_schema_places_producer_criteria_at_response_root():
+    from copilot.integration.autonomous_producer_alpha_v1 import LucasPlanningProviderAdapter
+
+    schema = LucasPlanningProviderAdapter._schema()
+    properties = schema["properties"]
+    assert "producer_criteria" in properties
+    assert "producer_criteria" in schema["required"]
+    assert "producer_criteria" not in properties["mix_decisions"]["properties"]["eq_eight"]["properties"]["action"]["properties"]

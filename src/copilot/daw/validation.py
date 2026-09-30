@@ -42,6 +42,8 @@ def validate_mixer_volume(volume: Any) -> float:
 def validate_device_parameter(value: Any, parameter: DeviceParameter | None = None) -> float:
     if parameter is None:
         return require_finite_number(value, "parameter")
+    if parameter.max is None:
+        raise DawError(f"{parameter.name or 'parameter'} range maximum unavailable")
     return require_range(value, parameter.name or "parameter", parameter.min, parameter.max)
 
 

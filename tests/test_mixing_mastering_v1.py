@@ -495,6 +495,26 @@ def test_typed_parameter_rejects_stale_read_and_legacy_unit_spoof(tmp_path: Path
     assert report["phases"]["master"]["deferred"][0]["reason"] == "PHYSICAL_UNIT_UNCERTIFIED"
 
 
+def test_null_parameter_max_defers_write_without_inventing_range(tmp_path: Path):
+    daw = MasterMock()
+    daw.connect()
+    parameter = daw.master_devices[0]["parameters"][1]
+    parameter["max"] = None
+    strategy = {"master": {"parameter_actions": [{
+        "operation": "set_device_parameter", "device_name": "Limiter",
+        "parameter_name": "Ceiling", "normalized_value": 0.5,
+    }]}}
+
+    report = execute_lucas_mix_master_iteration(
+        strategy=strategy, daw=daw, session=daw.snapshot(), persist_dir=tmp_path,
+        post_apply=lambda *_: {"decision": "ROLLBACK"},
+    )
+
+    assert report["phases"]["master"]["writes_verified"] == 0
+    assert report["phases"]["master"]["deferred"][0]["reason"] == "PARAMETER_RANGE_UNAVAILABLE"
+    assert parameter["value"] == 0.9
+
+
 def test_unsupported_strategy_does_not_write(tmp_path: Path):
     daw = MasterMock()
     daw.connect()

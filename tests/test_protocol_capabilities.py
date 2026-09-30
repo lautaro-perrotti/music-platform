@@ -67,13 +67,32 @@ def test_browser_load_is_not_sent_without_live_handshake_capability(advertised: 
         daw.load_browser_item(0, "Samples/kick.wav")
 
 
-def test_unsupported_save_never_sends_transport_rpc() -> None:
+def test_session_save_requires_its_own_negotiated_capability() -> None:
     from copilot.daw.ableton_tcp import AbletonTcpAdapter
     from copilot.daw.adapter import DawError
+    from copilot.daw.protocol import CAPABILITIES, COMMAND_CAPABILITY
 
-    daw = AbletonTcpAdapter()
-    daw._sock = object()
-    daw.capabilities = {"session.transport"}
-    with pytest.raises(DawError, match="SAVE_UNSUPPORTED"):
-        daw.save_session()
-    assert not daw.tcp_counts.get("save")
+    assert "session.save" not in CAPABILITIES
+    assert COMMAND_CAPABILITY["save"] == "session.save"
+
+    for advertised in (set(), {"session.transport"}):
+        daw = AbletonTcpAdapter()
+        daw._sock = object()
+        daw.capabilities = advertised
+        with pytest.raises(DawError, match="SAVE_UNSUPPORTED"):
+            daw.save_session()
+        assert not daw.tcp_counts.get("save")
+
+    unknown = AbletonTcpAdapter()
+    unknown.capabilities = None
+    with pytest.raises(DawError, match="SAVE_CAPABILITY_UNKNOWN"):
+        unknown.save_session()
+
+    supported = AbletonTcpAdapter()
+    supported.capabilities = {"session.save"}
+    calls = []
+    supported._command = lambda command, params, *, side_effect: calls.append(
+        (command, params, side_effect)
+    ) or {"saved": True}
+    assert supported.save_session() == {"saved": True}
+    assert calls == [("save", {}, True)]

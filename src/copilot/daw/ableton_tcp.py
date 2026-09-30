@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 import os
 import socket
 from collections import Counter
@@ -33,6 +34,17 @@ from copilot.schemas.session import (
     TrackState,
     TransportState,
 )
+
+
+def _optional_parameter_max(value: Any) -> float | None:
+    """Parse a Live parameter maximum without inventing a default range."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 DEFAULT_HOST = os.environ.get("ABLETON_MCP_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABLETON_MCP_PORT", "9877"))
@@ -340,7 +352,7 @@ class AbletonTcpAdapter(DawAdapter):
                             name=str(parameter.get("name") or ""),
                             value=float(parameter.get("value", 0.0) or 0.0),
                             min=float(parameter.get("min", 0.0) or 0.0),
-                            max=float(parameter.get("max", 1.0)),
+                            max=_optional_parameter_max(parameter.get("max")),
                         )
                         for p_i, parameter in enumerate(device.get("parameters") or [])
                     ],
@@ -696,10 +708,14 @@ class AbletonTcpAdapter(DawAdapter):
         )
 
     def save_session(self) -> dict[str, Any]:
-        raise DawError(
-            "SAVE_UNSUPPORTED: the installed typed bridge has no verified save handler; "
-            "an unverified UI Save cannot establish durable project identity"
-        )
+        # ``_command`` enforces the negotiated ``session.save`` capability.
+        # A legacy/unknown handshake therefore fails closed before any RPC.
+        negotiated = getattr(self, "capabilities", None)
+        if negotiated is None:
+            raise DawError("SAVE_CAPABILITY_UNKNOWN: session.save was not negotiated")
+        if "session.save" not in negotiated:
+            raise DawError("SAVE_UNSUPPORTED: session.save was not advertised")
+        return self._command("save", {}, side_effect=True)
 
     def set_device_input_routing(
         self, track_index: int, device_index: int, routing_type: str, routing_channel: str = ""

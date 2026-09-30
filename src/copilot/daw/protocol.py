@@ -92,6 +92,8 @@ COMMAND_CAPABILITY = {
     "set_track_input_routing": "track.mute",
     "set_track_output_routing": "track.mute",
     "set_device_input_routing": "device.set_parameter",
+    # Recognized but not part of the static set: only a negotiated Live bridge
+    # with a verified save handler may execute it.
     "save": "session.save",
     "set_track_monitoring": "track.mute",
     "get_track_monitoring": "session.read",

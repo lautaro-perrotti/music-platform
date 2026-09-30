@@ -7,7 +7,14 @@ import time
 import traceback
 import queue
 import os
-from .parameter_units import attested_native_unit
+try:
+    from .parameter_units import attested_native_unit
+    _PARAMETER_UNITS_IMPORT_ERROR = None
+except Exception as _parameter_units_exc:  # Optional feature; never fail bridge startup.
+    attested_native_unit = None
+    _PARAMETER_UNITS_IMPORT_ERROR = "{0}: {1}".format(
+        type(_parameter_units_exc).__name__, _parameter_units_exc
+    )
 
 _clock = time
 
@@ -41,6 +48,11 @@ class AbletonMCP(ControlSurface):
 
         # Cache the song reference for easier access
         self._song = self.song()
+        if _PARAMETER_UNITS_IMPORT_ERROR:
+            self.log_message(
+                "Optional physical-unit module unavailable; capability disabled: "
+                + _PARAMETER_UNITS_IMPORT_ERROR
+            )
 
         # Start the socket server
         self.start_server()
@@ -255,31 +267,11 @@ class AbletonMCP(ControlSurface):
         try:
             # Route the command to the appropriate handler
             if command_type == "protocol_hello":
+                capabilities = self._advertised_capabilities()
                 response["result"] = {
                     "protocol_version": "1",
                     "bridge_version": "abletonmcp-vendored-live2",
-                    "capabilities": [
-                        "health",
-                        "session.read",
-                        "session.transport",
-                        "track.create_midi",
-                        "track.delete",
-                        "track.rename",
-                        "track.volume",
-                        "track.mute",
-                        "clip.create",
-                        "clip.delete",
-                        "clip.rename",
-                        "clip.read_notes",
-                        "clip.write_notes",
-                        "clip.fire",
-                        "device.set_parameter",
-                        "device.physical_units_v1",
-                        "device.load",
-                        "browser.load",
-                        "audio.capture_master",
-                        "compound.temporary_mutation",
-                    ],
+                    "capabilities": capabilities,
                     "bind": "127.0.0.1",
                     "transport_primitive_version": "arrangement-start-at-qn-1",
                     "compound_mutation_version": "1",
@@ -291,6 +283,12 @@ class AbletonMCP(ControlSurface):
                         "SET_SEND_LEVEL",
                     ],
                 }
+            elif command_type == "save":
+                save_method = getattr(self._song, "save", None)
+                if not callable(save_method):
+                    raise RuntimeError("SAVE_UNSUPPORTED")
+                save_method()
+                response["result"] = {"saved": True}
             elif command_type == "health_check":
                 response["result"] = self._health_check()
             elif command_type == "get_session_info":
@@ -2497,7 +2495,7 @@ class AbletonMCP(ControlSurface):
                 }
                 if param.is_quantized:
                     param_info["value_items"] = list(param.value_items) if hasattr(param, 'value_items') else []
-                if device.class_name in ("Eq8", "Eq Eight", "Limiter"):
+                if attested_native_unit is not None and device.class_name in ("Eq8", "Eq Eight", "Limiter"):
                     physical_unit = attested_native_unit(param, device_class=device.class_name)
                     if physical_unit:
                         param_info["unit"] = physical_unit
@@ -2515,6 +2513,30 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error getting device parameters: " + str(e))
             raise
+
+    def _advertised_capabilities(self):
+        capabilities = [
+            "health", "session.read", "session.transport",
+            "track.create_midi", "track.delete", "track.rename",
+            "track.volume", "track.mute", "clip.create", "clip.delete",
+            "clip.rename", "clip.read_notes", "clip.write_notes", "clip.fire",
+            "device.set_parameter", "device.load", "browser.load",
+            "audio.capture_master", "compound.temporary_mutation",
+        ]
+        if attested_native_unit is not None:
+            capabilities.append("device.physical_units_v1")
+        try:
+            save_available = callable(getattr(self._song, "save", None))
+        except Exception as exc:
+            save_available = False
+            self.log_message(
+                "Save capability probe failed closed: {0}: {1}".format(
+                    type(exc).__name__, exc
+                )
+            )
+        if save_available:
+            capabilities.append("session.save")
+        return capabilities
 
     def _set_device_parameter(self, track_index, device_index, parameter_index, value):
         """Set a device parameter value"""

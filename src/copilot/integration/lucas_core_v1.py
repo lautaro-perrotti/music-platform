@@ -736,6 +736,8 @@ def execute_lucas_patch_contracts_through_core(
                 )
                 if param is None:
                     raise ValueError("PARAMETER_NOT_FOUND")
+                if param.max is None:
+                    raise ValueError("PARAMETER_RANGE_UNAVAILABLE")
                 normalized = float(write["value"])
                 if not 0.0 <= normalized <= 1.0:
                     raise ValueError("VALUE_OUT_OF_RANGE")

@@ -8,7 +8,6 @@ import json
 import ntpath
 import re
 import shutil
-import sys
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -19,6 +18,27 @@ from copilot.importing.working_copy_manager_v1 import MANIFEST_NAME
 
 MAX_TEMPLATE_BYTES = 64 * 1024 * 1024
 TRACK_TAGS = {"AudioTrack", "MidiTrack", "GroupTrack"}
+
+
+class UiSaveRunBudget:
+    """Permit one explicit UI save/relaunch attempt in a production run."""
+
+    def __init__(self, *, enabled: bool, saver: Any = None) -> None:
+        self.enabled = enabled is True
+        self.attempted = False
+        self._saver = saver
+
+    def save(self, opened: dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled:
+            return {"status": "SAVE_NOT_ATTEMPTED", "reason": "UI_SAVE_OPT_IN_REQUIRED"}
+        if self.attempted:
+            return {
+                "status": "SAVE_NOT_ATTEMPTED",
+                "reason": "UI_SAVE_ONE_RELAUNCH_BUDGET_EXHAUSTED",
+            }
+        self.attempted = True
+        saver = self._saver or save_new_project_via_windows_ui
+        return saver(opened, allow_ui_save=True)
 
 
 def _digest(path: Path) -> str:
@@ -247,6 +267,7 @@ def reopen_and_verify_saved_project(
 def save_new_project_via_windows_ui(
     opened: dict[str, Any],
     *,
+    allow_ui_save: bool = False,
     ui: Any = None,
     readiness: Callable[..., dict[str, Any]] | None = None,
     daw_factory: Callable[[], Any] | None = None,
@@ -261,12 +282,15 @@ def save_new_project_via_windows_ui(
     *newly launched* process (not an already-open Live session).
     """
     from copilot.daw.ableton_tcp import AbletonTcpAdapter
-    from copilot.importing.windows_save_ui_v1 import WindowsSaveUI
+    from copilot.platform.windows_save_ui_v1 import WindowsSaveUI
+    from copilot.platform.system import host_system
 
     def blocked(reason: str) -> dict[str, Any]:
         return {"status": "BLOCKED", "reason": reason}
 
-    if sys.platform != "win32":
+    if allow_ui_save is not True:
+        return blocked("UI_SAVE_OPT_IN_REQUIRED")
+    if host_system() != "Windows":
         return blocked("WINDOWS_ONLY")
     target = Path(str(opened.get("working_als") or ""))
     launch = (opened.get("readiness") or {}).get("launch") or {}

@@ -34,6 +34,16 @@ from copilot.schemas.musicplan import (
     ProductionActionKind,
     VolumeOperation,
 )
+
+
+def _optional_parameter_max(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if isfinite(parsed) else None
 from copilot.schemas.session import (
     DeviceParameter,
     DeviceState,
@@ -228,7 +238,7 @@ class MasterAwareDaw:
                     name=str(row.get("name") or ""),
                     value=float(row.get("value", 0.0) or 0.0),
                     min=float(row.get("min", 0.0) or 0.0),
-                    max=float(row.get("max", 1.0)),
+                    max=_optional_parameter_max(row.get("max")),
                 )
                 for position, row in enumerate(params_payload.get("parameters") or [])
             ]
@@ -301,6 +311,8 @@ def _parameter_by_identity(device: DeviceState, spec: dict[str, Any]) -> DeviceP
 
 
 def _native_value(parameter: DeviceParameter, spec: dict[str, Any]) -> float:
+    if parameter.max is None:
+        raise ValueError("PARAMETER_RANGE_UNAVAILABLE")
     if "native_value" in spec:
         return float(spec["native_value"])
     normalized = float(spec["normalized_value"])
@@ -337,6 +349,8 @@ def _typed_mix_value(spec: dict[str, Any], *, daw, track: TrackState, device: De
     if len(matches) != 1:
         return None, None, "PARAMETER_SNAPSHOT_MISMATCH"
     parameter = matches[0]
+    if parameter.max is None:
+        return None, None, "PARAMETER_RANGE_UNAVAILABLE"
     if (
         device.index < 0 or device.index >= len(track.devices)
         or track.devices[device.index] is not device

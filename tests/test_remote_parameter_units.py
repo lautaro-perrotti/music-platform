@@ -40,3 +40,14 @@ def test_native_physical_unit_requires_live_display_parity():
     assert _MODULE.attested_native_unit(q, device_class="Eq8") == "q"
     q.name = "Unrelated"
     assert _MODULE.attested_native_unit(q, device_class="Eq8") is None
+
+
+def test_unusable_parameter_max_is_explicitly_unknown_not_defaulted():
+    from copilot.daw.ableton_tcp import _optional_parameter_max
+    from copilot.schemas.session import DeviceParameter
+
+    assert _optional_parameter_max(0) == 0.0
+    for raw in (None, "", "not-a-number", float("nan"), float("inf"), True):
+        assert _optional_parameter_max(raw) is None
+    parameter = DeviceParameter(index=0, name="Ceiling", value=0.0, max=None)
+    assert parameter.max is None

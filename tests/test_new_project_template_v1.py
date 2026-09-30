@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from copilot.importing.new_project_v1 import (
+    UiSaveRunBudget,
     open_new_project,
     prepare_new_project,
     reopen_and_verify_saved_project,
@@ -200,7 +201,7 @@ def test_owned_windows_ui_save_and_reopen(tmp_path: Path) -> None:
     opened, target = _owned_opened(tmp_path)
     ui = _UI(target)
     result = save_new_project_via_windows_ui(
-        opened, ui=ui, readiness=lambda **_: _ready(target, pid=11),
+        opened, allow_ui_save=True, ui=ui, readiness=lambda **_: _ready(target, pid=11),
         daw_factory=lambda: _Bridge(target), timeout_s=0.2,
     )
     assert result["status"] == "SAVED_REOPENED"
@@ -218,7 +219,7 @@ def test_windows_ui_save_fails_closed_before_or_after_keystroke(tmp_path: Path) 
     ]
     for ui, reason, sent in cases:
         result = save_new_project_via_windows_ui(
-            opened, ui=ui, readiness=lambda **_: _ready(target, pid=11),
+            opened, allow_ui_save=True, ui=ui, readiness=lambda **_: _ready(target, pid=11),
             daw_factory=lambda: _Bridge(target), timeout_s=0.01,
             sleep=lambda _: None,
         )
@@ -228,7 +229,7 @@ def test_windows_ui_save_fails_closed_before_or_after_keystroke(tmp_path: Path) 
             assert not ui.closed
     not_owned = {**opened, "readiness": {**opened["readiness"], "launch": {}}}
     ui = _UI(target)
-    assert save_new_project_via_windows_ui(not_owned, ui=ui)["reason"] == "OWNED_LIVE_PROCESS_REQUIRED"
+    assert save_new_project_via_windows_ui(not_owned, allow_ui_save=True, ui=ui)["reason"] == "OWNED_LIVE_PROCESS_REQUIRED"
     assert not ui.sent
 
 
@@ -241,15 +242,33 @@ def test_windows_ui_save_blocks_foreign_window_and_reopen_mismatch(tmp_path: Pat
         return {**original(pid), "executable": r"C:\Other\Live.exe"}
 
     ui.observe = foreign_executable
-    assert save_new_project_via_windows_ui(opened, ui=ui,
+    assert save_new_project_via_windows_ui(opened, allow_ui_save=True, ui=ui,
                                            daw_factory=lambda: _Bridge(target))["reason"] == "WINDOW_OR_MODAL_AMBIGUOUS"
     assert not ui.sent
     ui = _UI(target)
     other = tmp_path / "foreign.als"
     result = save_new_project_via_windows_ui(
-        opened, ui=ui, readiness=lambda **_: _ready(other, pid=11),
+        opened, allow_ui_save=True, ui=ui, readiness=lambda **_: _ready(other, pid=11),
         daw_factory=lambda: _Bridge(target), timeout_s=0.2,
     )
     assert result["status"] == "BLOCKED"
     assert result["reason"] == "REOPEN_IDENTITY_MISMATCH"
     assert ui.sent and ui.closed
+
+
+def test_windows_ui_save_requires_explicit_opt_in_and_run_budget_allows_one_attempt(tmp_path: Path) -> None:
+    opened, target = _owned_opened(tmp_path)
+    ui = _UI(target)
+    result = save_new_project_via_windows_ui(opened, ui=ui)
+    assert result == {"status": "BLOCKED", "reason": "UI_SAVE_OPT_IN_REQUIRED"}
+    assert not ui.sent and not ui.closed
+
+    calls = []
+    budget = UiSaveRunBudget(
+        enabled=True,
+        saver=lambda project, *, allow_ui_save: calls.append((project, allow_ui_save))
+        or {"status": "SAVED_REOPENED"},
+    )
+    assert budget.save(opened)["status"] == "SAVED_REOPENED"
+    assert budget.save(opened)["reason"] == "UI_SAVE_ONE_RELAUNCH_BUDGET_EXHAUSTED"
+    assert len(calls) == 1 and calls[0][1] is True

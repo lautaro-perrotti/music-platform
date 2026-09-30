@@ -45,7 +45,9 @@ class DeviceParameter(BaseModel):
     name: str
     value: float
     min: float = 0.0
-    max: float = 1.0
+    # ``None`` means the bridge did not provide a usable maximum. Never
+    # synthesize a range: parameter writes must defer until bounds are known.
+    max: float | None = None
 
 
 class DeviceState(BaseModel):

@@ -171,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample-root", default=None, help="produce-tech-house: authorized sample-library directory")
     parser.add_argument("--workspace", default=None, help="produce-tech-house: authorized output directory")
     parser.add_argument("--reference", default=None, help="produce-tech-house: optional read-only external comparison audio")
+    parser.add_argument(
+        "--allow-ui-save", action="store_true",
+        help="produce-tech-house: explicitly allow one identity-verified Windows UI save/relaunch",
+    )
     parser.add_argument("--track", default="AI Test")
     parser.add_argument("--log", default="logs/copilot.log")
     parser.add_argument(
@@ -441,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             sample_root=args.sample_root,
             workspace=args.workspace,
             reference=args.reference,
+            allow_ui_save=args.allow_ui_save,
         )
     if args.command == "cross-project-validate":
         return _cross_project_validate(evidence, logger)
@@ -2777,6 +2782,7 @@ def _produce_tech_house(
     template: str | None, sample_index: str | None,
     sample_root: str | None, workspace: str | None,
     reference: str | None = None,
+    allow_ui_save: bool = False,
 ) -> int:
     """New-project production; reject an incomplete goal before opening Live."""
     from uuid import uuid4
@@ -2824,6 +2830,7 @@ def _produce_tech_house(
             library_index=index, authorized_library_root=library_root,
             opened_project=opened,
             reference_audio=Path(reference).resolve(strict=True) if reference else None,
+            allow_ui_save=allow_ui_save,
         )
         report["copy"] = copy
         report["opened"] = opened

@@ -202,6 +202,41 @@ class LucasPlanningProviderAdapter:
                         "required": ["length_beats", "notes"],
                     },
                 },
+                "producer_criteria": {
+                    "type": "object",
+                    "properties": {
+                        "primary_hook": {"type": "string"},
+                        "hook_role": {"type": "string"},
+                        "uncertainty": {"type": "string"},
+                        "sections": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "section_name": {"type": "string"},
+                                    "perceptual_goal": {"type": "string"},
+                                    "lead_role": {"type": "string"},
+                                    "low_end_owner": {"type": "string"},
+                                    "space_roles": {"type": "array", "items": {"type": "string"}},
+                                    "hook_usage": {"type": "string"},
+                                    "energy_rationale": {"type": "string"},
+                                    "variation_hypothesis": {"type": "string"},
+                                    "claim_kind": {"type": "string"},
+                                    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                                },
+                                "required": [
+                                    "section_name", "perceptual_goal", "lead_role",
+                                    "low_end_owner", "space_roles", "hook_usage",
+                                    "energy_rationale", "variation_hypothesis",
+                                    "claim_kind", "evidence_refs",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["primary_hook", "hook_role", "uncertainty", "sections"],
+                    "additionalProperties": False,
+                },
                 "mix_decisions": {
                     "type": "object",
                     "properties": {
@@ -220,41 +255,6 @@ class LucasPlanningProviderAdapter:
                                         "band": {"type": "integer"},
                                         "value": {"type": "number"},
                                         "unit": {"type": "string"},
-                                    },
-                                    "producer_criteria": {
-                                        "type": "object",
-                                        "properties": {
-                                            "primary_hook": {"type": "string"},
-                                            "hook_role": {"type": "string"},
-                                            "uncertainty": {"type": "string"},
-                                            "sections": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "section_name": {"type": "string"},
-                                                        "perceptual_goal": {"type": "string"},
-                                                        "lead_role": {"type": "string"},
-                                                        "low_end_owner": {"type": "string"},
-                                                        "space_roles": {"type": "array", "items": {"type": "string"}},
-                                                        "hook_usage": {"type": "string"},
-                                                        "energy_rationale": {"type": "string"},
-                                                        "variation_hypothesis": {"type": "string"},
-                                                        "claim_kind": {"type": "string"},
-                                                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
-                                                    },
-                                                    "required": [
-                                                        "section_name", "perceptual_goal", "lead_role",
-                                                        "low_end_owner", "space_roles", "hook_usage",
-                                                        "energy_rationale", "variation_hypothesis",
-                                                        "claim_kind", "evidence_refs",
-                                                    ],
-                                                    "additionalProperties": False,
-                                                },
-                                            },
-                                        },
-                                        "required": ["primary_hook", "hook_role", "uncertainty", "sections"],
-                                        "additionalProperties": False,
                                     },
                                     "required": ["track_name", "control", "value", "unit"],
                                     "additionalProperties": False,
@@ -751,8 +751,15 @@ def _capture_sections(
 def _capture_goal_sources(
     *, daw: Any, session: Any, spec: Any, evidence: Path,
 ) -> dict[str, dict[str, Any]]:
+    from copilot.audio.capture_preflight import generic_capture_preflight
+    from copilot.audio.session_diagnose import preflight_session
     from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
     from copilot.daw.object_ref import ref_from_track
+
+    preflight = generic_capture_preflight(preflight_session(daw))
+    if not preflight.get("pass"):
+        failures = "; ".join(str(item) for item in preflight.get("missing") or [])
+        raise RuntimeError("GENERIC_CAPTURE_PREFLIGHT_FAILED: " + (failures or "UNKNOWN"))
 
     wanted = {"Kick", "Bass", spec.hook_role}
     captures: dict[str, dict[str, Any]] = {}
@@ -770,7 +777,7 @@ def _capture_goal_sources(
         start, section_end = timeline[role]
         result = capture_source_post_mixer_ref(
             daw, session=session,
-            preflight={"pass": True, "revision": session.revision},
+            preflight=preflight,
             target_ref=ref_from_track(track, project_identity=session.project_identity),
             start_qn=start, end_qn=min(start + 16.0, section_end),
             region_id=f"producer_{role.lower().replace(' ', '_')}",
@@ -942,6 +949,7 @@ def run_alpha(
     authorized_library_root: Path | None = None,
     opened_project: dict[str, Any] | None = None,
     reference_audio: Path | None = None,
+    allow_ui_save: bool = False,
 ) -> dict[str, Any]:
     """Run a bounded pass; goal mode never uses a deterministic fallback."""
     evidence.mkdir(parents=True, exist_ok=True)
@@ -959,6 +967,12 @@ def run_alpha(
         report["status"] = "BLOCKED"
     producer_state: ProducerState | None = None
     producer_state_store: ProducerStateStore | None = None
+    from copilot.importing.new_project_v1 import UiSaveRunBudget
+
+    ui_save_budget = UiSaveRunBudget(enabled=allow_ui_save)
+
+    def request_ui_save(opened: dict[str, Any]) -> dict[str, Any]:
+        return ui_save_budget.save(opened)
 
     def persist_producer_state(next_state: ProducerState) -> None:
         nonlocal producer_state
@@ -1290,10 +1304,25 @@ def run_alpha(
             report["status"] = "DRAFT" if goal else "FAILED_EXECUTION"
             return report
         if goal is not None:
-            from copilot.importing.new_project_v1 import save_new_project_via_windows_ui
-
+            if not allow_ui_save:
+                save = request_ui_save(opened_project)
+                report["save"] = save
+                report["persistence"] = "PERSISTENCE_PENDING"
+                report["status"] = "DRAFT"
+                report["blockers"] = [save["reason"]]
+                persist_producer_state(
+                    producer_state.model_copy(update={
+                        "pending_issues": report["blockers"],
+                        "stop_reason": report["blockers"][0],
+                    }).record(
+                        "SAVE_NOT_ATTEMPTED",
+                        phase=ProducerPhase.DRAFT,
+                        detail=report["blockers"][0],
+                    )
+                )
+                return report
             daw.disconnect()
-            save = save_new_project_via_windows_ui(opened_project)
+            save = request_ui_save(opened_project)
             report["save"] = save
             if save.get("status") != "SAVED_REOPENED":
                 report["status"] = "DRAFT"
@@ -1400,7 +1429,7 @@ def run_alpha(
                 previous = report["save"]
                 ready = previous.get("readiness") or {}
                 daw.disconnect()
-                mix_save = save_new_project_via_windows_ui({
+                mix_save = request_ui_save({
                     "status": "OPENED_EMPTY",
                     "working_als": str(project_path),
                     "project_identity": session.project_identity,
@@ -1608,8 +1637,6 @@ def run_alpha(
             report["section_captures"] = section_captures
             report["source_captures"] = source_captures
             if any(row.get("result") == "IMPROVED_WITH_CAPTURE_AND_CRITIQUE" for row in revisions):
-                from copilot.importing.new_project_v1 import save_new_project_via_windows_ui
-
                 previous = report["save"]
                 ready = previous.get("readiness") or {}
                 reopened_owned = {
@@ -1621,7 +1648,7 @@ def run_alpha(
                     "readiness": ready,
                 }
                 daw.disconnect()
-                revision_save = save_new_project_via_windows_ui(reopened_owned)
+                revision_save = request_ui_save(reopened_owned)
                 report["revision_save"] = revision_save
                 if revision_save.get("status") != "SAVED_REOPENED":
                     report["status"] = "DRAFT"
