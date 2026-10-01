@@ -24,6 +24,8 @@ class MusicalVariationIntent(BaseModel):
     source_project_id: str | None = None
     start_qn: float = Field(ge=0)
     length_bars: int = Field(gt=0, le=16)
+    variation_index: int = Field(default=1, ge=1, le=5)
+    variation_count: int = Field(default=1, ge=1, le=5)
     source_domains: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     preserve: list[str] = Field(default_factory=list)
@@ -40,6 +42,8 @@ def build_bass_variation_intent(
     start_qn: float,
     length_bars: int = 8,
     instruction: str = "",
+    variation_index: int = 1,
+    variation_count: int = 1,
 ) -> MusicalVariationIntent:
     """Create one bounded bass intent from the canonical evidence view."""
     if not view.no_write:
@@ -48,6 +52,8 @@ def build_bass_variation_intent(
         raise ValueError("VARIATION_INTENT_BASS_EVIDENCE_INSUFFICIENT")
     if length_bars not in {8, 16}:
         raise ValueError("VARIATION_INTENT_LENGTH_INVALID")
+    if variation_index not in {1, 2, 3, 4, 5} or variation_index > variation_count:
+        raise ValueError("VARIATION_INTENT_INDEX_INVALID")
     refs: list[str] = []
     for domain in (view.bass, view.rhythm, view.groove, view.motifs, view.relationships):
         refs.extend(domain.evidence_refs)
@@ -65,6 +71,8 @@ def build_bass_variation_intent(
         source_project_id=view.project_id,
         start_qn=start_qn,
         length_bars=length_bars,
+        variation_index=variation_index,
+        variation_count=variation_count,
         source_domains=supported_domains,
         evidence_refs=list(dict.fromkeys(refs)),
         preserve=[
@@ -86,4 +94,8 @@ def build_bass_variation_intent(
     )
 
 
-__all__ = ["MusicalVariationIntent", "build_bass_variation_intent"]
+# Product-facing name; keep the historical name as a compatibility alias so
+# existing persisted payloads and imports remain stable.
+VariationIntent = MusicalVariationIntent
+
+__all__ = ["VariationIntent", "MusicalVariationIntent", "build_bass_variation_intent"]

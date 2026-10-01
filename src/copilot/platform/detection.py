@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import csv
+import io
 import os
 import platform
 import shutil
@@ -25,6 +27,7 @@ class AbletonDetection:
     process_running: bool
     port_open: bool
     evidence: list[str]
+    process_pid: int | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -107,7 +110,8 @@ def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> Able
             f"{'exists' if scripts_dir.exists() else 'absent'}: {scripts_dir}"
         )
 
-    process_running = _live_process_running()
+    process_pid = _live_process_pid()
+    process_running = process_pid is not None
     if process_running:
         evidence.append("Ableton process running")
     port_open = _port_open("127.0.0.1", port)
@@ -121,6 +125,7 @@ def detect_ableton(port: int = 9877, *, include_start_menu: bool = True) -> Able
         prefs_root=prefs_root,
         user_remote_scripts=scripts,
         process_running=process_running,
+        process_pid=process_pid,
         port_open=port_open,
         evidence=evidence,
     )
@@ -333,14 +338,25 @@ def _reg_str(key, name: str) -> str | None:
 
 
 def _live_process_running() -> bool:
+    return _live_process_pid() is not None
+
+
+def _live_process_pid() -> int | None:
     try:
         if os.name == "nt":
             out = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq Ableton Live*"],
+                ["tasklist", "/FO", "CSV", "/NH"],
                 text=True,
                 stderr=subprocess.DEVNULL,
             )
-            return "Ableton Live" in out
+            for row in csv.reader(io.StringIO(out)):
+                if len(row) < 2 or "Ableton Live" not in row[0]:
+                    continue
+                try:
+                    return int(row[1])
+                except ValueError:
+                    continue
+            return None
         for pattern in ("Ableton Live", "ableton", "/Contents/MacOS/Live"):
             try:
                 out = subprocess.check_output(
@@ -350,11 +366,14 @@ def _live_process_running() -> bool:
                 )
             except subprocess.CalledProcessError:
                 continue
-            if out.strip():
-                return True
+            for line in out.splitlines():
+                try:
+                    return int(line.split(maxsplit=1)[0])
+                except (IndexError, ValueError):
+                    continue
     except (OSError, subprocess.CalledProcessError):
-        return False
-    return False
+        return None
+    return None
 
 
 def _port_open(host: str, port: int) -> bool:

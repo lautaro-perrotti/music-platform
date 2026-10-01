@@ -99,6 +99,7 @@ COMMAND_CAPABILITY = {
     "get_track_monitoring": "session.read",
     "get_track_delay": "session.read",
     "get_session_path": "session.read",
+    "save": "session.save",
     "set_track_arm": "track.mute",
     "set_send_level": "track.volume",
     "get_send_level": "session.read",

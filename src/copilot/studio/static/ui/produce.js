@@ -5,7 +5,7 @@
 // refuses with GENERATION_BACKEND_NOT_AVAILABLE, it shows that state and nothing else.
 import { esc } from './lib/define.js';
 
-const ui = { scope: 'REGION', instruction: '', count: 1, length: 8, busy: false, refusal: null, error: '', live: null, liveAt: 0, playing: null };
+const ui = { scope: 'REGION', instruction: 'Create three distinct 8-bar bass variations from this verified reference', count: 3, length: 8, busy: false, refusal: null, error: '', live: null, liveAt: 0, playing: null };
 let liveRequest = null;
 
 const C = { bg: '#0F1012', panel: '#17181B', raised: '#1D1F23', control: '#24262B', line: '#26292E', line2: '#34373D', t1: '#EDEBE7', t2: '#B0ADA7', t3: '#8D8A85', cue: '#5EC6D3', ok: '#5CC08C', warn: '#E2BE5A', ivory: '#ECE8E1' };
@@ -57,7 +57,13 @@ function refusalPanel() {
 
 function resultsPanel(variations) {
   if (!variations.length) return '';
-  const rows = variations.map(v => {
+  const summarySource = variations.find(v => v.musical_summary) || variations[0];
+  const summary = summarySource.musical_summary || {};
+  const summarySection = `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 0 14px;border-bottom:1px solid ${C.line}">
+<div><div>${label('Preserved')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${(summary.preserved || []).map(item => `• ${esc(item)}`).join('<br>') || 'Reference-bound evidence'}</div></div>
+<div><div>${label('Changed')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${(summary.changed || []).map(item => `• ${esc(item)}`).join('<br>') || 'New editable material'}</div></div>
+<div><div>${label('Limitations')}</div><div style="font-size:12px;color:${C.t3};line-height:1.5">${(summary.limitations || []).map(item => `• ${esc(item)}`).join('<br>') || 'Human listening required'}</div></div></div>`;
+  const rows = summarySection + variations.map(v => {
     const ready = v.preview_url && v.preview?.signal_status === 'HAS_SIGNAL' && ['READY', 'KEPT'].includes(v.status);
     const kept = v.status === 'KEPT';
     const preview = ready ? `<audio data-variation="${esc(v.variation_id)}" preload="none" src="${esc(v.preview_url)}"></audio><button data-p="preview" data-id="${esc(v.variation_id)}" style="height:30px;padding:0 12px;border-radius:15px;border:0;background:${ui.playing === v.variation_id ? C.ivory : C.control};color:${ui.playing === v.variation_id ? '#141518' : C.t1};font-size:12.5px;font-weight:600;cursor:pointer">${ui.playing === v.variation_id ? '❚❚ Pause' : '▶ Preview'}</button>` : `<span style="font-size:12px;color:${C.cue}">● ${esc(v.failure_reason || (v.status === 'READY' ? 'PREVIEW_NOT_VERIFIED' : String(v.status).replace(/_/g, ' ').toLowerCase()))}</span>`;
@@ -65,6 +71,35 @@ function resultsPanel(variations) {
     return `<div style="display:flex;align-items:center;gap:14px;height:52px;border-bottom:1px solid #222429"><span style="width:92px;font-size:13.5px;font-weight:500">Variation ${v.index}</span>${preview}<span style="flex:1"></span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:${C.t3}">${bars}</span>${ready ? (kept ? `<span style="font-size:12.5px;color:${C.ok}">✓ Kept</span>` : btn('Keep', 'keep', `data-id="${esc(v.variation_id)}"`) + btn('Discard', 'discard', `data-id="${esc(v.variation_id)}"`)) + btn('Open in Ableton', 'open', `data-id="${esc(v.variation_id)}"`) : ''}</div>`;
   }).join('');
   return panel(`<div>${rows}</div><div style="display:flex;align-items:center;gap:12px">${btn('Regenerate', 'generate')}<span style="font-size:12px;color:${C.t3}">Discard requires the Studio process that created the variation; it is unavailable after restart.</span></div>${debug('Debug · variations', variations)}`, 'padding:6px 16px 12px');
+}
+
+function resultsPanelV2(variations) {
+  if (!variations.length) return '';
+  const summarySource = variations.find(v => v.musical_summary) || variations[0];
+  const summary = summarySource.musical_summary || {};
+  const list = values => (values || []).map(value => `• ${esc(typeof value === 'string' ? value : JSON.stringify(value))}`).join('<br>');
+  const selected = variations.find(v => v.musical_decision === 'MUSICAL_ACCEPTED');
+  const status = selected
+    ? `<div role="status" style="padding:10px 12px;border-radius:6px;background:#18221D;border:1px solid #2B4A39;color:${C.ok};font-size:12.5px">Selected candidate ${String.fromCharCode(64 + selected.index)} for musical review. <b>Save manually in Ableton</b> to persist the .als file.</div>`
+    : `<div style="font-size:12px;color:${C.t3}">Listen to A, B and C, then select one. Selection is musical only and does not claim that the project was saved.</div>`;
+  const summarySection = `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 0 14px;border-bottom:1px solid ${C.line}">
+<div><div>${label('Preserved')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${list(summary.preserved) || 'Reference-bound evidence'}</div></div>
+<div><div>${label('Changed')}</div><div style="font-size:12px;color:${C.t2};line-height:1.5">${list(summary.changed) || 'New editable material'}</div></div>
+<div><div>${label('Limitations')}</div><div style="font-size:12px;color:${C.t3};line-height:1.5">${list(summary.limitations) || 'Human listening required'}</div></div></div>`;
+  const rows = variations.map(v => {
+    const ready = v.preview_url && v.preview?.signal_status === 'HAS_SIGNAL' && ['READY', 'KEPT'].includes(v.status);
+    const candidate = String.fromCharCode(64 + Number(v.index));
+    const selectedHere = v.musical_decision === 'MUSICAL_ACCEPTED';
+    const strategy = v.provenance?.variation_strategy;
+    const strategyText = typeof strategy === 'string' ? strategy : JSON.stringify(strategy || 'reference-bound transform');
+    const preview = ready
+      ? `<audio data-variation="${esc(v.variation_id)}" preload="none" src="${esc(v.preview_url)}"></audio><button data-p="preview" data-id="${esc(v.variation_id)}" style="height:30px;padding:0 12px;border-radius:15px;border:0;background:${ui.playing === v.variation_id ? C.ivory : C.control};color:${ui.playing === v.variation_id ? '#141518' : C.t1};font-size:12.5px;font-weight:600;cursor:pointer">${ui.playing === v.variation_id ? 'Pause' : 'Preview'}</button>`
+      : `<span style="font-size:12px;color:${C.cue}">${esc(v.failure_reason || (v.status === 'READY' ? 'PREVIEW_NOT_VERIFIED' : String(v.status).replace(/_/g, ' ').toLowerCase()))}</span>`;
+    const metrics = ready ? `${v.preview.bars} bars · signal ${Number(v.preview.rms_dbfs).toFixed(1)} dBFS` : '';
+    const decision = selectedHere ? `<span style="font-size:12.5px;color:${C.ok}">Selected ${candidate} · disk save required</span>` : btn(`Select ${candidate}`, 'select', `data-id="${esc(v.variation_id)}"`);
+    return `<div style="display:flex;align-items:center;gap:14px;min-height:68px;border-bottom:1px solid #222429"><div style="width:190px"><div style="font-size:13.5px;font-weight:600">Candidate ${candidate}</div><div style="font-size:11px;color:${C.t3};margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(strategyText)}">${esc(strategyText)}</div></div>${preview}<span style="flex:1"></span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:${C.t3}">${metrics}</span>${ready ? decision + btn('Discard', 'discard', `data-id="${esc(v.variation_id)}"`) + btn('Open in Ableton', 'open', `data-id="${esc(v.variation_id)}"`) : ''}</div>`;
+  }).join('');
+  return panel(`${status}${summarySection}<div>${rows}</div><div style="display:flex;align-items:center;gap:12px">${btn('Regenerate', 'generate')}${btn('Reject all', 'reject-all')}<span style="font-size:12px;color:${C.t3}">Reject all rolls back only Copilot-owned candidates.</span></div>${debug('Debug · variations', variations)}`, 'padding:6px 16px 12px');
 }
 
 function rail(project, live) {
@@ -92,8 +127,12 @@ export async function showProduce(ctx) {
 <div style="flex:1;min-width:0;overflow:auto;padding:24px 32px"><div style="max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
 <div style="display:flex;align-items:flex-end;gap:12px"><h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;flex:1">Produce</h1><span style="font-size:12px;color:${C.t3}">Generate in Ableton, preview here.</span></div>
 ${ui.error ? `<div role="alert" style="padding:10px 14px;border-radius:8px;background:#1E1616;border:1px solid #4A2C2A;font-size:12.5px;color:#E7B7B2">${esc(ui.error)}</div>` : ''}
-${referencePanel(live)}${instructionPanel()}${refusalPanel()}${resultsPanel(variations || [])}
+${referencePanel(live)}${instructionPanel()}${refusalPanel()}${resultsPanelV2(variations || [])}
 </div></div>${rail(project, live)}</main>`;
+  const countGroup = main.querySelector('[aria-label="count"]');
+  if (countGroup) {
+    countGroup.innerHTML = [1, 3, 5].map(value => `<button role="radio" aria-checked="${value === ui.count}" data-p="count" data-v="${value}" style="height:28px;min-width:40px;padding:0 12px;border:0;border-radius:4px;background:${value === ui.count ? '#34373D' : 'transparent'};color:${value === ui.count ? C.t1 : C.t3};font-size:12.5px;cursor:pointer">${value}</button>`).join('');
+  }
   wire(ctx, project);
   if (!live && !liveRequest) liveStatus(api).then(() => { if ((location.hash.slice(1) || 'produce').startsWith('produce')) showProduce(ctx); });
 }
@@ -122,9 +161,14 @@ function wire(ctx, project) {
     if (res.status === 409 || res.status === 501) ui.refusal = res.data; else if (!res.ok) ui.error = res.data.error || `Request failed (${res.status})`;
     rerender();
   };
-  on('keep', variationAction('keep'));
+  on('select', variationAction('select'));
   on('discard', variationAction('discard'));
   on('open', variationAction('open'));
+  on('reject-all', async () => {
+    const res = await post(`/api/projects/${project.project_id}/variations/reject-all`);
+    if (res.status === 409 || res.status === 501) ui.refusal = res.data; else if (!res.ok) ui.error = res.data.error || `Request failed (${res.status})`;
+    rerender();
+  });
   on('preview', node => {
     const id = node.dataset.id;
     main.querySelectorAll('audio[data-variation]').forEach(a => { if (a.dataset.variation !== id) a.pause(); });

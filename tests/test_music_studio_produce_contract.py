@@ -75,16 +75,62 @@ def test_capability_report_certifies_only_the_one_variation_slice(tmp_path: Path
     service, _ = _service(tmp_path)
     report = service.produce_capabilities()
     assert report["generation_available"] is True
-    assert report["scope"] == "ONE_BASS_VARIATION_ONLY"
-    assert "VARIATION_PLANNER_N" in report["missing"]
+    assert report["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE"
+    assert "VARIATION_PLANNER_N" not in report["missing"]
     real = {row["name"] for row in report["capabilities"] if row["state"] == "REAL"}
-    assert {"SINGLE_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE", "KEEP_VARIATION"} <= real
+    assert {"SINGLE_VARIATION_PLAN", "MULTI_VARIATION_PLAN", "WRITE_MIDI_CLIP", "VARIATION_PREVIEW_CAPTURE"} <= real
+    assert next(row for row in report["capabilities"] if row["name"] == "KEEP_VARIATION")["state"] == "PARTIAL"
 
 
-def test_generate_blocks_n_variations_before_live_write(tmp_path: Path) -> None:
+def test_generate_supports_bounded_multi_variation_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     service, project_id = _service(tmp_path)
-    with pytest.raises(ValueError, match="PRODUCE_VARIATION_COUNT_UNSUPPORTED_FOR_V1"):
-        service.produce_generate(project_id, {"scope": "region", "instruction": "make a bass variation", "variations": 5, "length_bars": 16})
+    reference = _reference_payload(tmp_path, "mock-project")
+    calls = []
+    shared_daw = object()
+
+    def fake_generate(_project_id, _request, *, variation_index, variation_count, live_daw=None):
+        calls.append((variation_index, variation_count, live_daw))
+        return {
+            "variation": {"variation_id": f"variation_{variation_index}", "index": variation_index},
+            "status": "READY", "musical_writes": 4,
+        }
+
+    monkeypatch.setattr(service, "_produce_one_real_variation", fake_generate)
+    monkeypatch.setattr(service, "_open_variation_live", lambda: (shared_daw, None))
+    output = service.produce_generate(project_id, {
+        "scope": "region", "instruction": "make five bass variations", "variations": 5,
+        "length_bars": 8, **reference,
+    })
+    assert [index for index, _, _ in calls] == list(range(1, 6))
+    assert all(total == 5 for _, total, _ in calls)
+    assert all(daw is shared_daw for _, _, daw in calls)
+    assert len(output["variations"]) == 5
+    assert output["musical_writes"] == 20
+
+
+def test_generate_dispatches_one_multi_element_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, project_id = _service(tmp_path)
+    captured: list[dict] = []
+
+    def fake_multi(_project_id, request):
+        captured.append(request.model_dump(mode="json"))
+        return {"status": "READY", "candidate_kind": "MULTI_ELEMENT", "musical_writes": 12}
+
+    monkeypatch.setattr(service, "_produce_one_multi_element_candidate", fake_multi)
+    output = service.produce_generate(project_id, {
+        "scope": "region",
+        "instruction": "build one multi-element variation",
+        "variations": 1,
+        "length_bars": 8,
+        "start_qn": 160.0,
+        "elements": ["bass", "drums", "harmonic"],
+        "reference_analysis_path": "reference.json",
+        "musical_understanding_path": "understanding.json",
+        "harmonic_understanding_path": "harmonic.json",
+    })
+    assert output["candidate_kind"] == "MULTI_ELEMENT"
+    assert captured[0]["elements"] == ["BASS", "DRUMS", "HARMONIC"]
+    assert captured[0]["harmonic_understanding_path"] == "harmonic.json"
 
 
 @pytest.mark.parametrize("payload, code", [
@@ -157,9 +203,20 @@ def test_real_bridge_compiles_writes_captures_and_rolls_back_owned_material(tmp_
     assert generated is not None
     assert generated.clips[0].notes
     assert len(daw.snapshot().tracks) == 1
+    assert variation["provenance"]["symbolic_validation"]["status"] == "VERIFIED"
+    assert variation["provenance"]["source_not_copied"] is True
+    trace = variation["provenance"]["event_traceability"]
+    assert trace and any(item["changed"] for item in trace)
+    assert not all(item["direct_copy"] for item in trace)
 
-    kept = service.variation_action(variation["variation_id"], "keep")
-    assert kept["status"] == "KEPT"
+    # The mock adapter has no durable .als file.  Core must not confuse a
+    # verified SafeWrite transaction with a durable musical KEEP.
+    with pytest.raises(ProduceExecutionBlocked, match="KEEP_PERSISTENCE_FAILED"):
+        service.variation_action(variation["variation_id"], "keep")
+    pending = service.list_variations(project_id)["variations"][0]
+    assert pending["status"] == "READY"
+    assert pending["musical_decision"] == "PENDING"
+    assert pending["persistence_status"] == "SAVE_FAILED"
     discarded = service.variation_action(variation["variation_id"], "discard")
     assert discarded["rollback_verified"] is True
     assert daw.snapshot().tracks == []
@@ -258,7 +315,41 @@ def test_variation_preview_contract_uses_existing_artifact_route(tmp_path: Path)
     service.store.set_state(project_id, "variations", [record.model_dump(mode="json")])
     listed = service.list_variations(project_id)["variations"]
     assert listed[0]["preview_url"] == "/api/artifacts/artifact_abc/audio"
+    assert "project_persistence" not in service.list_variations(project_id)
     assert service.variation_action("variation_1", "open")["variation"]["variation_id"] == "variation_1"
+
+
+def test_select_is_musical_only_and_requires_manual_disk_save(tmp_path: Path) -> None:
+    service, project_id = _service(tmp_path)
+    records = [
+        VariationRecord(
+            variation_id=f"variation_{index}", project_id=project_id, request_id=f"req_{index}",
+            index=index, status="READY", persistence_status="CANDIDATE_PENDING",
+            persistence={"status": "CANDIDATE_PENDING", "project_identity": "mock-project"},
+            created_at="2026-09-27T00:00:00Z",
+        )
+        for index in (1, 2, 3)
+    ]
+    service.store.set_state(project_id, "variations", [record.model_dump(mode="json") for record in records])
+
+    selected = service.variation_action("variation_2", "select")
+
+    assert selected["status"] == "MUSICAL_ACCEPTED"
+    assert selected["persistence_status"] == "DISK_SAVE_REQUIRED"
+    assert selected["disk_save_required"] is True
+    assert selected["musical_writes"] == 0
+    rows = service.list_variations(project_id)["variations"]
+    assert rows[1]["musical_decision"] == "MUSICAL_ACCEPTED"
+    assert rows[1]["persistence_status"] == "DISK_SAVE_REQUIRED"
+    assert rows[0]["musical_decision"] == "PENDING"
+    assert rows[2]["musical_decision"] == "PENDING"
+    assert service.list_variations(project_id)["project_persistence"]["selected_variation_id"] == "variation_2"
+
+    replaced = service.variation_action("variation_3", "select")
+    assert replaced["status"] == "MUSICAL_ACCEPTED"
+    rows = service.list_variations(project_id)["variations"]
+    assert rows[1]["musical_decision"] == "PENDING"
+    assert rows[2]["musical_decision"] == "MUSICAL_ACCEPTED"
 
 
 def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: Path) -> None:
@@ -275,7 +366,7 @@ def test_http_produce_routes_expose_real_capability_and_typed_blocker(tmp_path: 
         with urllib.request.urlopen(f"{base}/api/produce/capabilities") as response:
             body = json.load(response)
             assert body["generation_available"] is True
-            assert body["scope"] == "ONE_BASS_VARIATION_ONLY"
+            assert body["scope"] == "ONE_TO_FIVE_BASS_VARIATIONS_PLUS_ONE_MULTI_ELEMENT_CANDIDATE"
         request = urllib.request.Request(f"{base}/api/projects/{project_id}/produce", method="POST",
                                          data=json.dumps({"instruction": "make a bass variation", "variations": 1}).encode(),
                                          headers={"Content-Type": "application/json"})

@@ -86,6 +86,12 @@ def test_reference_bound_notes_use_measured_events_and_transform_them() -> None:
     assert features["source_not_copied"] is True
     assert features["generated_event_count"] == len(notes)
     assert features["shifted_onsets"] > 0
+    assert features["symbolic_validation"]["status"] == "VERIFIED"
+    assert features["symbolic_validation"]["direct_note_copy"] is False
+    assert features["symbolic_validation"]["rhythm_transformed"] is True
+    assert len(features["event_traceability"]) == len(notes)
+    assert any(row["changed"] for row in features["event_traceability"])
+    assert not all(row["direct_copy"] for row in features["event_traceability"])
     assert {note.pitch for note in notes} == {33, 37, 40, 42}
     assert notes[0].start_time == 0.0
     assert notes[4].start_time == 4.0
@@ -98,6 +104,21 @@ def test_reference_bound_notes_fail_closed_without_events() -> None:
     understanding.bass.pitch_events = []
     with pytest.raises(ReferenceVariationError, match="AUTHORITATIVE_BASS_EVENTS_MISSING"):
         build_reference_bound_bass_notes(_pack(), understanding, start_qn=160.0, length_beats=32.0)
+
+
+def test_five_variation_strategies_are_deterministic_and_distinct() -> None:
+    signatures = set()
+    for variation_index in range(1, 6):
+        notes, features = build_reference_bound_bass_notes(
+            _pack(), _understanding(), start_qn=160.0, length_beats=32.0,
+            variation_index=variation_index,
+        )
+        assert features["symbolic_validation"]["status"] == "VERIFIED"
+        assert features["variation_index"] == variation_index
+        assert features["variation_strategy"]
+        assert all(note.pitch in {33, 37, 40, 42} for note in notes)
+        signatures.add(tuple((note.start_time, note.duration, note.pitch) for note in notes))
+    assert len(signatures) == 5
 
 
 def test_reference_binding_rejects_other_project_or_analysis(tmp_path) -> None:

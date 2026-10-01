@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -24,7 +25,7 @@ from copilot.daw.detect import AbletonDetection, detect_ableton
 from copilot.daw.install_remote_script import install_remote_script
 from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready
 from copilot.importing.ableton_launcher_v1 import launch_working_copy, names_match, paths_match
-from copilot.importing.working_copy_manager_v1 import create_working_copy
+from copilot.importing.working_copy_manager_v1 import create_working_copy, is_copilot_working_copy
 from copilot.platform.ableton import driver_for_system
 from copilot.platform.system import host_architecture, host_shell, host_system
 
@@ -151,6 +152,21 @@ def ensure_ableton_ready(
     except Exception as exc:  # noqa: BLE001
         launch = {"status": "LAUNCH_FAILED", "reason": str(exc)}
     report["launch"] = launch
+    if launch.get("status") == "LIVE_SESSION_CONFLICT":
+        activation = _activate_copilot_working_copy(
+            target=target,
+            profile=profile,
+            host=host,
+            port=port,
+            deadline_s=deadline_s,
+            launcher=launcher,
+        )
+        report["project_activation"] = activation
+        if activation.get("status") == SESSION_READY:
+            report["launch"] = activation.get("launch", launch)
+            launch = report["launch"]
+        else:
+            return _blocked(report, str(activation.get("reason") or "PROJECT_ACTIVATION_FAILED"))
     report["restart_count"] = launch.get("restart_count", report["restart_count"])
     report["same_process_pid"] = launch.get("same_process_pid") or (
         launch.get("process_lifecycle") or {}
@@ -181,6 +197,66 @@ def ensure_ableton_ready(
     report["working_als"] = str(target)
     report["project_identity"] = probe.project_identity
     return report
+
+
+def _activate_copilot_working_copy(
+    *,
+    target: Path,
+    profile: EnvironmentProfile,
+    host: str,
+    port: int,
+    deadline_s: float,
+    launcher: Callable[..., dict[str, Any]],
+) -> dict[str, Any]:
+    """Switch only away from another manifest-backed Copilot working copy.
+
+    This is lifecycle orchestration, not a musical write.  Unknown/user sets
+    remain fail-closed because a graceful close cannot prove unsaved state was
+    preserved.  A known Copilot copy may be abandoned and reopened safely; if
+    the exact process does not exit, no force-kill is attempted.
+    """
+    current = probe_session_ready(host, port)
+    current_path = Path(str(current.project_path or "")) if current.project_path else None
+    if current.status != SESSION_READY or current_path is None:
+        return {"status": "BLOCKED", "reason": "CURRENT_PROJECT_NOT_AUTHORITATIVE"}
+    if paths_match(current.project_path, target) or names_match(current.project_name, target):
+        return {"status": SESSION_READY, "launch": {"status": SESSION_READY, "launch": "already_open"}}
+    if not is_copilot_working_copy(current_path):
+        return {
+            "status": "BLOCKED",
+            "reason": "BLOCKED_UNSAFE_PROJECT_SWITCH",
+            "current_project": str(current_path),
+            "expected_project": str(target),
+            "preservation": "current project is not a manifest-backed Copilot working copy",
+        }
+    pid = profile.ableton.process_pid
+    if pid is None:
+        return {
+            "status": "BLOCKED",
+            "reason": "BLOCKED_UNSAFE_PROJECT_SWITCH",
+            "current_project": str(current_path),
+            "expected_project": str(target),
+            "preservation": "exact Ableton PID is unavailable; no process-name termination allowed",
+        }
+    driver_for_system(profile.system).request_shutdown_pid(pid)
+    deadline = time.monotonic() + min(deadline_s, 30.0)
+    while time.monotonic() < deadline:
+        detection = driver_for_system(profile.system).discover(host=host, port=port)
+        if not detection.process_running and not detection.port_open:
+            break
+        time.sleep(0.25)
+    else:
+        return {
+            "status": "BLOCKED",
+            "reason": "BLOCKED_UNSAFE_PROJECT_SWITCH",
+            "current_project": str(current_path),
+            "expected_project": str(target),
+            "preservation": "graceful shutdown did not complete; process was not force-killed",
+        }
+    launch = launcher(target, deadline_s=deadline_s, force=False, host=host, port=port)
+    if launch.get("status") != SESSION_READY:
+        return {"status": "BLOCKED", "reason": str(launch.get("status") or "PROJECT_ACTIVATION_FAILED"), "launch": launch}
+    return {"status": SESSION_READY, "launch": launch, "previous_project": str(current_path), "pid": pid}
 
 
 def _resolve_working_copy(

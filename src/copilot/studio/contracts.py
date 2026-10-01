@@ -103,6 +103,38 @@ class CapabilityState(StrEnum):
     MISSING = "MISSING"
 
 
+class MusicalDecision(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "MUSICAL_ACCEPTED"
+    KEPT = "KEPT"
+    DISCARDED = "DISCARDED"
+
+
+class PersistenceStatus(StrEnum):
+    IN_SYNC = "IN_SYNC"
+    LIVE_DIRTY = "LIVE_DIRTY"
+    CANDIDATE_PENDING = "CANDIDATE_PENDING"
+    DISK_SAVE_REQUIRED = "DISK_SAVE_REQUIRED"
+    SAVE_IN_PROGRESS = "SAVE_IN_PROGRESS"
+    CHECKPOINTED = "CHECKPOINTED"
+    SAVE_FAILED = "SAVE_FAILED"
+    UNKNOWN = "UNKNOWN"
+
+
+class ProjectPersistenceState(BaseModel):
+    status: PersistenceStatus = PersistenceStatus.UNKNOWN
+    musical_decision: MusicalDecision = MusicalDecision.PENDING
+    project_path: str = ""
+    project_identity: str = ""
+    disk_before: dict[str, Any] = Field(default_factory=dict)
+    disk_after: dict[str, Any] = Field(default_factory=dict)
+    live_before: dict[str, Any] = Field(default_factory=dict)
+    live_after: dict[str, Any] = Field(default_factory=dict)
+    save_attempted: bool = False
+    save_verified: bool = False
+    reason: str = ""
+
+
 class ProduceCapability(BaseModel):
     name: str
     state: CapabilityState
@@ -128,6 +160,9 @@ class VariationRecord(BaseModel):
     request_id: str
     index: int
     status: str  # PLANNED | CREATING_IN_ABLETON | CAPTURING | READY | KEPT | DISCARDED | FAILED
+    musical_decision: MusicalDecision = MusicalDecision.PENDING
+    persistence_status: PersistenceStatus = PersistenceStatus.UNKNOWN
+    persistence: dict[str, Any] = Field(default_factory=dict)
     ableton_track_ref: str | None = None
     ableton_clip_ref: str | None = None
     preview: VariationPreview | None = None
@@ -135,6 +170,9 @@ class VariationRecord(BaseModel):
     ownership: dict[str, Any] = Field(default_factory=dict)
     safe_write: dict[str, Any] = Field(default_factory=dict)
     region: dict[str, Any] = Field(default_factory=dict)
+    reference: dict[str, Any] = Field(default_factory=dict)
+    musical_summary: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
     failure_reason: str | None = None
     created_at: str
 
@@ -144,8 +182,10 @@ class ProduceRequest(BaseModel):
     instruction: str
     variations: int  # 1 | 3 | 5
     length_bars: int | None = None  # 8 | 16 | 32 | None == Auto
+    elements: list[str] = Field(default_factory=list)
     start_qn: float = 0.0
     end_qn: float | None = None
     reference_analysis_path: str | None = None
     musical_understanding_path: str | None = None
+    harmonic_understanding_path: str | None = None
     astra_interpretation_path: str | None = None

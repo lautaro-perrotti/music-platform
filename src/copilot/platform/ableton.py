@@ -98,6 +98,12 @@ class PlatformAbletonDriver:
         else:
             process.terminate()
 
+    def request_shutdown_pid(self, pid: int) -> None:
+        """Request graceful shutdown of a known, safe-to-close Live PID."""
+        command = self.request_shutdown_command(pid)
+        if command:
+            subprocess.run(command, capture_output=True, text=True, check=False)
+
     def request_shutdown_command(self, pid: int) -> list[str]:
         return []
 

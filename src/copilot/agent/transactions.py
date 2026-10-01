@@ -441,8 +441,22 @@ class TransactionManager:
         session: SessionState,
     ) -> ReconcileResult:
         if operation in {"create_midi_track", "create_audio_track"}:
+            expected_id = str(expected_after.get("stable_id", ""))
+            if expected_id:
+                matches = [
+                    track for track in session.tracks
+                    if track.stable_id == expected_id
+                ]
+                if len(matches) == 1:
+                    return ReconcileResult.SATISFIED
+                if matches:
+                    return ReconcileResult.AMBIGUOUS
             before_count = int(before.get("track_count", 0))
             if len(session.tracks) == before_count + 1:
+                return ReconcileResult.SATISFIED
+            if expected_after.get("multi_intent") and len(session.tracks) >= int(
+                expected_after.get("track_count", before_count + 1)
+            ):
                 return ReconcileResult.SATISFIED
             if len(session.tracks) == before_count:
                 return ReconcileResult.ABSENT
