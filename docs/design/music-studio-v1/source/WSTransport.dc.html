@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace transport</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div role="region" aria-label="Transport" style="width:1440px;height:80px;box-sizing:border-box;display:flex;align-items:center;gap:18px;padding:0 16px;background:#17181B;border-top:1px solid #26292E;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;opacity:1">
+<div style="display:flex;align-items:center;gap:6px;opacity:{{ctlOp}}">
+<button aria-label="Stop" disabled="{{ro}}" style="width:34px;height:34px;border-radius:6px;border:1px solid #34373D;background:#1D1F23;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 24 24" fill="#B0ADA7" aria-hidden="true"><path d="M6 6h12v12H6z"></path></svg></button>
+<button aria-label="{{playLabel}}" disabled="{{ro}}" style="width:40px;height:40px;border-radius:50%;border:0;background:{{playBg}};display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="#141518" aria-hidden="true"><path d="{{playPath}}"></path></svg></button>
+<button aria-label="Loop" aria-pressed="true" disabled="{{ro}}" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid #2F4A4E;background:#1E3437;color:#5EC6D3;font-size:12px;display:flex;align-items:center;gap:6px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5EC6D3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V9a3 3 0 0 1 3-3h12l-3-3M20 13v2a3 3 0 0 1-3 3H5l3 3"></path></svg>Drop 2 · 65–97</button>
+</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<span style="font-family:'Geist Mono',monospace;font-size:22px;font-weight:500;letter-spacing:-0.01em;color:{{posColor}}">66.3.2</span>
+<span style="font-size:11px;color:#8D8A85">{{posNote}}</span>
+</div>
+<div style="display:flex;gap:18px;font-size:12px">
+<div style="display:flex;flex-direction:column;gap:2px"><span style="color:#8D8A85">Time</span><span style="font-family:'Geist Mono',monospace">2:03.7</span></div>
+<div style="display:flex;flex-direction:column;gap:2px"><span style="color:#8D8A85">Tempo</span><span style="font-family:'Geist Mono',monospace">128.00</span></div>
+<div style="display:flex;flex-direction:column;gap:2px"><span style="color:#8D8A85">Meter</span><span style="font-family:'Geist Mono',monospace">4/4</span></div>
+</div>
+<div style="display:flex;align-items:center;gap:6px">
+<span style="font-size:11.5px;color:#8D8A85">Audition</span>
+<div role="group" aria-label="A/B" style="display:flex;padding:2px;border-radius:6px;background:#1F2126;border:1px solid #2B2E34"><button style="height:24px;padding:0 9px;border:0;border-radius:4px;background:#ECE8E1;color:#141518;font-size:11.5px;font-weight:600">Live</button><button style="height:24px;padding:0 9px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:11.5px">Source</button><button style="height:24px;padding:0 9px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:11.5px">A/B</button></div>
+</div>
+<div style="flex:1"></div>
+<a href="WorkspaceOps.dc.html" aria-label="Operations" style="display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:8px;border:1px solid #2B2E34;background:#1D1F23;color:#EDEBE7;text-decoration:none;font-size:12.5px;min-width:330px">
+<span style="font-size:12px;color:{{opColor}}">{{opGlyph}}</span>
+<span style="flex:1;display:flex;flex-direction:column;gap:1px"><span>{{opTitle}}</span><span style="font-size:11px;color:#8D8A85">{{opSub}}</span></span>
+<span style="font-size:11px;color:#8D8A85;border:1px solid #34373D;border-radius:4px;padding:1px 6px">{{opCount}}</span>
+</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"readonly":{"editor":"boolean","default":false},"ops":{"editor":"enum","options":["busy","idle","verified"],"default":"busy"},"$preview":{"width":1440,"height":80}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var ro = this.props.readonly === true || this.props.readonly === 'true';
+    var ops = this.props.ops || 'busy';
+    var O = {
+      busy: ['●', '#5EC6D3', 'Generating candidate 4', '12.8 s · usually 20–30 s', '3 ops'],
+      idle: ['○', '#8D8A85', 'No operations running', 'Last: note moved · verified 92 ms', '0 ops'],
+      verified: ['✓', '#5CC08C', 'Bass note moved · verified', 'Applied 37 ms · verified 92 ms', '1 op']
+    }[ops];
+    return {
+      ro: ro, ctlOp: ro ? 0.45 : 1, playBg: ro ? '#6A6D73' : '#ECE8E1', playLabel: ro ? 'Play (unavailable)' : 'Stop playback',
+      playPath: ro ? 'M8 5.5v13l11-6.5z' : 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z',
+      posColor: ro ? '#8D8A85' : '#EDEBE7', posNote: ro ? 'Read-only · last known position' : 'Playing in Ableton',
+      opGlyph: O[0], opColor: O[1], opTitle: O[2], opSub: O[3], opCount: O[4]
+    };
+  }
+}
+</script>
+</body>
+</html>

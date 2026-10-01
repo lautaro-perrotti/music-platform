@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace sidebar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<nav aria-label="Workspace" style="width:188px;height:772px;box-sizing:border-box;background:#141518;border-right:1px solid #26292E;display:flex;flex-direction:column;padding:10px 8px;font-family:Geist,system-ui,sans-serif;color:#EDEBE7">
+<div style="display:flex;flex-direction:column;gap:1px">
+<sc-for list="{{items}}" as="it" hint-placeholder-count="7">
+<a href="{{it.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;font-size:13.5px;font-weight:{{it.fw}};color:{{it.fg}};background:{{it.bg}}">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{it.ic}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+<span style="flex:1">{{it.label}}</span>
+<span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5E5C59">{{it.k}}</span>
+</a>
+</sc-for>
+</div>
+<div style="flex:1"></div>
+<div style="border-top:1px solid #26292E;padding-top:6px;display:flex;flex-direction:column;gap:1px">
+<a href="Projects.dc.html" style="height:30px;padding:0 10px;display:flex;align-items:center;font-size:12.5px;color:#8D8A85;text-decoration:none">Library</a>
+<a href="Providers.dc.html" style="height:30px;padding:0 10px;display:flex;align-items:center;font-size:12.5px;color:#8D8A85;text-decoration:none">Settings</a>
+<a href="SystemHealth.dc.html" style="height:30px;padding:0 10px;display:flex;align-items:center;font-size:12.5px;color:#8D8A85;text-decoration:none">Advanced / Debug</a>
+</div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["project","generate","arrangement","tracks","harmony","versions","analysis"],"default":"project"},"$preview":{"width":188,"height":772}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var a = this.props.active || 'project';
+    var I = [
+      ['project', 'Project', 'Workspace.dc.html', 'M4 10.5 12 4l8 6.5V20H4z M9.5 20v-5.5h5V20', '1'],
+      ['generate', 'Generate', 'Produce.dc.html', 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z', '2'],
+      ['arrangement', 'Arrangement', 'Studio.dc.html', 'M3 6h6M11 6h10M3 12h10M15 12h6M3 18h4M9 18h12', '3'],
+      ['tracks', 'Tracks', 'Stems.dc.html', 'M12 3 3 7.5l9 4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5', '4'],
+      ['harmony', 'Harmony', 'ReferenceDetail.dc.html', 'M9 18V6l10-2v12 M9 18a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0zM19 16a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0z', '5'],
+      ['versions', 'Versions', 'Versions.dc.html', 'M6 3v18M6 8c6 0 12 1 12 8v5', '6'],
+      ['analysis', 'Analysis', 'MixMaster.dc.html', 'M4 20V10M10 20V4M16 20v-7M22 20H2', '7']
+    ];
+    return { items: I.map(function (i) { var on = i[0] === a; return { label: i[1], href: i[2], d: i[3], k: i[4], bg: on ? '#24262B' : 'transparent', fg: on ? '#EDEBE7' : '#B0ADA7', ic: on ? '#5EC6D3' : '#8D8A85', fw: on ? '500' : '400' }; }) };
+  }
+}
+</script>
+</body>
+</html>

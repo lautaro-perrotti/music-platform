@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace top bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<header style="width:1440px;height:48px;box-sizing:border-box;display:flex;align-items:center;gap:10px;background:#141518;border-bottom:1px solid #26292E;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13px;padding:0 12px 0 16px">
+<svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="21" rx="5" fill="#ECE8E1"></rect><rect x="5" y="8" width="2.4" height="6" rx="1.2" fill="#141518"></rect><rect x="9.8" y="4.5" width="2.4" height="13" rx="1.2" fill="#141518"></rect><rect x="14.6" y="7" width="2.4" height="8" rx="1.2" fill="#141518"></rect></svg>
+<a href="ProjectSwitcher.dc.html" style="display:flex;align-items:center;gap:6px;height:30px;padding:0 8px;border-radius:6px;color:#EDEBE7;text-decoration:none;font-weight:600">Rhythm Ashanti<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></a>
+<span style="color:#4A4C52">/</span>
+<a href="VersionSwitcher.dc.html" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:6px;color:#EDEBE7;text-decoration:none">v8 · Stronger Drop 2<span style="font-size:11.5px;color:{{verColor}}">{{verMark}}</span></a>
+<div style="flex:1;display:flex;justify-content:center">
+<a href="CommandPalette.dc.html" style="width:360px;height:30px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34;color:#8D8A85;text-decoration:none">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D8A85" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM20 20l-4-4"></path></svg>
+<span style="flex:1">Command, object or bar…</span><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;border:1px solid #3A3D44">Ctrl K</span></a>
+</div>
+<a href="WorkspaceSync.dc.html" aria-label="Ableton status" style="display:flex;align-items:center;gap:10px;height:32px;padding:0 12px;border-radius:6px;border:1px solid {{bd}};background:{{bg}};color:#EDEBE7;text-decoration:none;font-size:12.5px">
+<span style="font-size:11.5px;color:#8D8A85">Ableton</span>
+<span style="display:flex;align-items:center;gap:6px;color:{{c1}}"><span style="width:8px;height:8px;border-radius:50%;background:{{dot}};border:{{dotBorder}}"></span>{{l1}}</span>
+<span style="width:1px;height:14px;background:#34373D"></span>
+<span style="color:{{c2}}">{{l2}}</span>
+<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">{{l3}}</span>
+</a>
+<span aria-label="Lucas Perrotti" style="width:28px;height:28px;border-radius:50%;background:#2A2C32;border:1px solid #3A3D44;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">LP</span>
+</header>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"sync":{"editor":"enum","options":["synced","syncing","stale","degraded","disconnected"],"default":"synced"},"$preview":{"width":1440,"height":48}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var S = {
+      synced: ['#5CC08C', '0', 'Connected', '#B0ADA7', 'Synced', '#B0ADA7', '18 ms', '#2B2E34', 'transparent', '✓ in Ableton', '#5CC08C'],
+      syncing: ['#5CC08C', '0', 'Connected', '#B0ADA7', 'Syncing · 1 pending', '#5EC6D3', '', '#2F4A4E', '#16211F', '✓ in Ableton', '#5CC08C'],
+      stale: ['#5CC08C', '0', 'Connected', '#B0ADA7', 'Stale · 8 s', '#E2BE5A', '', '#3F3822', 'transparent', '✓ in Ableton', '#5CC08C'],
+      degraded: ['#E2BE5A', '0', 'Degraded', '#E2BE5A', 'Slow replies', '#B0ADA7', '640 ms', '#3F3822', '#1D1B15', '✓ in Ableton', '#5CC08C'],
+      disconnected: ['transparent', '1.5px solid #8D8A85', 'Disconnected', '#B0ADA7', 'Read-only', '#B0ADA7', 'verified 12 s ago', '#34373D', '#1D1F23', '◷ last verified', '#8D8A85']
+    };
+    var s = S[this.props.sync || 'synced'] || S.synced;
+    return { dot: s[0], dotBorder: s[1], l1: s[2], c1: s[3], l2: s[4], c2: s[5], l3: s[6], bd: s[7], bg: s[8], verMark: s[9], verColor: s[10] };
+  }
+}
+</script>
+</body>
+</html>

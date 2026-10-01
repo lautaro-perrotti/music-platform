@@ -175,6 +175,38 @@
       "x": 4520,
       "y": 996
     },
+    "Produce.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "P1 · Produce · ready to generate (interactive)",
+      "w": 1440,
+      "x": 0,
+      "y": -1560
+    },
+    "ProduceGenerating.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "P2 · Produce · generating in Ableton",
+      "w": 1440,
+      "x": 1520,
+      "y": -1560
+    },
+    "ProduceResults.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "P3 · Produce · 5 variations to preview",
+      "w": 1440,
+      "x": 3040,
+      "y": -1560
+    },
+    "ProduceUnavailable.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "P4 · Produce · backend not available (no simulation)",
+      "w": 1440,
+      "x": 4560,
+      "y": -1560
+    },
     "ProjectHome.dc.html": {
       "h": 900,
       "is_interactive": true,
@@ -238,6 +270,14 @@
       "w": 212,
       "x": 4520,
       "y": 128
+    },
+    "SidebarSimple.dc.html": {
+      "h": 788,
+      "is_interactive": true,
+      "title": "Component · Sidebar (Produce / Library / Settings)",
+      "w": 212,
+      "x": 6080,
+      "y": -1560
     },
     "States.dc.html": {
       "h": 1500,
@@ -333,44 +373,80 @@
       "x": 4560,
       "y": 9480
     },
-    "Produce.dc.html": {
+    "WorkspacePlan.dc.html": {
+      "x": -1600,
+      "y": -3200,
+      "w": 1440,
+      "h": 2700,
+      "title": "W0 · Audit, IA, components, realtime model, plan"
+    },
+    "Workspace.dc.html": {
       "x": 0,
-      "y": -1560,
+      "y": -3200,
       "w": 1440,
       "h": 900,
-      "title": "P1 · Produce · ready to generate (interactive)",
+      "title": "W1 · Project workspace · synced",
       "is_interactive": true
     },
-    "ProduceGenerating.dc.html": {
+    "WorkspaceSync.dc.html": {
       "x": 1520,
-      "y": -1560,
+      "y": -3200,
       "w": 1440,
       "h": 900,
-      "title": "P2 · Produce · generating in Ableton",
+      "title": "W2 · Ableton status popover",
       "is_interactive": true
     },
-    "ProduceResults.dc.html": {
+    "WorkspaceEdit.dc.html": {
       "x": 3040,
-      "y": -1560,
+      "y": -3200,
       "w": 1440,
       "h": 900,
-      "title": "P3 · Produce · 5 variations to preview",
+      "title": "W3 · Editing · 1 change syncing",
       "is_interactive": true
     },
-    "ProduceUnavailable.dc.html": {
+    "WorkspaceOps.dc.html": {
       "x": 4560,
-      "y": -1560,
+      "y": -3200,
       "w": 1440,
       "h": 900,
-      "title": "P4 · Produce · backend not available (no simulation)",
+      "title": "W4 · Operation center",
       "is_interactive": true
     },
-    "SidebarSimple.dc.html": {
+    "WorkspaceOffline.dc.html": {
       "x": 6080,
-      "y": -1560,
-      "w": 212,
-      "h": 788,
-      "title": "Component · Sidebar (Produce / Library / Settings)",
+      "y": -3200,
+      "w": 1440,
+      "h": 900,
+      "title": "W5 · Disconnected · cached read-only",
+      "is_interactive": true
+    },
+    "WorkspaceStates.dc.html": {
+      "x": 7600,
+      "y": -3200,
+      "w": 1440,
+      "h": 1180,
+      "title": "W6 · Trust, operations, progress"
+    },
+    "WSTopBar.dc.html": {
+      "x": 9120,
+      "y": -3200,
+      "w": 1440,
+      "h": 48,
+      "title": "Component · Workspace top bar (sync states)"
+    },
+    "WSTransport.dc.html": {
+      "x": 9120,
+      "y": -3072,
+      "w": 1440,
+      "h": 80,
+      "title": "Component · Transport + operation status"
+    },
+    "WSSidebar.dc.html": {
+      "x": 9120,
+      "y": -2912,
+      "w": 188,
+      "h": 772,
+      "title": "Component · Workspace modes",
       "is_interactive": true
     }
   },
@@ -464,14 +540,32 @@
       "y": 11820
     },
     "tp": {
-      "x": 0,
-      "y": -1820,
-      "text": "Produce · generate in Ableton, preview here",
       "kind": "title1",
-      "maxW": 6300
+      "maxW": 6300,
+      "text": "Produce · generate in Ableton, preview here",
+      "w": 240,
+      "x": 0,
+      "y": -1820
+    },
+    "tw": {
+      "x": -1600,
+      "y": -3460,
+      "text": "Workspace · the control layer above Ableton (foundation)",
+      "kind": "title1",
+      "maxW": 12160
     }
   },
   "order": [
+    "WorkspacePlan.dc.html",
+    "Workspace.dc.html",
+    "WorkspaceSync.dc.html",
+    "WorkspaceEdit.dc.html",
+    "WorkspaceOps.dc.html",
+    "WorkspaceOffline.dc.html",
+    "WorkspaceStates.dc.html",
+    "WSTopBar.dc.html",
+    "WSTransport.dc.html",
+    "WSSidebar.dc.html",
     "Produce.dc.html",
     "ProduceGenerating.dc.html",
     "ProduceResults.dc.html",

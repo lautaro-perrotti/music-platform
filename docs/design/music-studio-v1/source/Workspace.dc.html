@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;font-size:13.5px;overflow:hidden;position:relative">
+<div style="height:48px;flex-shrink:0"><dc-import name="WSTopBar" sync="{{sync}}" hint-size="1440px,48px"></dc-import></div>
+<div style="display:flex;height:772px;flex-shrink:0">
+<div style="width:188px;flex-shrink:0"><dc-import name="WSSidebar" active="project" hint-size="188px,772px"></dc-import></div>
+
+<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
+<div style="padding:16px 24px 12px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #222429">
+<div style="display:flex;align-items:center;gap:12px">
+<div role="radiogroup" aria-label="Semantic zoom" style="display:flex;padding:2px;border-radius:6px;background:#1D1F23;border:1px solid #2B2E34">
+<button role="radio" aria-checked="true" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:#34373D;font-size:12px">Song</button><button role="radio" aria-checked="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Section</button><button role="radio" aria-checked="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Bars</button><button role="radio" aria-checked="false" style="height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#8D8A85;font-size:12px">Events</button>
+</div>
+<span style="font-size:12px;color:#8D8A85">Zoom with <span style="font-family:'Geist Mono',monospace;border:1px solid #3A3D44;border-radius:4px;padding:0 5px">Z</span> / <span style="font-family:'Geist Mono',monospace;border:1px solid #3A3D44;border-radius:4px;padding:0 5px">X</span> on the selection</span>
+</div>
+<div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+<h1 style="margin:0;font-size:24px;font-weight:600;letter-spacing:-0.02em">Rhythm Ashanti</h1>
+<sc-for list="{{facts}}" as="f" hint-placeholder-count="6"><span style="font-size:12.5px;color:#B0ADA7;display:flex;align-items:baseline;gap:5px"><span style="font-family:{{f.font}}">{{f.v}}</span><span style="font-size:11px;color:{{f.mc}}">{{f.m}}</span></span></sc-for>
+</div>
+</div>
+
+<sc-if value="{{offline}}" hint-placeholder-val="{{false}}">
+<div role="status" style="margin:12px 24px 0;display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:#1D1F23;border:1px solid #34373D">
+<span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #8D8A85"></span>
+<span style="flex:1;font-size:13px"><b style="font-weight:600">Ableton disconnected.</b> <span style="color:#B0ADA7">Showing the last verified state from 12 s ago. Edits and playback are paused, and nothing is lost.</span></span>
+<button style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Reconnect</button>
+</div>
+</sc-if>
+
+<section aria-label="Arrangement" style="padding:14px 24px 6px;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85;flex:1">Arrangement</span><span style="font-size:11.5px;color:#8D8A85">sections from Ableton locators · <span style="color:{{markColor}}">{{markShort}}</span></span></div>
+<div style="position:relative;height:44px;display:flex;gap:2px">
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="8">
+<button style="width:{{s.w}}%;height:44px;border-radius:4px;border:1px solid {{s.bd}};background:{{s.bg}};color:{{s.fg}};font-size:12px;font-weight:{{s.fw}};text-align:left;padding:0 8px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;white-space:nowrap">{{s.l}}<span style="font-family:'Geist Mono',monospace;font-size:10px;color:#8D8A85;font-weight:400">{{s.bars}}</span></button>
+</sc-for>
+<div style="position:absolute;left:37.3%;top:-4px;bottom:-4px;width:2px;background:#5EC6D3;opacity:{{phOp}}"></div>
+</div>
+</section>
+
+<section aria-label="Tracks" style="flex:1;min-height:0;padding:10px 24px 0;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:8px;height:28px"><span style="font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85;flex:1">Tracks · 6 of 14</span><span style="font-size:11.5px;color:#8D8A85">Source = what was generated or recorded · Editable = what lives in Ableton</span></div>
+<sc-for list="{{tracks}}" as="t" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:12px;height:58px;border-bottom:1px solid #1F2125;opacity:{{t.op}}">
+<div style="width:250px;flex-shrink:0;display:flex;flex-direction:column;gap:3px;min-width:0">
+<span style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:2px;background:{{t.c}}"></span><span style="font-size:13px;font-weight:600">{{t.n}}</span><span style="font-size:10.5px;color:#8D8A85;border:1px solid #2B2E34;border-radius:3px;padding:0 4px">{{t.role}}</span></span>
+<span style="font-size:11.5px;color:#8D8A85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{t.rep}}</span>
+</div>
+<div style="flex:1;min-width:0;position:relative;height:30px;background:#141518;border-radius:4px">
+<sc-for list="{{t.blocks}}" as="b" hint-placeholder-count="2"><div style="position:absolute;left:{{b.a}}%;width:{{b.w}}%;top:4px;bottom:4px;border-radius:3px;background:{{t.fill}};border:1px {{b.bs}} {{b.bc}}"></div></sc-for>
+<div style="position:absolute;left:37.3%;top:0;bottom:0;width:1px;background:#5EC6D3;opacity:{{phOp}}"></div>
+</div>
+<span style="width:96px;flex-shrink:0;text-align:right;font-size:11.5px;color:{{t.mc}}">{{t.mark}}</span>
+</div>
+</sc-for>
+</section>
+</main>
+
+<aside aria-label="Inspector" style="width:320px;flex-shrink:0;border-left:1px solid #26292E;background:#141518;padding:16px 16px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8D8A85">Section</span><span style="font-size:18px;font-weight:600">Drop 2</span><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#8D8A85">bars 65–97 · 2:00–3:00 · 32 bars</span></div>
+<div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:6px;background:#17181B;border:1px solid #26292E;font-size:12.5px">
+<span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#8D8A85">IN ABLETON</span>
+<div style="display:flex;justify-content:space-between"><span style="color:#B0ADA7">Locator “Drop 2” @ bar 65</span><span style="color:{{markColor}}">{{markShort}}</span></div>
+<div style="display:flex;justify-content:space-between"><span style="color:#B0ADA7">9 arrangement clips</span><span style="color:{{markColor}}">{{markShort}}</span></div>
+<span style="font-size:11px;color:#8D8A85">{{verifiedNote}}</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:6px"><span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#8D8A85;flex:1">HARMONY</span><span style="font-size:10.5px;color:#8D8A85;font-style:italic">inferred</span></div>
+<div style="display:flex;gap:3px"><span style="flex:1;height:30px;border-radius:4px;background:#1D1F23;border:1px solid #2B2E34;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:500">Fm9</span><span style="flex:1;height:30px;border-radius:4px;background:#1D1F23;border:1px solid #2B2E34;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:500">Dbmaj7</span><span style="flex:1;height:30px;border-radius:4px;background:#1D1F23;border:1px solid #2B2E34;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:500">Ab</span><span style="flex:1;height:30px;border-radius:4px;background:#1D1F23;border:1px solid #2B2E34;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:500">Eb</span></div>
+<div style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:62px">F minor</span><div style="flex:1;height:4px;border-radius:2px;background:#2B2E34"><div style="width:68%;height:4px;border-radius:2px;background:#B0ADA7"></div></div><span style="font-family:'Geist Mono',monospace;color:#8D8A85;width:30px;text-align:right">68%</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="width:62px;color:#8D8A85">Ab major</span><div style="flex:1;height:4px;border-radius:2px;background:#2B2E34"><div style="width:25%;height:4px;border-radius:2px;background:#5A5D64"></div></div><span style="font-family:'Geist Mono',monospace;color:#8D8A85;width:30px;text-align:right">25%</span></div>
+</div>
+<div style="display:flex;gap:6px"><button disabled="{{offline}}" style="height:26px;padding:0 9px;border-radius:5px;background:#24262B;border:1px solid #34373D;font-size:11.5px">Accept</button><button disabled="{{offline}}" style="height:26px;padding:0 9px;border-radius:5px;background:#24262B;border:1px solid #34373D;font-size:11.5px">Correct</button><button style="height:26px;padding:0 9px;border-radius:5px;background:transparent;border:1px solid transparent;color:#8D8A85;font-size:11.5px">Why?</button></div>
+</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#8D8A85">PROVENANCE</span>
+<sc-for list="{{prov}}" as="p" hint-placeholder-count="5"><div style="display:flex;gap:8px;align-items:flex-start;font-size:12px"><span style="width:10px;display:flex;flex-direction:column;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:{{p.c}};margin-top:4px"></span></span><span style="flex:1;color:#B0ADA7">{{p.t}}</span><span style="font-size:11px;color:#8D8A85">{{p.who}}</span></div></sc-for>
+</div>
+<div style="margin-top:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px">
+<button style="height:32px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Zoom into bars</button>
+<button disabled="{{offline}}" style="height:32px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px;opacity:{{wOp}}">Generate variation</button>
+<button style="height:32px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px">Compare A/B</button>
+<button disabled="{{offline}}" style="height:32px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12.5px;opacity:{{wOp}}">Lock section</button>
+</div>
+</aside>
+</div>
+<div style="height:80px;flex-shrink:0"><dc-import name="WSTransport" readonly="{{offline}}" ops="{{opsMode}}" hint-size="1440px,80px"></dc-import></div>
+
+<sc-if value="{{showOps}}" hint-placeholder-val="{{false}}">
+<section aria-label="Operations" style="position:absolute;left:188px;right:0;bottom:80px;height:330px;background:#1B1C20;border-top:1px solid #3A3D44;box-shadow:0 -16px 40px rgba(0,0,0,0.45);display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:10px;height:42px;padding:0 20px;border-bottom:1px solid #2B2E34"><span style="font-size:13px;font-weight:600;flex:1">Operations</span><span style="font-size:12px;color:#8D8A85">Each kind of work shows the progress it can actually measure</span><a href="Workspace.dc.html" aria-label="Close" style="color:#8D8A85;font-size:16px">×</a></div>
+<div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+<sc-for list="{{ops}}" as="o" hint-placeholder-count="5">
+<div style="display:flex;align-items:center;gap:14px;min-height:52px;padding:6px 20px;border-bottom:1px solid #222429">
+<span style="width:14px;font-size:12px;color:{{o.c}}">{{o.g}}</span>
+<div style="width:260px;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-weight:500">{{o.t}}</span><span style="font-size:11.5px;color:#8D8A85">{{o.scope}}</span></div>
+<div style="flex:1;display:flex;flex-direction:column;gap:5px">
+<span style="font-size:12px;color:{{o.pc}}">{{o.p}}</span>
+<sc-if value="{{o.bar}}" hint-placeholder-val="{{false}}"><div style="height:3px;border-radius:2px;background:#2B2E34"><div style="width:{{o.bar}}%;height:3px;border-radius:2px;background:#5EC6D3"></div></div></sc-if>
+</div>
+<span style="width:150px;text-align:right;font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">{{o.time}}</span>
+<sc-if value="{{o.act}}" hint-placeholder-val="{{false}}"><button style="height:28px;padding:0 10px;border-radius:6px;background:#24262B;border:1px solid #34373D;font-size:12px">{{o.act}}</button></sc-if>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{showSync}}" hint-placeholder-val="{{false}}">
+<section aria-label="Ableton status" style="position:absolute;right:52px;top:52px;width:400px;background:#1B1C20;border:1px solid #3A3D44;border-radius:10px;box-shadow:0 20px 48px rgba(0,0,0,0.55);display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #2B2E34"><span style="width:9px;height:9px;border-radius:50%;background:#5CC08C"></span><b style="font-size:14px;font-weight:600;flex:1">Ableton Live 12 · Synced</b><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#8D8A85">18 ms</span></div>
+<div style="padding:8px 16px;display:flex;flex-direction:column">
+<sc-for list="{{syncRows}}" as="r" hint-placeholder-count="6"><div style="display:flex;justify-content:space-between;align-items:center;height:32px;border-bottom:1px solid #222429;font-size:12.5px"><span style="color:#8D8A85">{{r.k}}</span><span style="color:{{r.c}}">{{r.v}}</span></div></sc-for>
+</div>
+<div style="padding:4px 16px 12px;display:flex;flex-direction:column;gap:8px">
+<span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:#8D8A85">LAST EDIT · ROUND TRIP</span>
+<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px"><div style="width:6%;background:#5A5D64"></div><div style="width:44%;background:#5EC6D3"></div><div style="width:50%;background:#5CC08C"></div></div>
+<div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85"><span>send 5 ms</span><span>apply 37 ms</span><span>verify 42 ms</span><span style="color:#EDEBE7">84 ms</span></div>
+</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 14px;border-top:1px solid #2B2E34">
+<span style="font-size:11px;color:#5CC08C;border:1px solid #2C4533;border-radius:4px;padding:2px 6px">● Synced</span><span style="font-size:11px;color:#5EC6D3;border:1px solid #2F4A4E;border-radius:4px;padding:2px 6px">● Syncing</span><span style="font-size:11px;color:#E2BE5A;border:1px solid #3F3822;border-radius:4px;padding:2px 6px">◷ Stale</span><span style="font-size:11px;color:#E2BE5A;border:1px solid #3F3822;border-radius:4px;padding:2px 6px">◐ Degraded</span><span style="font-size:11px;color:#B0ADA7;border:1px solid #34373D;border-radius:4px;padding:2px 6px">○ Disconnected</span>
+</div>
+</section>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"state":{"editor":"enum","options":["synced","syncing","disconnected","ops","sync"],"default":"synced"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var st = this.props.state || 'synced';
+    var offline = st === 'disconnected', syncing = st === 'syncing';
+    var OK = '#5CC08C', N = '#8D8A85', CUE = '#5EC6D3';
+    var mark = offline ? ['◷ stale', N] : ['✓ verified', OK];
+    var S = [['Intro', 0, 9, '1–16'], ['Groove', 9, 18, '17–32'], ['Drop', 18, 27, '33–48'], ['Break', 27, 31.6, '49'], ['Build', 31.6, 36.1, '57'], ['Drop 2', 36.1, 54.2, '65–97'], ['Groove B', 54.2, 81.3, '97–144'], ['Outro', 81.3, 100, '145–177']];
+    function blk(a, b, pending) { return { a: a, w: b - a, bs: pending ? 'dashed' : 'solid', bc: pending ? CUE : 'transparent' }; }
+    var T = [
+      ['Drums', 'Drums', '#D98A5B', 'Source · drums stem  →  Editable · drum MIDI', [blk(9, 27), blk(31.6, 81.3)], 'verified'],
+      ['Bass', 'Bass', '#6FA0E6', 'Source · bass stem  →  Editable · bass MIDI', [blk(9, 27), blk(36.1, 54.2, syncing), blk(54.2, 81.3)], syncing ? 'pending' : 'verified'],
+      ['Keys', 'Harmony', '#A9C46A', 'Editable · Rhodes MIDI (yours)', [blk(0, 100)], 'user'],
+      ['Conga layer', 'Perc', '#D98A5B', 'Copilot track · added in v8', [blk(36.1, 54.2)], 'verified'],
+      ['Other', 'FX', '#A09AC8', 'Source · other stem', [blk(18, 27), blk(31.6, 54.2)], 'inferred'],
+      ['Vocals', 'Vocals', '#D68CB2', 'No vocals in this version', [], 'none']
+    ];
+    var M = { verified: mark, pending: ['syncing…', CUE], user: offline ? mark : ['✓ yours', OK], inferred: ['inferred 74%', N], none: ['—', N] };
+    var ops = [
+      { g: '●', c: CUE, t: 'Generating candidate 4', scope: 'Generate · provider', p: 'Generating audio · no measurable progress from provider', pc: '#B0ADA7', bar: false, time: '12.8 s · usually 20–30 s', act: 'Cancel' },
+      { g: '●', c: CUE, t: 'Separating stems', scope: 'Candidate B · 4 stems', p: 'bass ✓  drums ✓  vocals …  other ○', pc: '#B0ADA7', bar: 50, time: '2 / 4', act: false },
+      { g: '◐', c: CUE, t: 'Importing into Ableton', scope: 'Conga layer → Working Copy', p: 'Applied · waiting for readback', pc: '#B0ADA7', bar: false, time: '1.1 s', act: false },
+      { g: '✓', c: OK, t: 'Moved bass note', scope: 'Bass · bar 66 · F2 → Ab2', p: 'Verified in Ableton', pc: OK, bar: false, time: 'apply 37 ms · 92 ms', act: 'Undo' },
+      { g: '!', c: '#F08A4B', t: 'Change not applied', scope: 'Keys · bar 70', p: 'The Keys clip changed in Ableton before this edit was verified.', pc: '#F0A67A', bar: false, time: '3 s ago', act: 'Inspect change' }
+    ];
+    return {
+      sync: offline ? 'disconnected' : syncing ? 'syncing' : 'synced',
+      offline: offline, showOps: st === 'ops', showSync: st === 'sync', opsMode: st === 'ops' ? 'busy' : syncing ? 'busy' : st === 'synced' ? 'verified' : 'idle',
+      markShort: mark[0], markColor: mark[1], phOp: offline ? 0.3 : 1, wOp: offline ? 0.45 : 1,
+      verifiedNote: offline ? 'Last verified 12 s ago · read-only' : 'Last verified 2 s ago by readback',
+      facts: [
+        { v: '128.00 BPM', m: offline ? '◷' : '✓', mc: offline ? N : OK, font: "'Geist Mono',monospace" },
+        { v: 'F minor', m: 'inferred 68%', mc: N, font: 'inherit' },
+        { v: '4/4', m: offline ? '◷' : '✓', mc: offline ? N : OK, font: "'Geist Mono',monospace" },
+        { v: '5:32', m: '', mc: N, font: "'Geist Mono',monospace" },
+        { v: '14 tracks', m: offline ? '◷' : '✓', mc: offline ? N : OK, font: 'inherit' },
+        { v: 'Hearing v8 in Live', m: '', mc: N, font: 'inherit' }
+      ],
+      sections: S.map(function (s) { var on = s[0] === 'Drop 2'; return { l: s[0], w: s[2] - s[1], bars: s[3], bg: on ? '#1E3437' : '#17181B', bd: on ? CUE : '#26292E', fg: on ? '#EDEBE7' : '#B0ADA7', fw: on ? '600' : '500' }; }),
+      tracks: T.map(function (t) { var m = M[t[5]]; return { n: t[0], role: t[1], c: t[2], rep: t[3], blocks: t[4], mark: m[0], mc: m[1], fill: t[2] + '33', op: t[5] === 'none' ? 0.5 : 1 }; }),
+      prov: [
+        { t: 'Eleven Music · candidate B', who: 'provider', c: '#6A6D73' },
+        { t: 'Selected · kept as v7', who: 'you', c: '#ECE8E1' },
+        { t: 'Drop 2 variation · v8', who: 'Lucas', c: '#D9B98F' },
+        { t: 'Applied to Working Copy', who: 'Core', c: '#6A6D73' },
+        { t: offline ? 'Readback · 12 s ago' : 'Readback verified', who: 'Ableton', c: offline ? N : OK }
+      ],
+      ops: ops,
+      syncRows: [
+        { k: 'Bridge', v: 'Remote Script · handshake OK', c: '#EDEBE7' }, { k: 'Project', v: 'Rhythm Ashanti - Working Copy', c: '#EDEBE7' },
+        { k: 'Last verified', v: '2 s ago', c: OK }, { k: 'Pending operations', v: 'none', c: '#EDEBE7' },
+        { k: 'Round trip (median)', v: '18 ms', c: '#EDEBE7' }, { k: 'Audio capture', v: '4 sources + Main available', c: '#EDEBE7' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

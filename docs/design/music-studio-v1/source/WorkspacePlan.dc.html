@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workspace audit and plan</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+</style>
+</helmet>
+<div style="width:1440px;height:2700px;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;padding:56px 64px;display:flex;flex-direction:column;gap:36px;overflow:hidden">
+<div style="display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Phase 1 · audit and plan</span>
+<h1 style="margin:0;font-size:34px;font-weight:600;letter-spacing:-0.02em;max-width:1100px">The intelligence and control layer above Ableton</h1>
+<p style="margin:0;font-size:15px;line-height:1.6;color:#B0ADA7;max-width:1050px">Ableton is the engine and the authoritative state. This app understands the music, represents it, lets you control it and shows how much to trust every value. This iteration covers the audit, the plan and the foundation: shell, realtime Ableton status, the Project workspace, and the trust and operation model. Generation screens come later.</p>
+</div>
+
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="7">
+<section style="display:grid;grid-template-columns:260px minmax(0,1fr);gap:32px;border-top:1px solid #26292E;padding-top:24px">
+<div style="display:flex;flex-direction:column;gap:6px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#5EC6D3">{{s.k}}</span><h2 style="margin:0;font-size:19px;font-weight:600">{{s.t}}</h2></div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{s.items}}" as="i" hint-placeholder-count="5">
+<div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;font-size:13.5px;line-height:1.55;padding:6px 0;border-bottom:1px solid #1C1E22"><span style="font-weight:500;color:{{i.c}}">{{i.a}}</span><span style="color:#B0ADA7;white-space:pre-line">{{i.b}}</span></div>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2700}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var W = '#EDEBE7', K = '#5CC08C', A = '#E2BE5A', R = '#F08A4B';
+    function s(k, t, rows) { return { k: k, t: t, items: rows.map(function (r) { return { a: r[0], b: r[1], c: r[2] || W }; }) }; }
+    return { sections: [
+      s('A', 'UI audit', [
+        ['Keep · visual language', 'The dark Control Room system, ivory primary, cue for live and selection, glyph + word + color states, and Geist / Geist Mono all suit a 10-hour studio tool. Keep them.', K],
+        ['Keep · trust ideas', 'Lucas (judgment) vs Core (measured), progressive disclosure, Apply review → readback → rollback, In doubt with Inspect / Reconcile, and blind stem review. These already point at trust.', K],
+        ['Keep · Produce', '“Generate in Ableton, preview here” and the honest capability states (no simulation). This becomes the Generate mode of the workspace.', K],
+        ['Gap · fragmentation', '40+ separate screens. Project, Studio, Stems, Versions and Analysis each re-explain the song. The brief asks for one coherent workspace.', A],
+        ['Gap · no realtime model', 'The Live pill was static. No sync states, latency, pending vs verified per object, transport mirroring or conflict model.', A],
+        ['Gap · no musical objects', 'We show waveforms and sections, but no notes, hits, chords or events you can select. No inspector for an event, no source correspondence, no semantic zoom.', A],
+        ['Gap · confidence', 'Measured badges exist, but there is no consistent way to show inferred vs verified vs user-verified on every value.', A],
+        ['Code reality', 'Web Components, no build (src/copilot/studio/static/ui). Real today: session probe, reference analysis, track/region capture, SafeWrite, CREATE_TRACK. Missing: selection read, MIDI write certification, N-variation planner, realtime state push, transport read API.', R]
+      ]),
+      s('B', 'Information architecture', [
+        ['One workspace', 'Top bar (project / version / command / Ableton status) · left modes · center musical canvas · right inspector · bottom transport + operations. Panels collapse and resize, and there is a focus mode.'],
+        ['Modes (left)', 'Project · Generate · Arrangement · Tracks · Harmony · Versions · Analysis. Library, Settings and Advanced / Debug sit below. Old screens survive as Debug until replaced.'],
+        ['Semantic zoom', 'Song → Section → Track / Clip → Bars → Events → Note / Transient. The same canvas changes density. The inspector always describes the current selection.'],
+        ['Selection is the hub', 'Selecting anything (section, track, bar range, note, hit, chord) drives the inspector, the AI scope, the context menu and A/B.']
+      ]),
+      s('C', 'Component map', [
+        ['New · foundation', 'SyncStatus · OperationStatus · OperationCenter · TrustMark · ConfidenceIndicator · Transport (mirrors Live, read-only state) · SectionStrip · TrackRow (Source → Editable) · InspectorSection · ProvenanceChain'],
+        ['Evolve existing', 'ms-player → Transport · ms-jobs-panel + ms-stage-list → OperationCenter · ms-section-ruler / ms-timeline → SectionStrip / Timeline · ms-inspector → Inspector · ms-version-lineage → VersionItem · ms-plan-card → DiffView · ms-candidate-card stays'],
+        ['Later phases', 'MusicalEvent · DrumCell · PianoEvent · ChordBlock · EvidencePanel · ScopeIndicator · LockToggle · ContextMenu']
+      ]),
+      s('D', 'Interaction model', [
+        ['Direct = AI', 'Dragging a kick and asking “move kick 2 later” produce the same typed operation. AI never mutates directly; it produces a DiffView with Preview / Apply / Reject and an explicit scope + preserved locks.'],
+        ['Optimistic edits', 'Edits render instantly as Pending, Ableton confirms, and the mark becomes ✓. On reject the value reverts with a reason. The UI never blocks.'],
+        ['Keyboard', 'Space play/stop · Ctrl K palette · Z/X zoom · 1–7 modes · A/B compare · Esc clear selection. App undo is its own history and does not override browser shortcuts.'],
+        ['Manual Live edits', 'Routine changes update quietly and are logged in Activity. A change that collides with a pending edit becomes a Conflict.']
+      ]),
+      s('E', 'Realtime state model', [
+        ['Connection', 'synced · syncing(n pending) · stale(age) · degraded(latency) · disconnected(last_verified_at). Disconnected = cached read-only workspace and writes disabled. Never wipe the view.'],
+        ['Object trust', 'VERIFIED · INFERRED(confidence, evidence) · USER_VERIFIED · PENDING(op_id) · STALE(age) · CONFLICT(op_id, live_value)'],
+        ['Operation', 'pending → sending → applied → verifying → confirmed | failed(reason) | conflict(diff) | rolled_back(readback). Progress = measured(count/bytes) | phase(name, elapsed, expected_range) | instant'],
+        ['Typed messages', 'bridge.status · project.snapshot(gen) · transport.tick(bar, beat, playing, tempo) · entity.changed(source: live_manual | platform, gen) · op.update(op_id, stage, timing). Generation counters, not timestamps, decide freshness (AGENTS.md).'],
+        ['Backend needed', 'A push channel for these messages. Today there are only job SSE events and a polled readiness probe, so the transport and entity streams have no API yet. Design shows them; build waits for the contract.', R]
+      ]),
+      s('F', 'Visual direction', [
+        ['Same system, more precise', 'Keep Control Room. Density is like an IDE or Resolve: 13.5 px body, 11 px labels and mono for musical positions (66.3.2), times and pitches.'],
+        ['Quiet trust', 'Verified = small ✓ in muted green · Inferred = italic value + % in grey · Pending = cue dashed outline + “syncing…” · Stale = dimmed + ◷ · Conflict = the only loud state (orange).'],
+        ['Motion', 'Only for state: pending → ✓ fade, playhead, inserted events, panel collapse. No decorative motion.']
+      ]),
+      s('G', 'Implementation plan', [
+        ['Now (this board row)', 'Phase 2 shell · Phase 3 realtime status (top bar states, sync popover, disconnected read-only) · Phase 4 Project workspace · operation + trust model.', K],
+        ['Next', 'Phase 5 musical detail: Bars / Events zoom, drum grid, bass piano view, waveform with transients. Phase 6 inspector for events + provenance + confidence + correction.'],
+        ['Then', 'Phase 7 AI proposals as DiffView with scope and locks · Phase 8 versions and A/B · Phase 9 operation center polish · Phase 10 performance (virtualized rows, no full re-render per transport tick) and accessibility.'],
+        ['Code order', 'Typed message contract and fixtures first → SyncStatus + Transport (read-only from the probe) → TrackRow / SectionStrip from snapshot() → optimistic op model wired to SafeWrite. One reviewable step at a time.']
+      ])
+    ] };
+  }
+}
+</script>
+</body>
+</html>

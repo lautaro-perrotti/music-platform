@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trust and operation states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1012}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit}
+</style>
+</helmet>
+<div style="width:1440px;height:1180px;background:#0F1012;font-family:Geist,system-ui,sans-serif;color:#EDEBE7;padding:48px 56px;display:flex;flex-direction:column;gap:34px;overflow:hidden">
+<div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Realtime foundation</span><h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-0.02em">Trust, operations and progress</h1><p style="margin:0;font-size:14px;color:#B0ADA7;max-width:900px;line-height:1.55">Every musical object shows two things: what it is and how sure we are. The marks stay quiet when things are fine, and only conflicts are loud.</p></div>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Trust states · same note, six states</h2>
+<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px">
+<sc-for list="{{trust}}" as="t" hint-placeholder-count="6">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px">
+<div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:5px;background:{{t.bg}};border:1px {{t.bs}} {{t.bc}};opacity:{{t.op}}"><span style="font-family:'Geist Mono',monospace;font-size:14px;font-weight:500;font-style:{{t.it}}">Ab2</span><span style="flex:1"></span><span style="font-size:11.5px;color:{{t.mc}}">{{t.mark}}</span></div>
+<span style="font-size:12.5px;font-weight:600">{{t.name}}</span>
+<span style="font-size:12px;color:#8D8A85;line-height:1.45">{{t.d}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8D8A85">Operation lifecycle · a direct edit (drag F2 → Ab2)</h2>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:0">
+<sc-for list="{{life}}" as="l" hint-placeholder-count="5">
+<div style="flex:1;display:flex;flex-direction:column;gap:6px"><div style="height:4px;background:{{l.c}};border-radius:2px;margin-right:4px"></div><span style="font-size:13px;font-weight:500;color:{{l.tc}}">{{l.n}}</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8D8A85">{{l.t}}</span><span style="font-size:11.5px;color:#8D8A85">{{l.d}}</span></div>
+</sc-for>
+</div>
+<div style="display:flex;gap:10px;font-size:12px;color:#B0ADA7"><span style="color:#8D8A85">If it fails:</span><span style="color:#EF6A5F">✕ Failed · revert to F2, show the reason</span><span style="color:#F08A4B">! Conflict · Ableton changed underneath, so don't apply</span><span style="color:#E2BE5A">↺ Rolled back · readback differed, so F2 is restored</span></div>
+<div style="font-size:12px;color:#8D8A85">The UI updates the note instantly. Only the mark changes as Ableton confirms. Nothing freezes, and edits to other notes go on in parallel when they don't depend on this result.</div>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#8D8A85">MEASURABLE PROGRESS</span>
+<span style="font-size:14px;font-weight:600">Separating stems</span>
+<span style="font-size:12.5px;color:#B0ADA7">bass ✓ · drums ✓ · vocals … · other ○</span>
+<div style="height:4px;border-radius:2px;background:#2B2E34"><div style="width:50%;height:4px;border-radius:2px;background:#5EC6D3"></div></div>
+<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">2 / 4 stems</span>
+<span style="font-size:11.5px;color:#8D8A85">Use a count or bytes only when the backend actually reports it.</span>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#8D8A85">UNKNOWN PROGRESS</span>
+<span style="font-size:14px;font-weight:600">Generating candidate 4</span>
+<span style="font-size:12.5px;color:#5EC6D3">● Generating audio</span>
+<span style="font-family:'Geist Mono',monospace;font-size:13px">14.2 s elapsed</span>
+<span style="font-size:12px;color:#8D8A85">Usually 18–25 s, based on your last 20 runs</span>
+<span style="font-size:11.5px;color:#8D8A85">Shows the phase, elapsed time and historical range. Never a fake percentage.</span>
+</div>
+<div style="background:#17181B;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#8D8A85">INSTANT EDITS</span>
+<span style="font-size:14px;font-weight:600">Move a note</span>
+<span style="font-size:12.5px;color:#B0ADA7">Under 300 ms: no progress UI, the mark just turns ✓.</span>
+<span style="font-size:12.5px;color:#E2BE5A">Over 1 s: “Ableton is taking longer than usual…”</span>
+<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8D8A85">send 5 · apply 37 · verify 42 · 84 ms</span>
+<span style="font-size:11.5px;color:#8D8A85">Timing breakdown lives in the sync popover and Debug.</span>
+</div>
+</section>
+
+<section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+<div style="background:#141518;border:1px solid #26292E;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#8D8A85">REALITY VS DESIRED · INSPECTOR</span>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+<div style="padding:12px;border-radius:6px;background:#17181B;border:1px solid #26292E;display:flex;flex-direction:column;gap:4px"><span style="font-size:10.5px;letter-spacing:.06em;color:#8D8A85">CURRENT IN ABLETON</span><span style="font-family:'Geist Mono',monospace;font-size:18px">F2</span><span style="font-size:12px;color:#5CC08C">✓ Verified · 17.3.1</span></div>
+<div style="padding:12px;border-radius:6px;background:#16211F;border:1px dashed #5EC6D3;display:flex;flex-direction:column;gap:4px"><span style="font-size:10.5px;letter-spacing:.06em;color:#8D8A85">PROPOSED</span><span style="font-family:'Geist Mono',monospace;font-size:18px">Ab2</span><span style="font-size:12px;color:#5EC6D3">Pending · not sent</span></div>
+</div>
+<div style="font-size:12px;color:#B0ADA7;line-height:1.55"><b style="color:#EDEBE7;font-weight:500">Undo is two different things.</b> Undoing a local pending edit just discards it. Undoing a verified change creates a new Ableton transaction that is applied, read back and verified like any other.</div>
+</div>
+<div style="background:#1F1813;border:1px solid #5A3B28;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#F08A4B">CONFLICT</span>
+<span style="font-size:14px;font-weight:600">Could not apply change</span>
+<span style="font-size:12.5px;color:#D1C3B6;line-height:1.5">The Bass clip changed in Ableton before this edit was verified. Your edit (F2 → Ab2) was not applied. Ableton’s version is shown.</span>
+<div style="display:flex;gap:8px"><button style="height:30px;padding:0 12px;border-radius:6px;background:#ECE8E1;color:#141518;border:0;font-weight:600;font-size:12.5px">Inspect change</button><button style="height:30px;padding:0 12px;border-radius:6px;background:#2A211B;border:1px solid #5A3B28;font-size:12.5px">Re-apply on top</button><button style="height:30px;padding:0 12px;border-radius:6px;background:transparent;border:0;color:#B0ADA7;font-size:12.5px">Refresh</button></div>
+<span style="font-size:11.5px;color:#8D8A85">Changes you make directly in Ableton update the workspace quietly. They go in Activity, not in toasts, unless they collide with a pending edit.</span>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var T = [
+      ['Verified', '✓', '#5CC08C', 'Ableton read it back and it matches.', '#1D1F23', 'solid', '#2B2E34', 1, 'normal'],
+      ['Inferred', 'inferred 74%', '#8D8A85', 'The system thinks so. Accept, correct or inspect the evidence.', '#1D1F23', 'dotted', '#4A4C52', 1, 'italic'],
+      ['User verified', '✓ yours', '#B0ADA7', 'You confirmed or corrected it. It overrides inference.', '#1D1F23', 'solid', '#2B2E34', 1, 'normal'],
+      ['Pending', 'syncing…', '#5EC6D3', 'Shown immediately, not yet confirmed by Ableton.', '#16211F', 'dashed', '#5EC6D3', 1, 'normal'],
+      ['Stale', '◷ 12 s', '#8D8A85', 'Last known value while Ableton is unreachable.', '#17181B', 'solid', '#26292E', 0.6, 'normal'],
+      ['Conflict', '! changed', '#F08A4B', 'Ableton changed underneath a pending edit.', '#1F1813', 'solid', '#F08A4B', 1, 'normal']
+    ];
+    var L = [['Pending', '0 ms', 'shown in UI', '#5EC6D3'], ['Sending', '5 ms', 'one typed op', '#5EC6D3'], ['Applied', '37 ms', 'Live accepted', '#5EC6D3'], ['Verifying', '79 ms', 'readback', '#5EC6D3'], ['Confirmed', '84 ms', '✓ verified', '#5CC08C']];
+    return {
+      trust: T.map(function (t) { return { name: t[0], mark: t[1], mc: t[2], d: t[3], bg: t[4], bs: t[5], bc: t[6], op: t[7], it: t[8] }; }),
+      life: L.map(function (l) { return { n: l[0], t: l[1], d: l[2], c: l[3], tc: l[0] === 'Confirmed' ? '#5CC08C' : '#EDEBE7' }; })
+    };
+  }
+}
+</script>
+</body>
+</html>
