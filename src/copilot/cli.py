@@ -73,6 +73,7 @@ CANONICAL_COMMANDS = (
     "producer-analyze",
     "producer-run",
     "produce-tech-house",
+    "sample-library",
     "cross-project-validate",
     "import-project",
     "regression-v1",
@@ -90,6 +91,7 @@ Canonical supported envelope:
   project-bootstrap
   producer-analyze         (low-level debug path; prefer analyze-project)
   producer-run --mode analyze|autonomous
+  sample-library list|add <explicit-directory>|remove <directory>|index
   cross-project-validate
   regression-v1
   capabilities
@@ -153,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             "analyze-project",
             "producer-run",
             "produce-tech-house",
+            "sample-library",
             "cross-project-validate",
             "import-project",
             "install",
@@ -447,6 +450,8 @@ def main(argv: list[str] | None = None) -> int:
             reference=args.reference,
             allow_ui_save=args.allow_ui_save,
         )
+    if args.command == "sample-library":
+        return _sample_library_command(args.eval_argv)
     if args.command == "cross-project-validate":
         return _cross_project_validate(evidence, logger)
     if args.command == "import-project":
@@ -2842,6 +2847,99 @@ def _produce_tech_house(
         run_dir.mkdir(parents=True, exist_ok=True)
         atomic_write(run_dir / "report.json", report)
         print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
+
+
+def _sample_library_command(argv: list[str]) -> int:
+    """Manage and index only explicitly configured local library roots."""
+    import argparse
+
+    from copilot.sample_library.config import (
+        add_root,
+        config_path,
+        index_path,
+        load_config,
+        remove_root,
+    )
+
+    parser = argparse.ArgumentParser(prog="copilot sample-library")
+    subparsers = parser.add_subparsers(dest="action", required=True)
+    subparsers.add_parser("list", help="show configured roots and local index")
+    add_parser = subparsers.add_parser("add", help="add one explicit directory root")
+    add_parser.add_argument("path")
+    remove_parser = subparsers.add_parser("remove", help="remove one configured root")
+    remove_parser.add_argument("path")
+    subparsers.add_parser("index", help="index configured roots into the user config directory")
+    args = parser.parse_args(argv)
+    config_file = config_path()
+    try:
+        if args.action == "list":
+            config = load_config(config_file)
+            roots = [
+                {"path": root, "available": Path(root).is_dir()}
+                for root in config.roots
+            ]
+            print(json.dumps({
+                "status": "CONFIGURED" if roots else "NO_ROOTS_CONFIGURED",
+                "config_path": str(config_file),
+                "index_path": str(index_path()),
+                "roots": roots,
+                "disk_scan": False,
+            }, indent=2, ensure_ascii=False))
+            return 0
+        if args.action == "add":
+            config, added = add_root(Path(args.path), path=config_file)
+            print(json.dumps({
+                "status": "ROOT_ADDED" if added else "ROOT_ALREADY_CONFIGURED",
+                "config_path": str(config_file),
+                "roots": config.roots,
+                "disk_scan": False,
+            }, indent=2, ensure_ascii=False))
+            return 0
+        if args.action == "remove":
+            config, removed = remove_root(Path(args.path), path=config_file)
+            print(json.dumps({
+                "status": "ROOT_REMOVED" if removed else "ROOT_NOT_CONFIGURED",
+                "config_path": str(config_file),
+                "roots": config.roots,
+                "disk_scan": False,
+            }, indent=2, ensure_ascii=False))
+            return 0 if removed else 2
+
+        config = load_config(config_file)
+        if not config.roots:
+            print(json.dumps({
+                "status": "BLOCKED",
+                "error": "SAMPLE_LIBRARY_NO_ROOTS_CONFIGURED",
+                "next_command": "copilot sample-library add <explicit-directory>",
+                "disk_scan": False,
+            }, indent=2, ensure_ascii=False))
+            return 2
+        roots = [Path(root) for root in config.roots]
+        missing = [str(root) for root in roots if not root.is_dir()]
+        if missing:
+            print(json.dumps({
+                "status": "BLOCKED",
+                "error": "SAMPLE_LIBRARY_CONFIGURED_ROOT_UNAVAILABLE",
+                "missing_roots": missing,
+                "disk_scan": False,
+            }, indent=2, ensure_ascii=False))
+            return 2
+
+        from copilot.sample_library.library_v1 import index_library
+
+        destination = index_path()
+        result = index_library(roots, destination)
+        print(json.dumps({
+            "status": "INDEXED",
+            "index_path": str(destination),
+            "roots": [str(root.resolve()) for root in roots],
+            **result,
+            "disk_scan": False,
+        }, indent=2, ensure_ascii=False))
+        return 0
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"status": "ERROR", "error": str(exc)}, indent=2, ensure_ascii=False))
+        return 2
 
 
 def _doctor(evidence: Path, logger) -> int:
