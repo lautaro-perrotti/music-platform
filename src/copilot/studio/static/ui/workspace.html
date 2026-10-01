@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Music Studio workspace: the control layer above Ableton (mock data)">
+<title>Workspace · Music Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#0F1012;color:#EDEBE7;font-family:Geist,system-ui,sans-serif;font-size:13.5px}
+*{box-sizing:border-box}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid #5EC6D3;outline-offset:2px}
+#app{height:100%;display:grid;grid-template-rows:48px minmax(0,1fr) 80px;min-width:1100px}
+.ws-body{display:grid;grid-template-columns:188px minmax(0,1fr) 320px;min-height:0;position:relative}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/ui/workspace.js"></script>
+</body>
+</html>
