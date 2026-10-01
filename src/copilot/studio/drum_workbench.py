@@ -14,8 +14,9 @@ from copilot.audio.drum_events_v1 import apply_human_role_correction
 from copilot.sample_library.config import index_path as sample_index_path
 from copilot.sample_library.config import load_config as load_sample_library_config
 from copilot.sample_library.library_v1 import load_index
-from copilot.sample_library.drum_matching_v1 import match_drum_events
+from copilot.sample_library.drum_matching_v1 import match_drum_events, rank_role_family_candidates
 from copilot.musicplan.drum_reconstruction_v1 import build_drum_reconstruction
+from copilot.sample_library.schemas import AssetStatus
 
 
 def _sha256(path: Path) -> str:
@@ -68,7 +69,122 @@ def _sample_matching(event_set: DrumEventSetV1) -> dict[str, Any]:
     indexed_roots = {os.path.normcase(str(Path(root).resolve(strict=False))) for root in index.roots}
     if configured_roots != indexed_roots:
         return {"status": "INDEX_ROOT_MISMATCH", "reason": "The index does not describe the currently configured roots.", "event_candidates": {}}
-    return match_drum_events(event_set.events, index)
+    result = match_drum_events(event_set.events, index)
+    catalog = _load_provider_catalog(config.roots, index)
+    if catalog is None:
+        return result
+
+    role_shortlists: dict[str, dict[str, Any]] = {}
+    provisional_selections: dict[str, dict[str, Any]] = {}
+    for role in ("KICK", "CLOSED_HAT"):
+        if role == "KICK":
+            eligible = {sha for sha, row in catalog.items() if row["provider_role_claim"] == "KICK"}
+            pool_label = "provider-listed kick samples"
+        else:
+            eligible = {
+                sha for sha, row in catalog.items()
+                if row["provider_role_claim"] in {"CLOSED_HAT", "HI_HAT_NO_OPEN_LABEL"}
+            }
+            pool_label = "provider-listed hi-hats excluding assets explicitly labeled Open Hat; subtype remains unverified"
+        candidates = rank_role_family_candidates(
+            event_set.events,
+            index,
+            role=role,
+            eligible_sha256=eligible,
+        )
+        for candidate in candidates:
+            entry = catalog[candidate["sha256"]]
+            candidate["provider_catalog"] = {
+                "provider": "CRATE.hiphop",
+                "section": entry["provider_section"],
+                "label": entry["provider_label"],
+                "role_claim": entry["provider_role_claim"],
+                "role_claim_is_ground_truth": False,
+                "source_url": entry["provider_source_url"],
+            }
+        selection = None
+        if candidates:
+            selected = candidates[0]
+            selection = {
+                "status": "PROVISIONAL_ENGINEERING_SELECTION",
+                "asset_id": selected["asset_id"],
+                "sha256": selected["sha256"],
+                "filename": selected["filename"],
+                "ranking_distance": selected["ranking_distance"],
+                "selection_reason": (
+                    "lowest deterministic mean factual-descriptor distance across eligible source events "
+                    "within the provider-declared candidate pool; not a human preference or quality judgment"
+                ),
+                "human_selected": False,
+                "selected_for_realization": False,
+            }
+            provisional_selections[role] = selection
+        role_shortlists[role] = {
+            "status": "CANDIDATES_READY" if candidates else "NO_CANDIDATES_IN_PROVIDER_POOL",
+            "candidate_pool_label": pool_label,
+            "provider_labels_are_metadata_not_acoustic_truth": True,
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "provisional_selection": selection,
+        }
+    result["provider_catalog"] = {
+        "provider": "CRATE.hiphop",
+        "source_page": "https://crate.hiphop/free-drum-samples/",
+        "label_semantics": "official listing metadata; not acoustic ground truth",
+    }
+    result["role_shortlists"] = role_shortlists
+    result["provisional_selections"] = provisional_selections
+    return result
+
+
+def _load_provider_catalog(roots: list[str], index) -> dict[str, dict[str, Any]] | None:
+    """Load optional provider labels only from sidecars inside explicit roots."""
+    rows_by_sha: dict[str, dict[str, Any]] = {}
+    found_sidecar = False
+    allowed_claims = {"KICK", "CLOSED_HAT", "HI_HAT_NO_OPEN_LABEL", "OPEN_HAT", "OTHER"}
+    for root_text in roots:
+        root = Path(root_text).resolve(strict=False)
+        sidecar = root / "provider-catalog.json"
+        if not sidecar.is_file():
+            continue
+        found_sidecar = True
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8-sig"))
+            if (
+                payload.get("schema_version") != "provider-sample-catalog-v1"
+                or payload.get("provider") != "CRATE.hiphop"
+                or payload.get("source_page") != "https://crate.hiphop/free-drum-samples/"
+                or not isinstance(payload.get("entries"), list)
+            ):
+                return None
+            for row in payload["entries"]:
+                if not isinstance(row, dict):
+                    return None
+                sha = str(row.get("sha256", "")).lower()
+                if len(sha) != 64 or row.get("provider_role_claim") not in allowed_claims:
+                    return None
+                if row.get("role_claim_is_ground_truth") is not False:
+                    return None
+                if not str(row.get("provider_source_url", "")).startswith("https://crate.hiphop/packs/"):
+                    return None
+                asset = index.assets.get(sha)
+                if asset is None or asset.sha256.lower() != sha or asset.status != AssetStatus.INDEXED:
+                    return None
+                asset_path = Path(asset.path).resolve(strict=False)
+                try:
+                    asset_path.relative_to(root)
+                except ValueError:
+                    return None
+                if asset.relative_path.replace("\\", "/") != str(row.get("relative_path", "")):
+                    return None
+                if not asset_path.is_file() or _sha256(asset_path).lower() != sha:
+                    return None
+                if sha in rows_by_sha:
+                    return None
+                rows_by_sha[sha] = row
+        except Exception:
+            return None
+    return rows_by_sha if found_sidecar else None
 
 
 def load_drum_workbench(
@@ -258,3 +374,53 @@ def read_drum_event_preview(
     buffer = io.BytesIO()
     sf.write(buffer, audio, sample_rate, format="WAV", subtype="PCM_16")
     return buffer.getvalue(), sample_rate
+
+
+def read_drum_sample_preview(asset_id: str) -> tuple[bytes, int]:
+    """Audition a listed shortlist asset, resolved only through the trusted index."""
+    workbench = load_drum_workbench()
+    if workbench.get("status") != "READY":
+        raise ValueError("DRUM_WORKBENCH_SOURCE_NOT_READY")
+    allowed_ids = {
+        candidate.get("asset_id")
+        for shortlist in workbench.get("sample_matching", {}).get("role_shortlists", {}).values()
+        for candidate in shortlist.get("candidates", [])
+    }
+    if asset_id not in allowed_ids:
+        raise KeyError(asset_id)
+    config = load_sample_library_config()
+    index_file = sample_index_path()
+    index = load_index(index_file)
+    if index is None:
+        raise ValueError("SAMPLE_LIBRARY_INDEX_UNAVAILABLE")
+    configured_roots = {os.path.normcase(str(Path(root).resolve(strict=False))) for root in config.roots}
+    indexed_roots = {os.path.normcase(str(Path(root).resolve(strict=False))) for root in index.roots}
+    if not configured_roots or configured_roots != indexed_roots:
+        raise ValueError("SAMPLE_INDEX_ROOT_MISMATCH")
+    asset = next((item for item in index.assets.values() if item.id == asset_id), None)
+    if asset is None or asset.status != AssetStatus.INDEXED:
+        raise KeyError(asset_id)
+    path = Path(asset.path).resolve(strict=False)
+    allowed_roots = [Path(root).resolve(strict=False) for root in config.roots]
+    if not any(_is_relative_to(path, root) for root in allowed_roots):
+        raise ValueError("SAMPLE_ASSET_OUTSIDE_CONFIGURED_ROOTS")
+    if not path.is_file() or _sha256(path).lower() != asset.sha256.lower():
+        raise ValueError("SAMPLE_ASSET_HASH_MISMATCH")
+
+    import soundfile as sf
+
+    with sf.SoundFile(str(path), mode="r") as source:
+        sample_rate = int(source.samplerate)
+        frame_count = min(len(source), max(1, sample_rate))
+        audio = source.read(frame_count, dtype="float32", always_2d=True)
+    buffer = io.BytesIO()
+    sf.write(buffer, audio, sample_rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue(), sample_rate
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False

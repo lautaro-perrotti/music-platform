@@ -44,16 +44,28 @@ proposal remains blocked on sample selection, human confirmation of inferred
 roles/grid, note-duration policy, and the existing certified SafeWrite/Live
 readback path. No musical writes occur.
 
-On the current host, the sample-library config has no roots. Add a known,
-authorized library directory explicitly with:
+On the current host, CRATE.hiphop's official free drum-sample library is
+explicitly registered at `D:\\MusicPlatform\\Samples\\CRATE_Free_Drum_Samples`.
+Its local provenance and provider catalog metadata are stored outside the repo.
+The provider catalog labels define candidate pools only and do not verify
+acoustic role. The current root contains 174 WAVs and the index reports 174
+indexed, 0 failed, and 0 duplicates. Studio shows top-five KICK and
+CLOSED_HAT-family candidate lists plus deterministic provisional engineering
+selections. The CLOSED_HAT pool excludes entries explicitly labeled “Open
+Hat”; other hi-hats remain subtype-unverified until auditioned. Candidate
+audition resolves through the trusted sample index and verified hash, never a
+browser-supplied path.
+
+For another user-authorized library, add a known root explicitly with:
 
 ```powershell
 python -m copilot.cli sample-library add "<absolute-library-directory>"
 python -m copilot.cli sample-library index
 ```
 
-Do not replace this with a whole-drive scan. A real candidate shortlist has not
-yet been produced for the 32 reference events.
+Do not replace this with a whole-drive scan. Descriptor matching is factual and
+not a perceptual quality judgment. The machine's 16 KICK / 16 CLOSED_HAT source
+roles remain inferred until a human listens and uses the review controls.
 
 An explicit user tempo confirmation is written as a separate derived event
 artifact through `apply_human_tempo_confirmation`; it updates the operating

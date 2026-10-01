@@ -9,11 +9,12 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import pytest
 
 from copilot.audio.drum_events_v1 import build_drum_event_set
 from copilot.sample_library.config import SampleLibraryConfig
 from copilot.sample_library.schemas import AudioDescriptors, LibraryIndex, SampleAsset, SampleRole, SampleType
-from copilot.studio.drum_workbench import load_drum_workbench
+from copilot.studio.drum_workbench import load_drum_workbench, read_drum_sample_preview
 from copilot.studio.server import StudioHandler
 from copilot.studio.service import ProduceExecutionBlocked, StudioService, StudioTransportUnavailable
 
@@ -68,7 +69,12 @@ def test_produce_execution_blocker_keeps_its_typed_error_contract() -> None:
     }
 
 
-def test_drum_workbench_projects_validated_events_without_local_paths(tmp_path: Path) -> None:
+def test_drum_workbench_projects_validated_events_without_local_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "copilot.studio.drum_workbench.load_sample_library_config",
+        lambda: SampleLibraryConfig(roots=[]),
+    )
+    monkeypatch.setattr("copilot.studio.drum_workbench.sample_index_path", lambda: tmp_path / "no-index.json")
     artifact, manifest, _source, digest = _write_inputs(tmp_path)
     result = load_drum_workbench(artifact_path=artifact, manifest_path=manifest)
     assert result["status"] == "READY"
@@ -134,6 +140,85 @@ def test_drum_workbench_attaches_real_index_shortlist_without_leaking_root_paths
     assert all(event["sample_candidates"][0]["asset_id"] == "sample-kick" for event in result["events"])
     assert all(event["sample_candidates"][0]["selected_for_realization"] is False for event in result["events"])
     assert str(sample_path.parent) not in json.dumps(result)
+
+
+def test_provider_role_shortlists_are_metadata_and_auditions_resolve_by_index_id(tmp_path: Path, monkeypatch) -> None:
+    artifact, manifest, _source, _digest = _write_inputs(tmp_path)
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    for event in payload["events"]:
+        event["role_hypothesis"] = {
+            "role": "KICK",
+            "status": "INFERRED",
+            "confidence": 0.8,
+                "confidence_basis": "UNCALIBRATED_RULES",
+            "features": {
+                "measured_window_start_seconds": 0.05,
+                "measured_window_end_seconds": 0.16,
+                "spectral_centroid_hz": 120.0,
+                "low_band_energy_fraction_20_150_hz": 0.9,
+                "high_band_energy_fraction_2000_12000_hz": 0.02,
+            },
+        }
+    artifact.write_text(json.dumps(payload), encoding="utf-8")
+
+    library_root = tmp_path / "library"
+    sample_path = library_root / "packs" / "kicks" / "provider-kick.wav"
+    sample_path.parent.mkdir(parents=True)
+    sample_audio = np.zeros(24_000, dtype=np.float32)
+    sample_audio[2_000] = 0.8
+    sf.write(sample_path, sample_audio, 24_000)
+    sample_digest = hashlib.sha256(sample_path.read_bytes()).hexdigest()
+    asset = SampleAsset(
+        id="trusted-kick-asset",
+        path=str(sample_path),
+        filename=sample_path.name,
+        library_root=str(library_root),
+        relative_path="packs/kicks/provider-kick.wav",
+        extension=".wav",
+        size_bytes=sample_path.stat().st_size,
+        sha256=sample_digest,
+        sample_type=SampleType.ONE_SHOT,
+        semantic_role=SampleRole.UNKNOWN,
+        descriptors=AudioDescriptors(spectral_centroid_hz=150, low_band_energy=0.9),
+    )
+    index_file = tmp_path / "library-index.json"
+    index_file.write_text(LibraryIndex(roots=[str(library_root)], assets={sample_digest: asset}).model_dump_json())
+    (library_root / "provider-catalog.json").write_text(json.dumps({
+        "schema_version": "provider-sample-catalog-v1",
+        "provider": "CRATE.hiphop",
+        "source_page": "https://crate.hiphop/free-drum-samples/",
+        "role_labels": "Listing metadata only.",
+        "entries": [{
+            "provider_source_url": "https://crate.hiphop/packs/kicks/provider-kick.wav",
+            "provider_section": "kick",
+            "provider_label": "Kick — WAV",
+            "provider_role_claim": "KICK",
+            "role_claim_is_ground_truth": False,
+            "relative_path": "packs/kicks/provider-kick.wav",
+            "sha256": sample_digest,
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setattr("copilot.studio.drum_workbench.load_sample_library_config", lambda: SampleLibraryConfig(roots=[str(library_root)]))
+    monkeypatch.setattr("copilot.studio.drum_workbench.sample_index_path", lambda: index_file)
+    monkeypatch.setenv("COPILOT_STUDIO_DRUM_EVENT_SET", str(artifact))
+    monkeypatch.setenv("COPILOT_STUDIO_ASSET_SET_MANIFEST", str(manifest))
+
+    result = load_drum_workbench(artifact_path=artifact, manifest_path=manifest)
+    assert "role_shortlists" in result["sample_matching"], result["sample_matching"]
+    kick = result["sample_matching"]["role_shortlists"]["KICK"]
+    assert kick["status"] == "CANDIDATES_READY"
+    assert kick["candidates"][0]["asset_id"] == asset.id
+    assert kick["candidates"][0]["provider_catalog"]["role_claim_is_ground_truth"] is False
+    assert kick["provisional_selection"]["status"] == "PROVISIONAL_ENGINEERING_SELECTION"
+    assert kick["provisional_selection"]["human_selected"] is False
+    assert "HI_HAT_NO_OPEN_LABEL" in result["sample_matching"]["role_shortlists"]["CLOSED_HAT"]["candidate_pool_label"] or result["sample_matching"]["role_shortlists"]["CLOSED_HAT"]["status"] == "NO_CANDIDATES_IN_PROVIDER_POOL"
+    assert str(library_root) not in json.dumps(result)
+
+    preview, sample_rate = read_drum_sample_preview(asset.id)
+    assert preview.startswith(b"RIFF")
+    assert sample_rate == 24_000
+    with pytest.raises(KeyError):
+        read_drum_sample_preview("arbitrary-browser-path")
 
 
 def test_drum_workbench_fails_closed_on_source_digest_mismatch(tmp_path: Path) -> None:

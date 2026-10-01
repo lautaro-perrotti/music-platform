@@ -87,7 +87,11 @@ from copilot.studio.contracts import (
     VersionRecord,
 )
 from copilot.schemas.session import SessionState
-from copilot.studio.drum_workbench import load_drum_workbench, read_drum_event_preview
+from copilot.studio.drum_workbench import (
+    load_drum_workbench,
+    read_drum_event_preview,
+    read_drum_sample_preview,
+)
 from copilot.studio.persistence import (
     MUSICAL_DECISION_ACCEPTED,
     MUSICAL_DECISION_KEPT,
@@ -1841,6 +1845,10 @@ class StudioService:
     def drum_event_preview(self, event_id: str) -> tuple[bytes, int]:
         """Read a bounded audition window from the manifest-verified source."""
         return read_drum_event_preview(event_id)
+
+    def drum_sample_preview(self, asset_id: str) -> tuple[bytes, int]:
+        """Read a bounded sample audition resolved from the trusted index."""
+        return read_drum_sample_preview(asset_id)
 
     def open_transport_event_client(self) -> tuple[AbletonTcpAdapter, AbletonTransportEventClient, float]:
         """Open a push-only transport subscription after readiness and identity checks."""

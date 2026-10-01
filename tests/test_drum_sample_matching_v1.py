@@ -8,7 +8,11 @@ import soundfile as sf
 import pytest
 
 from copilot.audio.drum_events_v1 import DrumAttackFeatures, build_drum_event_set
-from copilot.sample_library.drum_matching_v1 import match_drum_events, rank_event_candidates
+from copilot.sample_library.drum_matching_v1 import (
+    match_drum_events,
+    rank_event_candidates,
+    rank_role_family_candidates,
+)
 from copilot.sample_library.schemas import (
     AssetStatus,
     AudioDescriptors,
@@ -122,6 +126,30 @@ def test_matching_is_bounded_and_deterministic_with_deduplicated_index(tmp_path:
 
     with pytest.raises(ValueError, match="top_k"):
         rank_event_candidates(event, index, top_k=MAX_TOP_K + 1)
+
+
+def test_role_family_matching_uses_only_explicit_provider_pool_and_aggregates_events(tmp_path: Path) -> None:
+    first = _event_set(tmp_path)
+    second = first.model_copy(deep=True)
+    second.event_id = "second-kick-event"
+    second.onset_seconds = 0.25
+    close = _asset(tmp_path / "provider-kick.wav", centroid=180, low=0.86, sha="e" * 64)
+    far = _asset(tmp_path / "provider-hat.wav", centroid=7_000, low=0.02, sha="f" * 64)
+    index = LibraryIndex(roots=[str(tmp_path)], assets={close.sha256: close, far.sha256: far})
+
+    result = rank_role_family_candidates(
+        [first, second],
+        index,
+        role="KICK",
+        eligible_sha256={close.sha256},
+    )
+
+    assert [row["asset_id"] for row in result] == [close.id]
+    assert result[0]["compared_source_event_count"] == 2
+    assert result[0]["reference_source_event_count"] == 2
+    assert result[0]["provisional"] is True
+    assert result[0]["human_selected"] is False
+    assert result[0]["selected_for_realization"] is False
 
 
 MAX_TOP_K = 5

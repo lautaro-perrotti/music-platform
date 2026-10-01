@@ -14,13 +14,26 @@ KICK→MIDI 36 / CLOSED_HAT→MIDI 42. Source event timing and accent dBFS remai
 separate from projected musical timing and derived velocity; MIDI duration is
 not inferred.
 
-Current host sample-library config is `NO_ROOTS_CONFIGURED`; therefore no real
-library files were indexed or matched. Ableton Live was not running and port
-9877 had no listener during this pass. `DrumReconstructionV1` is
-`SYMBOLIC_PROPOSAL_NOT_EXECUTABLE`; no SafeWrite/MIDI/sample write, authoritative
-readback, capture, or A/B was performed. Root configuration instructions are
-in `docs/STUDIO_DRUM_WORKBENCH_V1.md`. Do not report the drum production slice
-as complete from this offline proposal.
+The current host has an explicitly configured CRATE sample root with 174 real
+WAV files indexed (174 indexed, 0 failed, 0 duplicates). The provider's own
+page lists 29 kicks and 36 hi-hats; those are candidate-pool labels only, not
+acoustic ground truth. Studio exposes top-five role-family shortlists and a
+deterministic provisional engineering selection, with bounded audition by
+trusted indexed asset ID. No candidate has been human-selected. Ableton Live
+was not running and port 9877 had no listener during this pass.
+`DrumReconstructionV1` remains `SYMBOLIC_PROPOSAL_NOT_EXECUTABLE`; no
+SafeWrite/MIDI/sample write, authoritative readback, capture, or A/B was
+performed. SafeWrite policy still certifies only `SET_TRACK_VOLUME`.
+Do not report the drum production slice as complete from this offline proposal.
+
+The selected pack is CRATE.hiphop's “Free drum samples”, downloaded from its
+official page as 174 individual WAVs to
+`D:\\MusicPlatform\\Samples\\CRATE_Free_Drum_Samples`. The official license
+permits use and processing in music, including commercial work, while
+prohibiting redistribution/repackaging of the samples. No AI/ML-specific clause
+appears on the license page; this run performed local factual DSP indexing and
+ranking only, with no model training or sample redistribution. Local
+provenance and per-file hashes are stored with the pack, not in git.
 
 The user confirmed the operating tempo as 125 BPM. A separate derived event
 artifact now records `tempo_bpm=125.0`, `tempo_source=HUMAN_CONFIRMED`, and

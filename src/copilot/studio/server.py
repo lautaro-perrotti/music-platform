@@ -77,6 +77,11 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._headers(200, "audio/wav", len(audio))
                 self.wfile.write(audio)
                 return
+            if len(parts) == 5 and parts[:3] == ["api", "drums", "samples"] and parts[4] == "audio":
+                audio, _sample_rate = self.service.drum_sample_preview(parts[3])
+                self._headers(200, "audio/wav", len(audio))
+                self.wfile.write(audio)
+                return
             if path == "/api/ableton/transport/stream":
                 return self._stream_transport_events()
             if path == "/api/produce/capabilities":

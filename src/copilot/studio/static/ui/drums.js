@@ -55,6 +55,8 @@ function render() {
     if (pill.textContent.includes('Reconstruction:')) pill.textContent = `Reconstruction: ${data.reconstruction?.status || 'UNAVAILABLE'}`;
   });
   gateCard?.append(matchingSummary);
+  const familyShortlists = buildProviderRoleShortlists(matching);
+  if (familyShortlists) app.insertBefore(familyShortlists, gateCard);
   if (matching.next_command) {
     const commands = document.createElement('pre');
     commands.className = 'muted';
@@ -100,6 +102,60 @@ function buildCandidatePanel(event, matching) {
     }
     card.append(title, metadata, list);
     panel.append(card);
+  }
+  return panel;
+}
+
+function buildProviderRoleShortlists(matching) {
+  const shortlists = matching?.role_shortlists;
+  if (!shortlists) return null;
+  const panel = document.createElement('section');
+  panel.className = 'card';
+  const heading = document.createElement('h2');
+  heading.textContent = 'Role-family sample shortlist';
+  panel.append(heading);
+  const explanation = document.createElement('p');
+  explanation.className = 'muted';
+  explanation.textContent = 'Candidates are ranked by factual descriptor distance across the inferred source events. Provider listing labels only define the candidate pool; they are not acoustic truth. First candidate is an engineering default, not a human choice or quality winner.';
+  panel.append(explanation);
+
+  for (const role of ['KICK', 'CLOSED_HAT']) {
+    const shortlist = shortlists[role];
+    if (!shortlist) continue;
+    const roleSection = document.createElement('section');
+    roleSection.className = 'card';
+    const roleHeading = document.createElement('h3');
+    roleHeading.textContent = `${role} · ${shortlist.candidate_count || 0} ranked candidates`;
+    roleSection.append(roleHeading);
+    const pool = document.createElement('p');
+    pool.className = 'muted';
+    pool.textContent = shortlist.candidate_pool_label || shortlist.status;
+    roleSection.append(pool);
+    for (const [index, candidate] of (shortlist.candidates || []).entries()) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.cssText = 'display:block;margin:8px 0;padding:10px;border:1px solid #373630;border-radius:8px';
+      const title = document.createElement('b');
+      const isSelected = shortlist.provisional_selection?.asset_id === candidate.asset_id;
+      title.textContent = `${index + 1}. ${candidate.filename}${isSelected ? ' · PROVISIONAL ENGINEERING SELECTION' : ''}`;
+      const details = document.createElement('p');
+      details.className = 'muted';
+      details.textContent = `${candidate.provider_catalog?.label || 'Provider label unavailable'} · ${candidate.library_path_label} · mean descriptor distance ${fmt(candidate.ranking_distance, 4)} · compared with ${candidate.compared_source_event_count}/${candidate.reference_source_event_count} source events`;
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.preload = 'none';
+      audio.src = `/api/drums/samples/${encodeURIComponent(candidate.asset_id)}/audio`;
+      audio.style.width = '100%';
+      row.append(title, details, audio);
+      roleSection.append(row);
+    }
+    if (!shortlist.candidates?.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = `No candidate available: ${shortlist.status}`;
+      roleSection.append(empty);
+    }
+    panel.append(roleSection);
   }
   return panel;
 }
