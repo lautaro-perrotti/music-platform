@@ -1,14 +1,16 @@
 """Evidence-linked drum transient events for a bounded source region.
 
-This layer reuses the existing RMS-flux transient detector.  It records
-observations and a conditional musical-grid projection; it does not claim
-kick/snare/hat classification, MIDI velocity, or DAW authorization.
+This layer reuses the existing RMS-flux transient detector. It records
+observations, bounded uncalibrated role hypotheses, and a conditional
+musical-grid projection; it does not claim calibrated confidence, MIDI
+velocity, or DAW authorization.
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -19,8 +21,14 @@ from pydantic import BaseModel, Field, model_validator
 from copilot.audio.lowend import detect_transients
 
 
-DRUM_EVENT_ANALYSIS_VERSION = "drum-event-representation-v1"
+DRUM_EVENT_ANALYSIS_VERSION = "drum-event-representation-v2"
 DETECTOR_ID = "copilot.audio.lowend.detect_transients:rms_flux"
+ROLE_CLASSIFIER_VERSION = "drum-role-rules-v1"
+
+DrumRole = Literal[
+    "KICK", "SNARE", "CLAP", "CLOSED_HAT", "OPEN_HAT", "PERCUSSION",
+    "OTHER", "UNKNOWN",
+]
 
 
 def _sha256_file(path: Path) -> str:
@@ -61,15 +69,45 @@ class DrumMusicalPosition(BaseModel):
     micro_offset_ms: float
 
 
+class DrumAttackFeatures(BaseModel):
+    measured_window_start_seconds: float = Field(ge=0)
+    measured_window_end_seconds: float = Field(gt=0)
+    rms: float | None = Field(default=None, ge=0)
+    peak: float | None = Field(default=None, ge=0)
+    spectral_centroid_hz: float | None = Field(default=None, ge=0)
+    low_band_energy_fraction_20_150_hz: float | None = Field(default=None, ge=0, le=1)
+    mid_band_energy_fraction_150_2000_hz: float | None = Field(default=None, ge=0, le=1)
+    high_band_energy_fraction_2000_12000_hz: float | None = Field(default=None, ge=0, le=1)
+    late_to_early_rms_ratio: float | None = Field(default=None, ge=0)
+
+
 class DrumRoleHypothesis(BaseModel):
-    role: Literal[
-        "KICK", "SNARE", "CLAP", "CLOSED_HAT", "OPEN_HAT", "PERCUSSION",
-        "OTHER", "UNKNOWN",
-    ] = "UNKNOWN"
+    role: DrumRole = "UNKNOWN"
     status: Literal["UNCLASSIFIED", "INFERRED", "HUMAN_VERIFIED"] = "UNCLASSIFIED"
     confidence: float | None = Field(default=None, ge=0, le=1)
+    confidence_basis: Literal["UNAVAILABLE", "UNCALIBRATED_RULES"] = "UNAVAILABLE"
+    classifier_version: str | None = None
+    rule_id: str | None = None
+    features: DrumAttackFeatures | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+
+
+class DrumHumanCorrection(BaseModel):
+    role: DrumRole
+    reviewer_id: str = Field(min_length=1)
+    recorded_at_utc: str = Field(min_length=1)
+    note: str | None = None
+
+
+class DrumEventChange(BaseModel):
+    revision: int = Field(ge=2)
+    field: Literal["role"]
+    previous_effective_role: DrumRole
+    new_role: DrumRole
+    actor: Literal["HUMAN"] = "HUMAN"
+    reviewer_id: str = Field(min_length=1)
+    recorded_at_utc: str = Field(min_length=1)
 
 
 class DrumEventV1(BaseModel):
@@ -86,7 +124,18 @@ class DrumEventV1(BaseModel):
     source_slice: DrumSourceSliceRef
     role_hypothesis: DrumRoleHypothesis = Field(default_factory=DrumRoleHypothesis)
     realized_midi_velocity: int | None = Field(default=None, ge=1, le=127)
-    human_correction: str | None = None
+    human_correction: DrumHumanCorrection | None = None
+    selected_sample_asset_id: str | None = None
+    ableton_realization_ref: dict | None = None
+    knowledge_links: list[str] = Field(default_factory=list)
+    revision: int = Field(default=1, ge=1)
+    change_history: list[DrumEventChange] = Field(default_factory=list)
+
+    @property
+    def effective_role(self) -> DrumRole:
+        if self.human_correction is not None:
+            return self.human_correction.role
+        return self.role_hypothesis.role
 
 
 class DrumEventSetV1(BaseModel):
@@ -96,6 +145,8 @@ class DrumEventSetV1(BaseModel):
     source_path: str
     source_role: Literal["DRUMS"] = "DRUMS"
     detector_id: str = DETECTOR_ID
+    role_classifier_version: str = ROLE_CLASSIFIER_VERSION
+    detector_calibration_id: str | None = None
     detector_hop_ms: float = 5.0
     onset_latency_calibrated: Literal[False] = False
     region_start_seconds: float = Field(ge=0)
@@ -129,6 +180,86 @@ class DrumEventSetV1(BaseModel):
 def _event_id(source_sha256: str, detector_id: str, sample_index: int) -> str:
     canonical = f"{source_sha256.lower()}|{detector_id}|{sample_index}".encode("utf-8")
     return "drum_evt_" + hashlib.sha256(canonical).hexdigest()[:24]
+
+
+def _attack_features(
+    mono: np.ndarray,
+    sample_rate: int,
+    *,
+    start_seconds: float,
+    end_seconds: float,
+) -> DrumAttackFeatures:
+    start = max(0, int(math.floor(start_seconds * sample_rate)))
+    end = min(len(mono), int(math.ceil(end_seconds * sample_rate)))
+    segment = np.asarray(mono[start:end], dtype=np.float64)
+    values: dict = {
+        "measured_window_start_seconds": start / sample_rate,
+        "measured_window_end_seconds": end / sample_rate,
+    }
+    if not len(segment):
+        return DrumAttackFeatures(**values)
+    rms = float(np.sqrt(np.mean(segment**2)))
+    values.update(rms=rms, peak=float(np.max(np.abs(segment))))
+    spectrum = np.abs(np.fft.rfft(segment)) ** 2
+    freqs = np.fft.rfftfreq(len(segment), 1.0 / sample_rate)
+    total = float(spectrum.sum())
+    if total > 0:
+        values["spectral_centroid_hz"] = float(np.dot(freqs, spectrum) / total)
+        bands = ((20.0, 150.0), (150.0, 2_000.0), (2_000.0, 12_000.0))
+        names = (
+            "low_band_energy_fraction_20_150_hz",
+            "mid_band_energy_fraction_150_2000_hz",
+            "high_band_energy_fraction_2000_12000_hz",
+        )
+        nyquist = sample_rate / 2.0
+        for name, (lo, hi) in zip(names, bands):
+            mask = (freqs >= lo) & (freqs < min(hi, nyquist))
+            values[name] = float(spectrum[mask].sum() / total)
+    early_end = min(len(segment), int(round(sample_rate * 0.025)))
+    late_start = max(0, len(segment) - int(round(sample_rate * 0.025)))
+    if early_end and late_start < len(segment):
+        early_rms = float(np.sqrt(np.mean(segment[:early_end] ** 2)))
+        late_rms = float(np.sqrt(np.mean(segment[late_start:] ** 2)))
+        values["late_to_early_rms_ratio"] = late_rms / max(early_rms, 1e-12)
+    return DrumAttackFeatures(**values)
+
+
+def _classify_attack(features: DrumAttackFeatures) -> DrumRoleHypothesis:
+    """Emit only wide-margin kick/closed-hat hypotheses; scores are not probabilities."""
+    low = features.low_band_energy_fraction_20_150_hz
+    high = features.high_band_energy_fraction_2000_12000_hz
+    centroid = features.spectral_centroid_hz
+    role: DrumRole = "UNKNOWN"
+    rule_id: str | None = None
+    if low is not None and centroid is not None and low >= 0.60 and centroid <= 300.0:
+        role, rule_id = "KICK", "LOW_BAND_DOMINANT_AND_LOW_CENTROID"
+    elif (
+        low is not None and high is not None and centroid is not None
+        and high >= 0.85 and low <= 0.05 and centroid >= 3_500.0
+    ):
+        role, rule_id = "CLOSED_HAT", "HIGH_BAND_DOMINANT_LOW_LF_AND_HIGH_CENTROID"
+    if role == "UNKNOWN":
+        return DrumRoleHypothesis(
+            features=features,
+            classifier_version=ROLE_CLASSIFIER_VERSION,
+            evidence_refs=["features.spectral_centroid_hz", "features.band_energy"],
+            limitations=["NO_ROLE_RULE_MET_CONSERVATIVE_THRESHOLDS"],
+        )
+    return DrumRoleHypothesis(
+        role=role,
+        status="INFERRED",
+        confidence=None,
+        confidence_basis="UNCALIBRATED_RULES",
+        classifier_version=ROLE_CLASSIFIER_VERSION,
+        rule_id=rule_id,
+        features=features,
+        evidence_refs=["features.spectral_centroid_hz", "features.band_energy"],
+        limitations=[
+            "HEURISTIC_ROLE_IS_NOT_HUMAN_VERIFIED",
+            "NUMERIC_CONFIDENCE_NOT_CALIBRATED",
+            "SOURCE_STEM_PURITY_NOT_ESTABLISHED_BY_THIS_CLASSIFIER",
+        ],
+    )
 
 
 def _grid_position(
@@ -187,6 +318,7 @@ def build_drum_event_set(
     region_start_seconds: float = 0.0,
     region_end_seconds: float | None = None,
     min_distance_seconds: float = 0.08,
+    detector_calibration_id: str | None = None,
 ) -> DrumEventSetV1:
     """Create event evidence for an explicit region of an immutable drum stem.
 
@@ -261,17 +393,20 @@ def build_drum_event_set(
                 start_seconds=slice_start,
                 end_seconds=slice_end,
             ),
-            role_hypothesis=DrumRoleHypothesis(
-                limitations=["TRANSIENT_DETECTOR_DOES_NOT_CLASSIFY_KICK_SNARE_OR_HAT"]
-            ),
+            role_hypothesis=_classify_attack(_attack_features(
+                mono,
+                int(sample_rate),
+                start_seconds=max(region_start_seconds, onset - 0.005),
+                end_seconds=min(region_end, onset + 0.100),
+            )),
         ))
     limitations = [
         "MUSICAL_POSITIONS_ARE_CONDITIONAL_ON_SUPPLIED_TEMPO_METER_AND_GRID_ORIGIN",
-        "ROLE_CLASSIFICATION_NOT_PERFORMED_TRANSIENTS_REMAIN_UNKNOWN",
+        "ROLE_HYPOTHESES_USE_UNCALIBRATED_CONSERVATIVE_RULES_AND_REMAIN_INFERRED",
         "ACCENT_RMS_IS_AUDIO_MEASUREMENT_NOT_MIDI_VELOCITY",
         "SOURCE_SLICE_IS_AUDITION_CONTEXT_WINDOW_NOT_SEGMENTED_INSTRUMENT_AUDIO",
         "RMS_FLUX_ONSET_TIME_RESOLUTION_APPROX_5MS",
-        "RMS_FLUX_DETECTOR_LATENCY_NOT_CALIBRATED_MICROTIMING_IS_PROVISIONAL",
+        "DETECTOR_LATENCY_CALIBRATED_ON_SYNTHETIC_PROTOTYPES_ONLY_NOT_VALIDATED_ON_SOURCE_AUDIO_MICROTIMING_PROVISIONAL",
     ]
     if tempo_label_hint_bpm is not None and abs(tempo_label_hint_bpm - tempo_bpm) > 0.1:
         limitations.append("TEMPO_LABEL_HINT_CONFLICTS_WITH_SELECTED_TEMPO_HYPOTHESIS")
@@ -282,6 +417,8 @@ def build_drum_event_set(
         source_sha256=source_sha256,
         source_path=str(path.resolve()),
         detector_id=DETECTOR_ID,
+        role_classifier_version=ROLE_CLASSIFIER_VERSION,
+        detector_calibration_id=detector_calibration_id,
         region_start_seconds=region_start_seconds,
         region_end_seconds=region_end,
         tempo_label_hint_bpm=tempo_label_hint_bpm,
@@ -297,13 +434,61 @@ def build_drum_event_set(
     )
 
 
+def apply_human_role_correction(
+    event_set: DrumEventSetV1,
+    *,
+    event_id: str,
+    role: DrumRole,
+    reviewer_id: str,
+    note: str | None = None,
+    recorded_at_utc: str | None = None,
+) -> DrumEventSetV1:
+    """Return a revised copy; machine inference remains intact for provenance."""
+    if not reviewer_id.strip():
+        raise ValueError("DRUM_HUMAN_REVIEWER_REQUIRED")
+    corrected = event_set.model_copy(deep=True)
+    event = next((item for item in corrected.events if item.event_id == event_id), None)
+    if event is None:
+        raise ValueError("DRUM_EVENT_NOT_FOUND")
+    timestamp = recorded_at_utc or datetime.now(timezone.utc).isoformat()
+    previous_role = event.effective_role
+    if (
+        event.human_correction is not None
+        and event.human_correction.role == role
+        and event.human_correction.reviewer_id == reviewer_id
+        and event.human_correction.note == note
+    ):
+        return corrected
+    revision = event.revision + 1
+    event.human_correction = DrumHumanCorrection(
+        role=role,
+        reviewer_id=reviewer_id,
+        recorded_at_utc=timestamp,
+        note=note,
+    )
+    event.change_history.append(DrumEventChange(
+        revision=revision,
+        field="role",
+        previous_effective_role=previous_role,
+        new_role=role,
+        reviewer_id=reviewer_id,
+        recorded_at_utc=timestamp,
+    ))
+    event.revision = revision
+    return corrected
+
+
 __all__ = [
     "DETECTOR_ID",
     "DRUM_EVENT_ANALYSIS_VERSION",
+    "ROLE_CLASSIFIER_VERSION",
+    "DrumAttackFeatures",
     "DrumEventSetV1",
     "DrumEventV1",
+    "DrumHumanCorrection",
     "DrumMusicalPosition",
     "DrumRoleHypothesis",
     "DrumSourceSliceRef",
+    "apply_human_role_correction",
     "build_drum_event_set",
 ]

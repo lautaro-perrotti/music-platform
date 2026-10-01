@@ -6,7 +6,7 @@ import numpy as np
 import soundfile as sf
 import pytest
 
-from copilot.audio.drum_events_v1 import build_drum_event_set
+from copilot.audio.drum_events_v1 import apply_human_role_correction, build_drum_event_set
 
 
 def _write_impulses(path, *, rate: int = 16_000, offset_samples: int = 0) -> None:
@@ -102,3 +102,73 @@ def test_drum_event_builder_rejects_wrong_source_hash(tmp_path):
             tempo_bpm=120,
             tempo_source="test",
         )
+
+
+def test_conservative_role_hypotheses_include_features_and_keep_unknown(tmp_path):
+    source = tmp_path / "two-roles.wav"
+    rate = 16_000
+    audio = np.zeros(rate * 2, dtype=np.float32)
+    for onset, frequency, duration in ((0.4, 80.0, 0.08), (1.0, 6_000.0, 0.03)):
+        start = int(onset * rate)
+        count = int(duration * rate)
+        time = np.arange(count, dtype=np.float32) / rate
+        audio[start : start + count] = 0.8 * np.sin(2 * np.pi * frequency * time) * np.exp(-time / 0.01)
+    sf.write(source, audio, rate)
+    result = build_drum_event_set(
+        source,
+        source_asset_id="asset-roles",
+        source_sha256=_sha256(source),
+        tempo_bpm=120,
+        tempo_source="fixture-only",
+        region_start_seconds=0,
+        region_end_seconds=2,
+    )
+
+    inferred = [event for event in result.events if event.role_hypothesis.status == "INFERRED"]
+    assert {event.role_hypothesis.role for event in inferred} == {"KICK", "CLOSED_HAT"}
+    assert all(event.role_hypothesis.confidence is None for event in inferred)
+    assert all(event.role_hypothesis.confidence_basis == "UNCALIBRATED_RULES" for event in inferred)
+    assert all(event.role_hypothesis.features is not None for event in result.events)
+    assert result.role_classifier_version == "drum-role-rules-v1"
+
+
+def test_human_role_correction_preserves_inference_and_is_idempotent(tmp_path):
+    source = tmp_path / "drums.wav"
+    _write_impulses(source)
+    original = build_drum_event_set(
+        source,
+        source_asset_id="asset-human-correction",
+        source_sha256=_sha256(source),
+        tempo_bpm=120,
+        tempo_source="fixture-only",
+        region_start_seconds=0,
+        region_end_seconds=2,
+    )
+    target = original.events[0]
+    corrected = apply_human_role_correction(
+        original,
+        event_id=target.event_id,
+        role="PERCUSSION",
+        reviewer_id="producer-1",
+        note="Heard as hand percussion",
+        recorded_at_utc="2026-10-01T12:00:00Z",
+    )
+    changed = next(event for event in corrected.events if event.event_id == target.event_id)
+    assert target.human_correction is None
+    assert changed.role_hypothesis.model_dump() == target.role_hypothesis.model_dump()
+    assert changed.effective_role == "PERCUSSION"
+    assert changed.revision == 2
+    assert changed.change_history[0].previous_effective_role == target.role_hypothesis.role
+    assert changed.change_history[0].new_role == "PERCUSSION"
+
+    repeated = apply_human_role_correction(
+        corrected,
+        event_id=target.event_id,
+        role="PERCUSSION",
+        reviewer_id="producer-1",
+        note="Heard as hand percussion",
+        recorded_at_utc="2026-10-01T12:01:00Z",
+    )
+    repeated_event = next(event for event in repeated.events if event.event_id == target.event_id)
+    assert repeated_event.revision == 2
+    assert len(repeated_event.change_history) == 1
