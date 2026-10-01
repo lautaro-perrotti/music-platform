@@ -5,7 +5,6 @@ import json
 import mimetypes
 import os
 import time
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -115,6 +114,12 @@ class StudioHandler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ["api", "candidates"] and parts[3] == "keep":
                 version = self.service.keep_candidate(parts[2])
                 return self._json(version.model_dump(mode="json"), 201)
+            if len(parts) == 4 and parts[:2] == ["api", "candidates"] and parts[3] == "separate-stems":
+                body = self._body()
+                records = self.service.separate_selected_candidate_stems(
+                    parts[2], variation_id=str(body.get("stem_variation_id") or "six_stems_v1")
+                )
+                return self._json({"derived_stems": [item.model_dump(mode="json") for item in records]}, 201)
             if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] in {"cancel", "retry"}:
                 # Job lifecycle mutations are explicit POSTs.  Keep the operation
                 # behind the service so the browser cannot invent a second state

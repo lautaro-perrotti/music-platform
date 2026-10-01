@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import shutil
@@ -16,8 +15,16 @@ import soundfile as sf
 
 from copilot.music_generation.ace_step import AceStepProvider
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider
-from copilot.music_generation.schemas import GenerationBrief, GeneratorRequest
+from copilot.music_generation.schemas import (
+    GeneratedAsset,
+    GenerationBrief,
+    GeneratorRequest,
+    ModelManifest,
+    PerformanceManifest,
+    RightsManifest,
+)
 from copilot.music_generation.benchmark import validate_generated_audio
+from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.audio.session_diagnose import preflight_session
 from copilot.audio.capture_preflight import generic_capture_preflight
 from copilot.audio.source_capture_pool_v1 import capture_source_post_mixer_ref
@@ -146,16 +153,33 @@ class StudioService:
         self._variation_runtime: dict[str, tuple[Any, Any, Any]] = {}
 
     def _default_provider(self, requested: str | None) -> Any | None:
-        provider_id = (requested or "").strip().lower()
-        if provider_id in {"simulation", "simulated", "demo"}:
-            return SimulatedMusicProvider()
-        if provider_id in {"ace", "ace-step", "acestep"} or (not provider_id and os.environ.get("ACESTEP_API_URL")):
-            return AceStepProvider()
-        if provider_id in {"elevenlabs", "elevenlabs-music"} or (not provider_id and os.environ.get("ELEVENLABS_API_KEY")):
-            return ElevenLabsMusicProvider()
-        if self.mode in {"HYBRID", "SIMULATION"}:
-            return SimulatedMusicProvider()
-        return None
+        configured_default = os.environ.get("MUSIC_GENERATOR_PROVIDER")
+        default_id = "simulation" if self.mode == "SIMULATION" and not configured_default else (configured_default or "eleven_music")
+        provider_id = (requested or default_id).strip().lower()
+        aliases = {
+            "eleven_music": "elevenlabs-music",
+            "elevenlabs": "elevenlabs-music",
+            "elevenlabs-music": "elevenlabs-music",
+            "ace": "ace-step",
+            "ace-step": "ace-step",
+            "acestep": "ace-step",
+            "simulation": "simulated-music",
+            "simulated": "simulated-music",
+            "demo": "simulated-music",
+        }
+        canonical = aliases.get(provider_id)
+        if canonical is None:
+            return None
+        registry = MusicGeneratorRegistry()
+        if canonical == "elevenlabs-music":
+            registry.register(ElevenLabsMusicProvider())
+        elif canonical == "ace-step":
+            registry.register(AceStepProvider())
+        elif canonical == "simulated-music" and (requested or self.mode == "SIMULATION"):
+            registry.register(SimulatedMusicProvider())
+        elif canonical == "simulated-music":
+            return None
+        return registry.get(canonical)
 
     def create_project(self, name: str) -> ProjectRecord:
         project_id = f"project_{uuid.uuid4().hex[:16]}"
@@ -214,7 +238,7 @@ class StudioService:
     def _emit_status(self, job_id: str, status: JobStatus, stage: str, payload: dict[str, Any] | None = None) -> None:
         if status not in {JobStatus.CANCEL_REQUESTED, JobStatus.CANCELLED} and self._is_cancelled(job_id):
             return
-        job = self.store.update_job(job_id, status=status, current_stage=stage)
+        self.store.update_job(job_id, status=status, current_stage=stage)
         body = {"status": status.value, "stage": stage}
         if payload:
             body.update(payload)
@@ -249,9 +273,13 @@ class StudioService:
             health = provider.health().value
             self.store.append_event(job_id, "provider.ready", {"provider": descriptor.provider_id, "model": descriptor.model.model_dump(mode="json"), "health": health})
             if health not in {"HEALTHY", "CONFIGURED"}:
-                self.store.update_job(job_id, status=JobStatus.BLOCKED, current_stage="provider_unavailable",
-                                      error={"code": "PROVIDER_UNAVAILABLE", "provider": descriptor.provider_id, "health": health})
-                self.store.append_event(job_id, "job.blocked", {"code": "PROVIDER_UNAVAILABLE", "health": health})
+                missing_credential = descriptor.provider_id == "elevenlabs-music" and not getattr(provider, "api_key", None)
+                error_code = "CREDENTIAL_REQUIRED" if missing_credential else "PROVIDER_UNAVAILABLE"
+                stage = "credentials_required" if missing_credential else "provider_unavailable"
+                self.store.update_job(job_id, status=JobStatus.BLOCKED, current_stage=stage,
+                                      error={"code": error_code, "provider": descriptor.provider_id, "health": health,
+                                             "credential": "ELEVENLABS_API_KEY" if missing_credential else None})
+                self.store.append_event(job_id, "job.blocked", {"code": error_code, "stage": stage, "health": health})
                 return
             self._emit_status(job_id, JobStatus.RUNNING, "generation", {"provider": descriptor.provider_id})
             output_dir = self.data_dir / "provider_runs" / job_id
@@ -311,7 +339,17 @@ class StudioService:
             artifact_id=artifact_id, job_id=job_id, candidate_id=candidate_id,
             filename=destination.name, relative_path=relative.as_posix(), sha256=digest,
             bytes=destination.stat().st_size, duration_s=asset.duration_s,
-            sample_rate=asset.sample_rate, provider_metadata=asset.provider_metadata or {},
+            sample_rate=asset.sample_rate,
+            provider_metadata={
+                **(asset.provider_metadata or {}),
+                "provider_request": asset.provider_request,
+                "internal_candidate_seed": asset.seed,
+                "generation_request_id": asset.asset_id.rsplit(":", 1)[-1],
+                "generation_ordinal": ordinal,
+                "brief_id": brief.brief_id,
+                "asset_sha256": digest,
+                "generated_asset_id": asset.asset_id,
+            },
             rights=asset.rights_manifest.model_dump(mode="json"), created_at=utc_now(),
         )
         self.store.create_artifact(artifact)
@@ -363,6 +401,8 @@ class StudioService:
         artifact = self.store.get_artifact(candidate.artifact_id)
         if artifact is None:
             raise KeyError(candidate.artifact_id)
+        if candidate.status != "READY":
+            raise ValueError("CANDIDATE_NOT_TECHNICALLY_VALID")
         existing = self.store.list_versions(job.project_id)
         version_id = f"version_{uuid.uuid4().hex[:16]}"
         version = VersionRecord(
@@ -372,6 +412,9 @@ class StudioService:
                 "source": "music-studio",
                 "job_id": job.job_id,
                 "candidate_id": candidate_id,
+                "selected_candidate_id": candidate_id,
+                "musical_winner": candidate_id,
+                "selected_by": "HUMAN",
                 "artifact_id": artifact.artifact_id,
                 "artifact_sha256": artifact.sha256,
                 "ableton_writes": 0,
@@ -381,8 +424,110 @@ class StudioService:
         self.store.create_version(version)
         self.store.append_event(job.job_id, "version.created", version.model_dump(mode="json"))
         self.store.set_state(job.project_id, "active_version_id", version.version_id)
+        self.store.set_state(job.project_id, "human_selection", {
+            "selected_candidate_id": candidate_id,
+            "selected_by": "HUMAN",
+            "selected_at": version.created_at,
+            "version_id": version.version_id,
+        })
+        self.store.append_event(job.job_id, "candidate.human_selected", {
+            "candidate_id": candidate_id,
+            "selected_by": "HUMAN",
+            "musical_winner": candidate_id,
+            "technical_score_is_not_winner_authority": True,
+        })
         self.store.add_activity(job.project_id, "version.created", f"{version.name} kept from {candidate.label}", {"version_id": version.version_id, "candidate_id": candidate_id})
         return version
+
+    def separate_selected_candidate_stems(self, candidate_id: str, *, variation_id: str = "six_stems_v1") -> list[ArtifactRecord]:
+        """Paid stem separation is available only after explicit human selection."""
+        candidate = self.store.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError(candidate_id)
+        job = self.store.get_job(candidate.job_id)
+        artifact = self.store.get_artifact(candidate.artifact_id)
+        if job is None or artifact is None:
+            raise KeyError(candidate_id)
+        selection = self.store.get_state(job.project_id, "human_selection", {})
+        if selection.get("selected_candidate_id") != candidate_id or selection.get("selected_by") != "HUMAN":
+            raise ValueError("HUMAN_SELECTION_REQUIRED_BEFORE_STEM_SEPARATION")
+        if job.provider_id != "elevenlabs-music":
+            raise ValueError("STEM_SEPARATION_REQUIRES_ELEVENLABS_ASSET")
+        persisted_ids = self.store.get_state(job.project_id, f"stem_separation:{candidate_id}", [])
+        if persisted_ids:
+            existing_records = [self.store.get_artifact(item) for item in persisted_ids]
+            if all(item is not None for item in existing_records):
+                return [item for item in existing_records if item is not None]
+        path = (self.data_dir / artifact.relative_path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError("SELECTED_AUDIO_ARTIFACT_MISSING")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != artifact.sha256:
+            raise ValueError("SELECTED_AUDIO_ARTIFACT_HASH_MISMATCH")
+        provider = self.provider_factory("elevenlabs-music")
+        separate = getattr(provider, "separate_stems", None)
+        if not callable(separate):
+            raise GenerationBackendNotAvailable("stem-separation", ["ElevenLabs stem provider unavailable"])
+        model_data = job.provider_model or {}
+        model = ModelManifest.model_validate(model_data)
+        source_asset = GeneratedAsset(
+            asset_id=str(artifact.provider_metadata.get("generated_asset_id") or f"studio:{artifact.artifact_id}"),
+            path=path,
+            sha256=artifact.sha256,
+            bytes=artifact.bytes,
+            duration_s=artifact.duration_s,
+            sample_rate=artifact.sample_rate,
+            non_silent=bool(candidate.technical.get("non_silent")),
+            model=model,
+            seed=int(artifact.provider_metadata.get("internal_candidate_seed", 0)),
+            prompt=str(job.brief.get("user_intent", "")),
+            performance=PerformanceManifest(device=model.provider, actual_duration_s=artifact.duration_s, sample_rate=artifact.sample_rate),
+            rights_manifest=RightsManifest.model_validate(artifact.rights),
+            provider_metadata=artifact.provider_metadata,
+        )
+        raw_root = self.data_dir / "provider_runs" / "derived_stems" / candidate_id
+        derived = separate(source_asset, output_dir=raw_root, variation_id=variation_id)
+        persisted: list[ArtifactRecord] = []
+        for ordinal, item in enumerate(derived, 1):
+            source = Path(item["path"])
+            relative = Path("artifacts") / "derived_stems" / candidate_id / f"stem-{ordinal:02d}.wav"
+            destination = self.data_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            record = ArtifactRecord(
+                artifact_id=f"artifact_{uuid.uuid4().hex[:16]}",
+                job_id=job.job_id,
+                candidate_id=candidate_id,
+                filename=destination.name,
+                relative_path=relative.as_posix(),
+                sha256=hashlib.sha256(destination.read_bytes()).hexdigest(),
+                bytes=destination.stat().st_size,
+                duration_s=float(item["duration_s"]),
+                sample_rate=int(item["sample_rate"]),
+                mime_type="audio/wav",
+                provider_metadata={
+                    **item,
+                    "path": None,
+                    "kind": "DERIVED_STEM",
+                    "lineage": {
+                        "source_generated_asset_id": source_asset.asset_id,
+                        "source_artifact_id": artifact.artifact_id,
+                        "source_sha256": artifact.sha256,
+                        "human_selected_candidate_id": candidate_id,
+                    },
+                },
+                rights={**artifact.rights, "source_provider": model.provider, "source_model": model.model_id, "source_asset_id": source_asset.asset_id, "source_hash": artifact.sha256},
+                created_at=utc_now(),
+            )
+            self.store.create_artifact(record)
+            persisted.append(record)
+        self.store.append_event(job.job_id, "candidate.stems_separated", {
+            "candidate_id": candidate_id,
+            "selected_by": "HUMAN",
+            "derived_artifact_ids": [item.artifact_id for item in persisted],
+            "stem_variation_id": variation_id,
+        })
+        self.store.set_state(job.project_id, f"stem_separation:{candidate_id}", [item.artifact_id for item in persisted])
+        return persisted
 
     def project_snapshot(self, project_id: str) -> dict[str, Any]:
         project = self.get_project(project_id)
