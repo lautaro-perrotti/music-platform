@@ -9,7 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from copilot.studio.service import GenerationBackendNotAvailable, ProduceExecutionBlocked, StudioService
+from copilot.studio.service import (
+    GenerationBackendNotAvailable,
+    ProduceExecutionBlocked,
+    StudioService,
+    StudioTransportUnavailable,
+)
 
 
 def _default_data_dir() -> Path:
@@ -64,6 +69,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return self._json({"projects": [p.model_dump(mode="json") for p in self.service.list_projects()]})
             if path == "/api/ableton/status":
                 return self._json(self.service.ableton_status())
+            if path == "/api/drums/events":
+                return self._json(self.service.drum_workbench())
+            if path == "/api/ableton/transport/stream":
+                return self._stream_transport_events()
             if path == "/api/produce/capabilities":
                 return self._json(self.service.produce_capabilities())
             parts = [part for part in path.split("/") if part]
@@ -231,6 +240,71 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b": heartbeat\n\n")
                 self.wfile.flush()
             time.sleep(0.5)
+
+    def _stream_transport_events(self) -> None:
+        client = None
+        daw = None
+        try:
+            daw, client, subscription_elapsed_ms = self.service.open_transport_event_client()
+            initial = client.state
+        except StudioTransportUnavailable as exc:
+            self._headers(200, "text/event-stream; charset=utf-8")
+            payload = json.dumps({"state": "DISCONNECTED", "status": exc.status, "reason": exc.reason})
+            self.wfile.write(f"event: bridge.status\ndata: {payload}\n\n".encode("utf-8"))
+            self.wfile.flush()
+            return
+        except Exception as exc:
+            self._headers(200, "text/event-stream; charset=utf-8")
+            payload = json.dumps({"state": "DISCONNECTED", "status": "EVENT_SUBSCRIPTION_FAILED", "reason": type(exc).__name__})
+            self.wfile.write(f"event: bridge.status\ndata: {payload}\n\n".encode("utf-8"))
+            self.wfile.flush()
+            return
+
+        self._headers(200, "text/event-stream; charset=utf-8")
+        try:
+            snapshot = {
+                "state": initial.connection_state,
+                "bridge_session_id": initial.bridge_session_id,
+                "sequence": initial.sequence,
+                "playing": initial.playing,
+                "tempo": initial.tempo,
+                "subscription_elapsed_ms": round(subscription_elapsed_ms, 3),
+                "latency_semantics": "READINESS_AND_EVENT_SUBSCRIPTION_SETUP; NOT_EVENT_DELIVERY_LATENCY",
+            }
+            self.wfile.write(
+                f"id: {initial.sequence}\nevent: transport.snapshot\ndata: {json.dumps(snapshot)}\n\n".encode("utf-8")
+            )
+            self.wfile.flush()
+            while True:
+                try:
+                    state = client.read_next(timeout_s=1.0)
+                except Exception as exc:
+                    if "WAIT_TIMEOUT" in str(exc):
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+                        continue
+                    payload = json.dumps({"state": "STALE", "reason": type(exc).__name__})
+                    self.wfile.write(f"event: bridge.status\ndata: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    break
+                payload = {
+                    "state": state.connection_state,
+                    "bridge_session_id": state.bridge_session_id,
+                    "sequence": state.sequence,
+                    "playing": state.playing,
+                    "tempo": state.tempo,
+                }
+                self.wfile.write(
+                    f"id: {state.sequence}\nevent: transport.changed\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+                )
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            if client is not None:
+                client.close()
+            if daw is not None:
+                daw.disconnect()
 
 
 def run_server(*, host: str = "127.0.0.1", port: int = 8765, data_dir: Path | None = None) -> int:

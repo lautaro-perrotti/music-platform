@@ -17,7 +17,7 @@ const item = (route, label, glyph, active, key = '') => `<a href="#${route}" cla
 // primary destinations; every earlier screen stays reachable under Advanced / Debug.
 const ADV_KEY = 'ms-advanced';
 const advancedOn = () => { try { return localStorage.getItem(ADV_KEY) === '1'; } catch { return false; } };
-const DEBUG = [['home','Overview','home'],['chat','Chat','chat'],['create','Create','create'],['studio','Studio','studio'],['versions','Versions','versions'],['references','References','references'],['stems','Stems','stems'],['voice','Voice','voice'],['mix','Mix / Master','mix'],['jobs','Jobs','jobs'],['ableton','Ableton','ableton'],['activity','Activity','activity'],['health','System health','health']];
+const DEBUG = [['home','Overview','home'],['chat','Chat','chat'],['create','Create','create'],['studio','Studio','studio'],['versions','Versions','versions'],['references','References','references'],['stems','Stems','stems'],['drums','Drum workbench','activity'],['voice','Voice','voice'],['mix','Mix / Master','mix'],['jobs','Jobs','jobs'],['ableton','Ableton','ableton'],['activity','Activity','activity'],['health','System health','health']];
 const LIBRARY = new Set(['projects','new-project','project-switcher']);
 
 defineLight('ms-sidebar', el => {

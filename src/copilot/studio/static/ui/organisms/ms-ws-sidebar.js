@@ -6,6 +6,7 @@ const MODES = [
   ['generate', 'Generate', 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z', '/#produce'],
   ['arrangement', 'Arrangement', 'M3 6h6M11 6h10M3 12h10M15 12h6M3 18h4M9 18h12', 'phase 4'],
   ['tracks', 'Tracks', 'M12 3 3 7.5l9 4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5', 'phase 5'],
+  ['drums', 'Drum workbench', 'M4 18V9m5 9V5m5 13v-7m5 7V3', '/ui/drums.html'],
   ['harmony', 'Harmony', 'M9 18V6l10-2v12 M9 18a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0zM19 16a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0z', 'phase 6'],
   ['versions', 'Versions', 'M6 3v18M6 8c6 0 12 1 12 8v5', 'phase 8'],
   ['analysis', 'Analysis', 'M4 20V10M10 20V4M16 20v-7M22 20H2', 'later'],

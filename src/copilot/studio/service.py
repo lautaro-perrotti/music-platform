@@ -34,6 +34,7 @@ from copilot.daw.ableton_tcp import AbletonTcpAdapter
 from copilot.daw.object_ref import ref_from_track
 from copilot.daw.session_ready_v1 import SESSION_READY, probe_session_ready
 from copilot.daw.state_tokens import attach_tokens
+from copilot.daw.transport_events import AbletonTransportEventClient, TRANSPORT_EVENTS_CAPABILITY
 from copilot.integration.reference_variation_v1 import (
     ReferenceVariationError,
     build_reference_bound_bass_notes,
@@ -83,9 +84,10 @@ from copilot.studio.contracts import (
     VariationRecord,
     VersionRecord,
 )
+from copilot.schemas.session import SessionState
+from copilot.studio.drum_workbench import load_drum_workbench
 from copilot.studio.persistence import (
     MUSICAL_DECISION_ACCEPTED,
-    MUSICAL_DECISION_DISCARDED,
     MUSICAL_DECISION_KEPT,
     MUSICAL_DECISION_PENDING,
     PERSISTENCE_CANDIDATE_PENDING,
@@ -125,6 +127,15 @@ class ProduceExecutionBlocked(RuntimeError):
 
     def to_dict(self) -> dict[str, Any]:
         return {"error": self.code, "reason": self.reason, "detail": self.detail, "evidence": self.evidence}
+
+
+class StudioTransportUnavailable(RuntimeError):
+    """Typed read-only transport subscription refusal for Studio SSE."""
+
+    def __init__(self, status: str, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
 
 
 def _inspect_variation_wav(path: Path) -> dict[str, Any]:
@@ -1757,3 +1768,35 @@ class StudioService:
             return {"detection": detection, "session": probe.to_dict(), "musical_writes": 0}
         except Exception as exc:
             return {"status": "ENVIRONMENT_STATUS_UNAVAILABLE", "reason": str(exc), "musical_writes": 0}
+
+    def drum_workbench(self) -> dict[str, Any]:
+        """Expose the explicitly configured, hash-verified drum analysis read-only."""
+        return load_drum_workbench()
+
+    def open_transport_event_client(self) -> tuple[AbletonTcpAdapter, AbletonTransportEventClient, float]:
+        """Open a push-only transport subscription after readiness and identity checks."""
+        started = time.perf_counter()
+        probe = probe_session_ready()
+        if probe.status != SESSION_READY:
+            raise StudioTransportUnavailable(probe.status, probe.reason)
+        daw = AbletonTcpAdapter()
+        try:
+            daw.connect()
+            if TRANSPORT_EVENTS_CAPABILITY not in daw.capabilities:
+                raise StudioTransportUnavailable("UNSUPPORTED", TRANSPORT_EVENTS_CAPABILITY)
+            info = daw.get_session_info()
+            path_info = daw.get_session_path()
+            path = str((path_info or {}).get("path") or "").strip()
+            name = str((path_info or {}).get("name") or (info or {}).get("name") or "").strip()
+            session = SessionState(daw="ableton", connected=True)
+            attach_tokens(session, path=path or None, name=name or None)
+            identity = session.project_identity or session.project_token or ""
+            if not identity or identity != probe.project_identity:
+                raise StudioTransportUnavailable("PROJECT_MISMATCH", "Live project identity changed during subscription setup.")
+            client = AbletonTransportEventClient(daw)
+            client.connect()
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            return daw, client, elapsed_ms
+        except Exception:
+            daw.disconnect()
+            raise
