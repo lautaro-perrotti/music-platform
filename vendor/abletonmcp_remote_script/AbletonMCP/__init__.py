@@ -7,6 +7,7 @@ import time
 import traceback
 import queue
 import os
+from uuid import uuid4
 try:
     from .parameter_units import attested_native_unit
     _PARAMETER_UNITS_IMPORT_ERROR = None
@@ -48,6 +49,14 @@ class AbletonMCP(ControlSurface):
 
         # Cache the song reference for easier access
         self._song = self.song()
+        self._bridge_session_id = "bridge_" + uuid4().hex[:16]
+        self._transport_event_sequence = 0
+        self._transport_event_lock = threading.RLock()
+        self._transport_subscribers = {}
+        self._transport_listener_bindings = []
+        self._transport_event_capable = False
+        self._transport_last_state = None
+        self._setup_transport_event_listeners()
         if _PARAMETER_UNITS_IMPORT_ERROR:
             self.log_message(
                 "Optional physical-unit module unavailable; capability disabled: "
@@ -66,6 +75,17 @@ class AbletonMCP(ControlSurface):
         """Called when Ableton closes or the control surface is removed"""
         self.log_message("AbletonMCP disconnecting...")
         self.running = False
+        self._remove_transport_event_listeners()
+        with self._transport_event_lock:
+            subscribers = list(self._transport_subscribers.items())
+            self._transport_subscribers.clear()
+        for client, event_queue in subscribers:
+            try:
+                event_queue.put(None)
+                client.shutdown(socket.SHUT_RDWR)
+                client.close()
+            except (socket.error, OSError):
+                pass
 
         # Stop the server
         if self.server:
@@ -200,6 +220,22 @@ class AbletonMCP(ControlSurface):
                         buffer = ''  # Clear buffer after successful parse
                         
                         self.log_message("Received command: " + str(command.get("type", "unknown")))
+
+                        if command.get("type") == "subscribe_transport_events":
+                            event_queue, result = self._begin_transport_subscription(client)
+                            response = {
+                                "status": "success",
+                                "result": result,
+                                "request_id": command.get("request_id"),
+                            }
+                            client.sendall(json.dumps(response).encode("utf-8") + b"\n")
+                            writer = threading.Thread(
+                                target=self._transport_event_writer,
+                                args=(client, event_queue),
+                            )
+                            writer.daemon = True
+                            writer.start()
+                            continue
                         
                         # Process the command and get response
                         response = self._process_command(command)
@@ -244,6 +280,10 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error in client handler: " + str(e))
             self.log_message(traceback.format_exc())
         finally:
+            with self._transport_event_lock:
+                event_queue = self._transport_subscribers.pop(client, None)
+            if event_queue is not None:
+                event_queue.put(None)
             try:
                 client.close()
             except (socket.error, OSError) as e:
@@ -2536,7 +2576,127 @@ class AbletonMCP(ControlSurface):
             )
         if save_available:
             capabilities.append("session.save")
+        if getattr(self, "_transport_event_capable", False):
+            capabilities.append("events.transport.v1")
         return capabilities
+
+    def _transport_state(self):
+        return {
+            "playing": bool(getattr(self._song, "is_playing")),
+            "tempo": float(getattr(self._song, "tempo")),
+        }
+
+    def _setup_transport_event_listeners(self):
+        """Bind only factual Live transport listeners; no polling or LLM work."""
+        try:
+            self._transport_last_state = self._transport_state()
+        except Exception as exc:
+            self.log_message("Transport event capability unavailable: " + str(exc))
+            return
+        play_add = getattr(self._song, "add_is_playing_listener", None)
+        play_remove = getattr(self._song, "remove_is_playing_listener", None)
+        if not callable(play_add) or not callable(play_remove):
+            self.log_message(
+                "Transport event capability unavailable: is_playing listener pair missing"
+            )
+            return
+        try:
+            play_add(self._on_transport_changed)
+            self._transport_listener_bindings.append((play_remove, self._on_transport_changed))
+            tempo_add = getattr(self._song, "add_tempo_listener", None)
+            tempo_remove = getattr(self._song, "remove_tempo_listener", None)
+            if callable(tempo_add) and callable(tempo_remove):
+                tempo_add(self._on_transport_changed)
+                self._transport_listener_bindings.append(
+                    (tempo_remove, self._on_transport_changed)
+                )
+            self._transport_event_capable = True
+        except Exception as exc:
+            self._remove_transport_event_listeners()
+            self._transport_event_capable = False
+            self.log_message("Transport event listener setup failed: " + str(exc))
+
+    def _remove_transport_event_listeners(self):
+        for remove_listener, callback in self._transport_listener_bindings:
+            if callable(remove_listener):
+                try:
+                    remove_listener(callback)
+                except Exception as exc:
+                    self.log_message("Transport event listener cleanup failed: " + str(exc))
+        self._transport_listener_bindings = []
+
+    def _on_transport_changed(self):
+        try:
+            state = self._transport_state()
+        except Exception as exc:
+            self.log_message("Transport event readback failed: " + str(exc))
+            return
+        with self._transport_event_lock:
+            if state == self._transport_last_state:
+                return
+            self._transport_last_state = state
+            self._transport_event_sequence += 1
+            event = {
+                "event_type": "TRANSPORT_CHANGED",
+                "bridge_session_id": self._bridge_session_id,
+                "sequence": self._transport_event_sequence,
+                "state": state,
+            }
+            subscribers = list(self._transport_subscribers.values())
+        for event_queue in subscribers:
+            event_queue.put(event)
+
+    def _begin_transport_subscription(self, client):
+        if not self._transport_event_capable:
+            raise RuntimeError("UNSUPPORTED_CAPABILITY:events.transport.v1")
+        response_queue = queue.Queue()
+
+        def register_on_live_thread():
+            try:
+                with self._transport_event_lock:
+                    state = self._transport_state()
+                    self._transport_last_state = state
+                    event_queue = queue.Queue()
+                    snapshot_sequence = self._transport_event_sequence
+                    snapshot = {
+                        "event_type": "TRANSPORT_SNAPSHOT",
+                        "bridge_session_id": self._bridge_session_id,
+                        "sequence": snapshot_sequence,
+                        "state": state,
+                    }
+                    event_queue.put(snapshot)
+                    self._transport_subscribers[client] = event_queue
+                response_queue.put({
+                    "event_queue": event_queue,
+                    "bridge_session_id": self._bridge_session_id,
+                    "sequence": snapshot_sequence,
+                })
+            except Exception as exc:
+                response_queue.put({"error": str(exc)})
+
+        try:
+            self.schedule_message(0, register_on_live_thread)
+        except AssertionError:
+            register_on_live_thread()
+        result = response_queue.get(timeout=10.0)
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        return result["event_queue"], {
+            "event_stream": "transport.v1",
+            "bridge_session_id": result["bridge_session_id"],
+            "sequence": result["sequence"],
+        }
+
+    def _transport_event_writer(self, client, event_queue):
+        while self.running:
+            event = event_queue.get()
+            if event is None:
+                return
+            try:
+                client.sendall(json.dumps(event).encode("utf-8") + b"\n")
+            except (socket.error, OSError) as exc:
+                self.log_message("Transport event client disconnected: " + str(exc))
+                return
 
     def _set_device_parameter(self, track_index, device_index, parameter_index, value):
         """Set a device parameter value"""

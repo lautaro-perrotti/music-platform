@@ -70,3 +70,49 @@ def test_save_capability_is_runtime_negotiated_not_inferred_from_transport(
 
     instance._song = SimpleNamespace(save=lambda: None)
     assert "session.save" in instance._advertised_capabilities()
+
+
+def test_transport_event_capability_is_advertised_only_when_listener_setup_succeeds(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    bridge = _load_bridge(tmp_path, monkeypatch, include_units=False)
+    instance = object.__new__(bridge.AbletonMCP)
+    instance.log_message = lambda _message: None
+    instance._song = SimpleNamespace(is_playing=False, tempo=120.0)
+    assert "events.transport.v1" not in instance._advertised_capabilities()
+
+    callbacks = {}
+
+    def add_playing_listener(callback):
+        callbacks["playing"] = callback
+
+    def add_tempo_listener(callback):
+        callbacks["tempo"] = callback
+
+    def remove_listener(_callback):
+        return None
+
+    instance._song.add_is_playing_listener = add_playing_listener
+    instance._song.remove_is_playing_listener = remove_listener
+    instance._song.add_tempo_listener = add_tempo_listener
+    instance._song.remove_tempo_listener = remove_listener
+    instance._transport_event_lock = bridge.threading.RLock()
+    instance._bridge_session_id = "bridge_test"
+    instance._transport_listener_bindings = []
+    instance._transport_subscribers = {}
+    instance._transport_event_sequence = 0
+    instance._transport_event_capable = False
+    instance._setup_transport_event_listeners()
+
+    assert instance._transport_event_capable is True
+    assert "events.transport.v1" in instance._advertised_capabilities()
+
+    from queue import Queue
+    event_queue = Queue()
+    instance._transport_subscribers[object()] = event_queue
+    instance._song.is_playing = True
+    callbacks["playing"]()
+    event = event_queue.get_nowait()
+    assert event["event_type"] == "TRANSPORT_CHANGED"
+    assert event["sequence"] == 1
+    assert event["state"] == {"playing": True, "tempo": 120.0}
