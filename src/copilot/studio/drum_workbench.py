@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from copilot.audio.drum_events_v1 import DrumEventSetV1
+from copilot.sample_library.config import index_path as sample_index_path
+from copilot.sample_library.config import load_config as load_sample_library_config
+from copilot.sample_library.library_v1 import load_index
+from copilot.sample_library.drum_matching_v1 import match_drum_events
+from copilot.musicplan.drum_reconstruction_v1 import build_drum_reconstruction
 
 
 def _sha256(path: Path) -> str:
@@ -27,7 +32,41 @@ def _unavailable(status: str, reason: str | None = None) -> dict[str, Any]:
         "source": None,
         "grid": None,
         "events": [],
+        "sample_matching": {"status": "NOT_AVAILABLE", "reason": reason},
     }
+
+
+def _sample_matching(event_set: DrumEventSetV1) -> dict[str, Any]:
+    """Read only the explicitly configured local library index; never scan roots here."""
+    try:
+        config = load_sample_library_config()
+    except ValueError:
+        return {"status": "INVALID_LIBRARY_CONFIG", "reason": "Sample-library configuration failed validation."}
+    if not config.roots:
+        return {
+            "status": "NO_ROOTS_CONFIGURED",
+            "reason": "Add an explicit library directory, then run sample-library index.",
+            "next_command": "python -m copilot.cli sample-library add <explicit-directory>",
+            "next_index_command": "python -m copilot.cli sample-library index",
+            "disk_scan": False,
+            "event_candidates": {},
+        }
+    configured_index_path = sample_index_path()
+    if not configured_index_path.is_file():
+        return {
+            "status": "NOT_INDEXED",
+            "reason": "A library root is configured, but no sample index exists yet.",
+            "next_index_command": "python -m copilot.cli sample-library index",
+            "event_candidates": {},
+        }
+    index = load_index(configured_index_path)
+    if index is None:
+        return {"status": "INVALID_INDEX", "reason": "The configured sample index could not be parsed.", "event_candidates": {}}
+    configured_roots = {os.path.normcase(str(Path(root).resolve(strict=False))) for root in config.roots}
+    indexed_roots = {os.path.normcase(str(Path(root).resolve(strict=False))) for root in index.roots}
+    if configured_roots != indexed_roots:
+        return {"status": "INDEX_ROOT_MISMATCH", "reason": "The index does not describe the currently configured roots.", "event_candidates": {}}
+    return match_drum_events(event_set.events, index)
 
 
 def load_drum_workbench(
@@ -77,6 +116,8 @@ def load_drum_workbench(
         return _unavailable("SOURCE_HASH_MISMATCH", "Immutable source bytes no longer match the manifest.")
 
     events: list[dict[str, Any]] = []
+    sample_matching = _sample_matching(event_set)
+    candidates_by_event = sample_matching.get("event_candidates", {})
     for event in event_set.events:
         hypothesis = event.role_hypothesis
         human = event.human_correction
@@ -111,6 +152,7 @@ def load_drum_workbench(
             "features": features.model_dump(mode="json") if features else None,
             "human_correction": human.model_dump(mode="json") if human else None,
             "selected_sample_asset_id": event.selected_sample_asset_id,
+            "sample_candidates": candidates_by_event.get(event.event_id, []),
             "ableton_status": "VERIFIED" if event.ableton_realization_ref else "NOT_REALIZED",
         })
 
@@ -146,5 +188,7 @@ def load_drum_workbench(
             "meter_status": event_set.meter_status,
             "bars": max((event.musical_position.bar for event in event_set.events), default=0),
         },
+        "sample_matching": sample_matching,
+        "reconstruction": build_drum_reconstruction(event_set).model_dump(mode="json"),
         "events": events,
     }

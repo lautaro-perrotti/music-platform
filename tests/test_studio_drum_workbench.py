@@ -11,6 +11,8 @@ import numpy as np
 import soundfile as sf
 
 from copilot.audio.drum_events_v1 import build_drum_event_set
+from copilot.sample_library.config import SampleLibraryConfig
+from copilot.sample_library.schemas import AudioDescriptors, LibraryIndex, SampleAsset, SampleRole, SampleType
 from copilot.studio.drum_workbench import load_drum_workbench
 from copilot.studio.server import StudioHandler
 from copilot.studio.service import ProduceExecutionBlocked, StudioService, StudioTransportUnavailable
@@ -79,6 +81,59 @@ def test_drum_workbench_projects_validated_events_without_local_paths(tmp_path: 
     assert all("source_path" not in row for row in result["events"])
     assert str(tmp_path) not in json.dumps(result)
     assert result["musical_writes"] == 0
+    assert result["sample_matching"]["status"] == "NO_ROOTS_CONFIGURED"
+
+
+def test_drum_workbench_attaches_real_index_shortlist_without_leaking_root_paths(tmp_path: Path, monkeypatch) -> None:
+    artifact, manifest, _source, _digest = _write_inputs(tmp_path)
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    for event in payload["events"]:
+        event["role_hypothesis"] = {
+            "role": "KICK",
+            "status": "INFERRED",
+            "confidence": None,
+            "confidence_basis": "UNCALIBRATED_RULES",
+            "features": {
+                "measured_window_start_seconds": 0.0,
+                "measured_window_end_seconds": 0.1,
+                "spectral_centroid_hz": 120.0,
+                "low_band_energy_fraction_20_150_hz": 0.9,
+                "high_band_energy_fraction_2000_12000_hz": 0.02,
+            },
+        }
+    artifact.write_text(json.dumps(payload), encoding="utf-8")
+
+    sample_path = tmp_path / "library" / "kick.wav"
+    sample_path.parent.mkdir()
+    sf.write(sample_path, np.ones(4_800, dtype=np.float32) * 0.1, 48_000)
+    sample_digest = hashlib.sha256(sample_path.read_bytes()).hexdigest()
+    asset = SampleAsset(
+        id="sample-kick",
+        path=str(sample_path),
+        filename="kick.wav",
+        library_root=str(sample_path.parent),
+        relative_path="Kicks/kick.wav",
+        extension=".wav",
+        size_bytes=sample_path.stat().st_size,
+        sha256=sample_digest,
+        sample_type=SampleType.ONE_SHOT,
+        semantic_role=SampleRole.UNKNOWN,
+        descriptors=AudioDescriptors(spectral_centroid_hz=130, low_band_energy=0.88),
+    )
+    index_file = tmp_path / "library-index.json"
+    index_file.write_text(LibraryIndex(roots=[str(sample_path.parent)], assets={sample_digest: asset}).model_dump_json())
+    monkeypatch.setattr(
+        "copilot.studio.drum_workbench.load_sample_library_config",
+        lambda: SampleLibraryConfig(roots=[str(sample_path.parent)]),
+    )
+    monkeypatch.setattr("copilot.studio.drum_workbench.sample_index_path", lambda: index_file)
+
+    result = load_drum_workbench(artifact_path=artifact, manifest_path=manifest)
+
+    assert result["sample_matching"]["status"] == "CANDIDATES_READY"
+    assert all(event["sample_candidates"][0]["asset_id"] == "sample-kick" for event in result["events"])
+    assert all(event["sample_candidates"][0]["selected_for_realization"] is False for event in result["events"])
+    assert str(sample_path.parent) not in json.dumps(result)
 
 
 def test_drum_workbench_fails_closed_on_source_digest_mismatch(tmp_path: Path) -> None:

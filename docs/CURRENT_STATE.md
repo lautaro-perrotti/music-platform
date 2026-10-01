@@ -2,6 +2,26 @@
 
 Date: 2026-10-01. Runtime > this file when they disagree.
 
+## Drum reconstruction vertical slice (2026-10-01, offline / not executable)
+
+The Studio drum workbench now reads the configured sample-library index
+without scanning roots, returns explicit descriptor-delta candidate shortlists
+for supported KICK/CLOSED_HAT hypotheses, and exposes a symbolic
+`DrumReconstructionV1` for the 32-event real reference artifact. The UI shows
+candidate evidence and the separate MIDI proposal; candidate ranks are not
+perceptual quality judgments or selections. The proof mapping is local
+KICK→MIDI 36 / CLOSED_HAT→MIDI 42. Source event timing and accent dBFS remain
+separate from projected musical timing and derived velocity; MIDI duration is
+not inferred.
+
+Current host sample-library config is `NO_ROOTS_CONFIGURED`; therefore no real
+library files were indexed or matched. Ableton Live was not running and port
+9877 had no listener during this pass. `DrumReconstructionV1` is
+`SYMBOLIC_PROPOSAL_NOT_EXECUTABLE`; no SafeWrite/MIDI/sample write, authoritative
+readback, capture, or A/B was performed. Root configuration instructions are
+in `docs/STUDIO_DRUM_WORKBENCH_V1.md`. Do not report the drum production slice
+as complete from this offline proposal.
+
 ## Realtime platform baseline (2026-10-01, partial)
 
 The vendored Remote Script now exposes a push-only `events.transport.v1`
