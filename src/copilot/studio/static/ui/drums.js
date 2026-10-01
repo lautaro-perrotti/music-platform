@@ -35,13 +35,17 @@ function render() {
     ['Source window', `${fmt(selected.source_region_seconds.start, 3)}–${fmt(selected.source_region_seconds.end, 3)} s`],
     ['Selected local sample', selected.selected_sample_asset_id], ['Ableton realization', selected.ableton_status],
   ].map(([key, value]) => `<div class="row"><span class="muted">${esc(key)}</span><span style="text-align:right">${show(value)}</span></div>`).join('')}</div><h3>Measured features</h3><pre style="white-space:pre-wrap;overflow-wrap:anywhere;color:#B0ADA7;font-size:11px">${selected.features ? esc(JSON.stringify(selected.features, null, 2)) : 'No event feature record'}</pre><h3>Evidence / limitations</h3><ul>${[...(selected.evidence_refs || []), ...(selected.limitations || [])].map(item => `<li>${esc(item)}</li>`).join('')}</ul></section>` : '<section class="card">No detected events in this region.</section>';
-  app.innerHTML = `<header class="card"><a href="/ui/" style="color:#B0ADA7">← Music Studio</a><div class="facts" style="align-items:center"><h1>Drum workbench</h1><span class="pill">REAL LOCAL ANALYSIS</span><span class="pill">READ ONLY</span></div><div class="facts"><span class="pill">${events.length} events</span><span class="pill">Source DRUMS · ${show(source.rights_status)} rights</span><span class="pill">Ableton session: <b id="live-state">checking</b></span><button id="refresh-live" type="button" class="event-chip">Refresh session status</button></div><div class="facts" style="margin-top:8px"><button id="connect-transport" type="button" class="event-chip">Connect Live Play / Stop events</button><span class="pill">Transport ${show(transportState.state)}</span><span class="pill">Playing ${show(transportState.playing)}</span><span class="pill">Tempo ${show(transportState.tempo)}</span><span class="pill">Sequence ${show(transportState.sequence)}</span>${transportState.setupMs === null ? '' : `<span class="pill">Subscription setup ${fmt(transportState.setupMs, 1)} ms · not event latency</span>`}</div><p class="muted">No playhead position is included in the current transport event contract. Source SHA-256 <span class="mono">${show(source.sha256)}</span> · ${show(analysis.detector_id)}</p></header><div class="two"><section class="card"><h2>4-bar event pattern</h2><p class="muted">Grid positions are projections on an unresolved provisional tempo. Markers show inferred/effective roles, not human confirmation. Observed onset is separate. Gold = inferred kick · cyan = inferred closed hat · gray = unknown/other.</p><div class="facts"><span class="pill">Filename hint ${show(grid.filename_hint_bpm)} BPM</span><span class="pill">Selected ${show(grid.tempo_bpm)} BPM · ${show(grid.tempo_status)}</span><span class="pill">Alternative ${show(grid.alternate_tempos_bpm?.join(', '))} BPM</span><span class="pill">Meter ${show(grid.meter_numerator)}/${show(grid.meter_denominator)} · ${show(grid.meter_status)}</span></div><div class="bar-grid">${barMarkup}</div><h3>Events</h3><div class="event-list">${events.map(event => `<button type="button" class="event-chip ${event.event_id === selectedId ? 'selected' : ''}" data-event="${esc(event.event_id)}">${esc(event.role)} · ${event.bar}.${fmt(event.beat_in_bar)}</button>`).join('')}</div><p class="muted">Detector latency was calibrated on synthetic prototypes only and was not applied to this source. No sample is selected and no event is realized in Ableton.</p></section>${inspector}</div><section class="card"><h2>Current gates</h2><div class="facts"><span class="pill">Library match: not configured / not selected</span><span class="pill">Reconstruction: not built</span><span class="pill">SafeWrite: no operation attempted</span><span class="pill">Capture / A-B: pending realization</span><span class="pill">Musical writes: 0</span></div></section>`;
+  app.innerHTML = `<header class="card"><a href="/ui/" style="color:#B0ADA7">← Music Studio</a><div class="facts" style="align-items:center"><h1>Drum workbench</h1><span class="pill">REAL LOCAL ANALYSIS</span><span class="pill">READ ONLY</span></div><div class="facts"><span class="pill">${events.length} events</span><span class="pill">Source DRUMS · ${show(source.rights_status)} rights</span><span class="pill">Ableton session: <b id="live-state">checking</b></span><button id="refresh-live" type="button" class="event-chip">Refresh session status</button></div><div class="facts" style="margin-top:8px"><button id="connect-transport" type="button" class="event-chip">Connect Live Play / Stop events</button><span class="pill">Transport ${show(transportState.state)}</span><span class="pill">Playing ${show(transportState.playing)}</span><span class="pill">Tempo ${show(transportState.tempo)}</span><span class="pill">Sequence ${show(transportState.sequence)}</span>${transportState.setupMs === null ? '' : `<span class="pill">Subscription setup ${fmt(transportState.setupMs, 1)} ms · not event latency</span>`}</div><p class="muted">No playhead position is included in the current transport event contract. Source SHA-256 <span class="mono">${show(source.sha256)}</span> · ${show(analysis.detector_id)}</p></header><div class="two"><section class="card"><h2>4-bar event pattern</h2><p class="muted">Grid positions use the selected ${show(grid.tempo_bpm)} BPM tempo (${show(grid.tempo_source)} · ${show(grid.tempo_status)}). Markers show inferred/effective roles, not human confirmation. Observed onset is separate. Gold = inferred kick · cyan = inferred closed hat · gray = unknown/other.</p><div class="facts"><span class="pill">Filename hint ${show(grid.filename_hint_bpm)} BPM</span><span class="pill">Selected ${show(grid.tempo_bpm)} BPM · ${show(grid.tempo_status)}</span><span class="pill">Alternative ${show(grid.alternate_tempos_bpm?.join(', '))} BPM</span><span class="pill">Meter ${show(grid.meter_numerator)}/${show(grid.meter_denominator)} · ${show(grid.meter_status)}</span></div><div class="bar-grid">${barMarkup}</div><h3>Events</h3><div class="event-list">${events.map(event => `<button type="button" class="event-chip ${event.event_id === selectedId ? 'selected' : ''}" data-event="${esc(event.event_id)}">${esc(event.role)} · ${event.bar}.${fmt(event.beat_in_bar)}</button>`).join('')}</div><p class="muted">Detector latency was calibrated on synthetic prototypes only and was not applied to this source. No sample is selected and no event is realized in Ableton.</p></section>${inspector}</div><section class="card"><h2>Current gates</h2><div class="facts"><span class="pill">Library match: not configured / not selected</span><span class="pill">Reconstruction: not built</span><span class="pill">SafeWrite: no operation attempted</span><span class="pill">Capture / A-B: pending realization</span><span class="pill">Musical writes: 0</span></div></section>`;
   const matching = data.sample_matching || {};
+  const tempoStatement = document.createElement('p');
+  tempoStatement.className = 'muted';
+  tempoStatement.textContent = `Operating grid: ${grid.tempo_bpm} BPM · ${grid.tempo_source} · ${grid.tempo_status}. Original filename hint ${grid.filename_hint_bpm ?? 'unknown'} BPM and automatic alternatives remain in evidence.`;
+  app.querySelector('header.card')?.append(tempoStatement);
   const matchStatus = app.querySelector('.card:last-child .facts .pill');
   if (matchStatus) matchStatus.textContent = `Library matching: ${matching.status || 'UNAVAILABLE'}`;
   const cards = app.querySelectorAll('.two > .card');
   const inspectorCard = cards[1];
-  if (inspectorCard) inspectorCard.append(buildCandidatePanel(selected, matching));
+  if (inspectorCard) inspectorCard.append(buildReviewPanel(selected), buildCandidatePanel(selected, matching));
   if (cards[0]) cards[0].append(buildReconstructionPanel(data.reconstruction));
   const matchingSummary = document.createElement('p');
   matchingSummary.className = 'muted';
@@ -97,6 +101,63 @@ function buildCandidatePanel(event, matching) {
     card.append(title, metadata, list);
     panel.append(card);
   }
+  return panel;
+}
+
+function buildReviewPanel(event) {
+  const panel = document.createElement('section');
+  panel.className = 'card';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Listen and correct this event';
+  panel.append(heading);
+  if (!event) return panel;
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = `/api/drums/events/${encodeURIComponent(event.event_id)}/audio`;
+  audio.style.width = '100%';
+  panel.append(audio);
+
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', 'Human-confirmed drum role');
+  for (const role of ['KICK', 'SNARE', 'CLAP', 'CLOSED_HAT', 'OPEN_HAT', 'PERCUSSION', 'OTHER', 'UNKNOWN']) {
+    const option = document.createElement('option');
+    option.value = role;
+    option.textContent = role;
+    option.selected = role === event.role;
+    select.append(option);
+  }
+  const note = document.createElement('input');
+  note.type = 'text';
+  note.maxLength = 500;
+  note.placeholder = 'Optional listening note';
+  note.setAttribute('aria-label', 'Optional listening note');
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'event-chip';
+  save.textContent = event.role_status === 'HUMAN_VERIFIED' ? 'Update human label' : 'Confirm human label';
+  const status = document.createElement('span');
+  status.className = 'muted';
+  status.textContent = `Current trust: ${event.role_status}. This labels only this source event; it does not write to Ableton.`;
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    status.textContent = 'PENDING · saving correction to the local review record…';
+    try {
+      const response = await fetch(`/api/drums/events/${encodeURIComponent(event.event_id)}/role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: select.value, note: note.value }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.status !== 'READY') throw new Error(result.error || result.detail || result.status || `HTTP ${response.status}`);
+      data = result;
+      render();
+    } catch (error) {
+      status.textContent = `FAILED · ${error?.message || 'correction not saved'}`;
+      save.disabled = false;
+    }
+  });
+  panel.append(select, note, save, status);
   return panel;
 }
 

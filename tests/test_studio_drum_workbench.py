@@ -146,6 +146,7 @@ def test_drum_workbench_fails_closed_on_source_digest_mismatch(tmp_path: Path) -
 
 def test_studio_http_exposes_read_only_drum_contract(tmp_path: Path, monkeypatch) -> None:
     artifact, manifest, _source, _digest = _write_inputs(tmp_path)
+    original_artifact_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
     monkeypatch.setenv("COPILOT_STUDIO_DRUM_EVENT_SET", str(artifact))
     monkeypatch.setenv("COPILOT_STUDIO_ASSET_SET_MANIFEST", str(manifest))
     service = StudioService(tmp_path / "studio")
@@ -163,6 +164,26 @@ def test_studio_http_exposes_read_only_drum_contract(tmp_path: Path, monkeypatch
         assert body["status"] == "READY"
         assert body["musical_writes"] == 0
         assert body["events"]
+        event_id = body["events"][0]["event_id"]
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_address[1]}/api/drums/events/{event_id}/audio"
+        ) as response:
+            assert response.headers.get_content_type() == "audio/wav"
+            preview = response.read()
+        assert preview.startswith(b"RIFF")
+        role_request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/api/drums/events/{event_id}/role",
+            data=json.dumps({"role": "KICK", "note": "Auditioned in Studio."}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(role_request) as response:
+            reviewed = json.load(response)
+        reviewed_event = next(row for row in reviewed["events"] if row["event_id"] == event_id)
+        assert reviewed_event["role"] == "KICK"
+        assert reviewed_event["role_status"] == "HUMAN_VERIFIED"
+        assert reviewed["musical_writes"] == 0
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == original_artifact_sha
         with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/ui/drums.html") as response:
             assert b"Read-only drum event workbench" in response.read()
     finally:

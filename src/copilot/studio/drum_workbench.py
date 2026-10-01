@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 from typing import Any
 
 from copilot.audio.drum_events_v1 import DrumEventSetV1
+from copilot.audio.drum_events_v1 import apply_human_role_correction
 from copilot.sample_library.config import index_path as sample_index_path
 from copilot.sample_library.config import load_config as load_sample_library_config
 from copilot.sample_library.library_v1 import load_index
@@ -73,6 +75,7 @@ def load_drum_workbench(
     *,
     artifact_path: str | Path | None = None,
     manifest_path: str | Path | None = None,
+    review_overlay_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Load and validate the exact event artifact and its manifest-backed source.
 
@@ -114,6 +117,29 @@ def load_drum_workbench(
         return _unavailable("SOURCE_UNAVAILABLE", "Manifest-backed immutable source is missing.")
     if _sha256(source_path).lower() != expected_hash:
         return _unavailable("SOURCE_HASH_MISMATCH", "Immutable source bytes no longer match the manifest.")
+
+    review_path = Path(review_overlay_path) if review_overlay_path else None
+    if review_path and review_path.is_file():
+        try:
+            overlay = json.loads(review_path.read_text(encoding="utf-8"))
+            if (
+                overlay.get("schema_version") != "drum-human-review-v1"
+                or overlay.get("source_asset_id") != event_set.source_asset_id
+                or str(overlay.get("source_sha256", "")).lower() != event_set.source_sha256.lower()
+                or not isinstance(overlay.get("corrections"), list)
+            ):
+                return _unavailable("REVIEW_SOURCE_MISMATCH", "Human review overlay does not belong to this immutable source.")
+            for correction in overlay["corrections"]:
+                event_set = apply_human_role_correction(
+                    event_set,
+                    event_id=str(correction["event_id"]),
+                    role=correction["role"],
+                    reviewer_id=str(correction["reviewer_id"]),
+                    note=correction.get("note"),
+                    recorded_at_utc=str(correction["recorded_at_utc"]),
+                )
+        except Exception as exc:
+            return _unavailable("INVALID_REVIEW_OVERLAY", type(exc).__name__)
 
     events: list[dict[str, Any]] = []
     sample_matching = _sample_matching(event_set)
@@ -180,6 +206,7 @@ def load_drum_workbench(
         "grid": {
             "tempo_bpm": event_set.tempo_bpm,
             "tempo_status": event_set.tempo_status,
+            "tempo_decisions": [decision.model_dump(mode="json") for decision in event_set.tempo_decisions],
             "tempo_source": event_set.tempo_source,
             "filename_hint_bpm": event_set.tempo_label_hint_bpm,
             "alternate_tempos_bpm": event_set.alternate_tempos_bpm,
@@ -192,3 +219,42 @@ def load_drum_workbench(
         "reconstruction": build_drum_reconstruction(event_set).model_dump(mode="json"),
         "events": events,
     }
+
+
+def read_drum_event_preview(
+    event_id: str,
+    *,
+    artifact_path: str | Path | None = None,
+    manifest_path: str | Path | None = None,
+) -> tuple[bytes, int]:
+    """Return a short source-context WAV for one verified event ID only."""
+    view = load_drum_workbench(artifact_path=artifact_path, manifest_path=manifest_path)
+    if view.get("status") != "READY":
+        raise ValueError(str(view.get("status") or "DRUM_SOURCE_NOT_READY"))
+    configured_artifact = artifact_path or os.environ.get("COPILOT_STUDIO_DRUM_EVENT_SET")
+    if not configured_artifact:
+        raise ValueError("DRUM_EVENT_ARTIFACT_NOT_CONFIGURED")
+    event_file = Path(configured_artifact).expanduser()
+    event_set = DrumEventSetV1.model_validate_json(event_file.read_text(encoding="utf-8"))
+    event = next((item for item in event_set.events if item.event_id == event_id), None)
+    if event is None:
+        raise KeyError(event_id)
+    start = event.source_slice.start_seconds
+    end = event.source_slice.end_seconds
+    if end - start > 1.0 or start < event_set.region_start_seconds or end > event_set.region_end_seconds:
+        raise ValueError("DRUM_PREVIEW_WINDOW_OUT_OF_BOUNDS")
+    source_path = Path(event_set.source_path).expanduser()
+    if not source_path.is_file() or _sha256(source_path).lower() != event_set.source_sha256.lower():
+        raise ValueError("DRUM_PREVIEW_SOURCE_HASH_MISMATCH")
+
+    import soundfile as sf
+
+    with sf.SoundFile(str(source_path), mode="r") as source:
+        sample_rate = int(source.samplerate)
+        first = max(0, int(start * sample_rate))
+        frame_count = max(1, int(end * sample_rate) - first)
+        source.seek(first)
+        audio = source.read(frame_count, dtype="float32", always_2d=True)
+    buffer = io.BytesIO()
+    sf.write(buffer, audio, sample_rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue(), sample_rate

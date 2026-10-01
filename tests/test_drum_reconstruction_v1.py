@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from copilot.audio.drum_events_v1 import DrumAttackFeatures, build_drum_event_set
+from copilot.audio.drum_events_v1 import (
+    DrumAttackFeatures,
+    apply_human_tempo_confirmation,
+    build_drum_event_set,
+)
 from copilot.musicplan.drum_reconstruction_v1 import build_drum_reconstruction
 
 
@@ -72,3 +76,28 @@ def test_unmapped_event_is_preserved_as_deferred_not_dropped(tmp_path: Path) -> 
     assert event_set.events[0].event_id in result.deferred_source_event_ids
     assert all(row.source_event_id != event_set.events[0].event_id for row in result.events)
     assert "UNMAPPED_SOURCE_EVENTS_PRESENT" in result.blockers
+
+
+def test_human_tempo_confirmation_revises_grid_and_preserves_automatic_history(tmp_path: Path) -> None:
+    event_set = _event_set(tmp_path)
+    original_qn = event_set.events[0].musical_position.onset_qn
+    confirmed = apply_human_tempo_confirmation(
+        event_set,
+        tempo_bpm=125.0,
+        reviewer_id="human-user",
+        note="User confirmed operating tempo as 125 BPM.",
+        recorded_at_utc="2026-10-01T12:00:00+00:00",
+    )
+
+    assert event_set.tempo_bpm == 120.0
+    assert event_set.tempo_status == "PROVISIONAL"
+    assert event_set.events[0].musical_position.onset_qn == original_qn
+    assert confirmed.tempo_bpm == 125.0
+    assert confirmed.tempo_source == "HUMAN_CONFIRMED"
+    assert confirmed.tempo_status == "VERIFIED"
+    assert confirmed.tempo_decisions[0].previous_tempo_bpm == 120.0
+    assert confirmed.tempo_decisions[0].previous_tempo_status == "PROVISIONAL"
+    assert confirmed.tempo_decisions[0].source == "DIRECT_USER_INSTRUCTION"
+    assert confirmed.events[0].musical_position.tempo_bpm == 125.0
+    assert confirmed.events[0].musical_position.tempo_status == "VERIFIED"
+    assert confirmed.tempo_label_hint_bpm is None

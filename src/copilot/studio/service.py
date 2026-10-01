@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -85,7 +87,7 @@ from copilot.studio.contracts import (
     VersionRecord,
 )
 from copilot.schemas.session import SessionState
-from copilot.studio.drum_workbench import load_drum_workbench
+from copilot.studio.drum_workbench import load_drum_workbench, read_drum_event_preview
 from copilot.studio.persistence import (
     MUSICAL_DECISION_ACCEPTED,
     MUSICAL_DECISION_KEPT,
@@ -1770,8 +1772,75 @@ class StudioService:
             return {"status": "ENVIRONMENT_STATUS_UNAVAILABLE", "reason": str(exc), "musical_writes": 0}
 
     def drum_workbench(self) -> dict[str, Any]:
-        """Expose the explicitly configured, hash-verified drum analysis read-only."""
-        return load_drum_workbench()
+        """Expose hash-verified drum evidence plus the separate local human review."""
+        return load_drum_workbench(review_overlay_path=self._drum_review_path())
+
+    def _drum_review_path(self) -> Path:
+        return self.data_dir / "drum_reviews" / "current.json"
+
+    def correct_drum_event_role(self, event_id: str, role: str, note: str | None = None) -> dict[str, Any]:
+        """Persist a user-entered label correction, not an analyzer or DAW write."""
+        allowed_roles = {"KICK", "SNARE", "CLAP", "CLOSED_HAT", "OPEN_HAT", "PERCUSSION", "OTHER", "UNKNOWN"}
+        normalized_role = str(role).strip().upper()
+        if normalized_role not in allowed_roles:
+            raise ValueError("DRUM_REVIEW_ROLE_UNSUPPORTED")
+        clean_note = str(note or "").strip()
+        if len(clean_note) > 500:
+            raise ValueError("DRUM_REVIEW_NOTE_TOO_LONG")
+        view = self.drum_workbench()
+        if view.get("status") != "READY":
+            raise ValueError(f"DRUM_REVIEW_SOURCE_NOT_READY:{view.get('status')}")
+        event = next((item for item in view["events"] if item["event_id"] == event_id), None)
+        if event is None:
+            raise KeyError(event_id)
+
+        review_path = self._drum_review_path()
+        if review_path.is_file():
+            payload = json.loads(review_path.read_text(encoding="utf-8"))
+            if (
+                payload.get("source_asset_id") != view["source"]["asset_id"]
+                or payload.get("source_sha256", "").lower() != view["source"]["sha256"].lower()
+                or payload.get("schema_version") != "drum-human-review-v1"
+            ):
+                raise ValueError("DRUM_REVIEW_SOURCE_MISMATCH")
+        else:
+            payload = {
+                "schema_version": "drum-human-review-v1",
+                "source_asset_id": view["source"]["asset_id"],
+                "source_sha256": view["source"]["sha256"],
+                "corrections": [],
+            }
+        corrections = payload["corrections"]
+        previous = next((row for row in reversed(corrections) if row.get("event_id") == event_id), None)
+        if previous and previous.get("role") == normalized_role and previous.get("note") == (clean_note or None):
+            return view
+        corrections.append({
+            "event_id": event_id,
+            "role": normalized_role,
+            "reviewer_id": "STUDIO_LOCAL_HUMAN",
+            "note": clean_note or None,
+            "recorded_at_utc": utc_now(),
+        })
+        review_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=".drum-review-", suffix=".tmp", dir=review_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, review_path)
+        except Exception:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise
+        return self.drum_workbench()
+
+    def drum_event_preview(self, event_id: str) -> tuple[bytes, int]:
+        """Read a bounded audition window from the manifest-verified source."""
+        return read_drum_event_preview(event_id)
 
     def open_transport_event_client(self) -> tuple[AbletonTcpAdapter, AbletonTransportEventClient, float]:
         """Open a push-only transport subscription after readiness and identity checks."""

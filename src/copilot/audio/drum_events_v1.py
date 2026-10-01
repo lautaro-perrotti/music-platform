@@ -55,7 +55,7 @@ class DrumSourceSliceRef(BaseModel):
 class DrumMusicalPosition(BaseModel):
     tempo_bpm: float = Field(gt=0)
     tempo_source: str
-    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED"]
+    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED", "VERIFIED"]
     alternate_tempos_bpm: list[float] = Field(default_factory=list)
     meter_numerator: int = Field(gt=0)
     meter_denominator: int = Field(gt=0)
@@ -110,6 +110,18 @@ class DrumEventChange(BaseModel):
     recorded_at_utc: str = Field(min_length=1)
 
 
+class DrumTempoDecisionV1(BaseModel):
+    previous_tempo_bpm: float = Field(gt=0)
+    previous_tempo_source: str
+    previous_tempo_status: str
+    confirmed_tempo_bpm: float = Field(gt=0)
+    authority: Literal["HUMAN"] = "HUMAN"
+    source: Literal["DIRECT_USER_INSTRUCTION"] = "DIRECT_USER_INSTRUCTION"
+    reviewer_id: str = Field(min_length=1)
+    note: str = Field(min_length=1)
+    recorded_at_utc: str = Field(min_length=1)
+
+
 class DrumEventV1(BaseModel):
     event_id: str
     source_asset_id: str
@@ -154,11 +166,12 @@ class DrumEventSetV1(BaseModel):
     tempo_label_hint_bpm: float | None = Field(default=None, gt=0)
     tempo_bpm: float = Field(gt=0)
     tempo_source: str
-    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED"]
+    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED", "VERIFIED"]
     alternate_tempos_bpm: list[float] = Field(default_factory=list)
     meter_numerator: int = Field(gt=0)
     meter_denominator: int = Field(gt=0)
     meter_status: Literal["ASSUMED", "SUPPORTED", "HUMAN_VERIFIED"]
+    tempo_decisions: list[DrumTempoDecisionV1] = Field(default_factory=list)
     events: list[DrumEventV1] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     no_ableton_access: Literal[True] = True
@@ -267,7 +280,7 @@ def _grid_position(
     *,
     tempo_bpm: float,
     tempo_source: str,
-    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED"],
+    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED", "VERIFIED"],
     alternate_tempos_bpm: list[float],
     meter_numerator: int,
     meter_denominator: int,
@@ -301,6 +314,59 @@ def _grid_position(
     )
 
 
+def apply_human_tempo_confirmation(
+    event_set: DrumEventSetV1,
+    *,
+    tempo_bpm: float,
+    reviewer_id: str,
+    note: str,
+    recorded_at_utc: str | None = None,
+) -> DrumEventSetV1:
+    """Return a new event set with a human-authorized operating grid.
+
+    Original automatic tempo/source/alternates are preserved in the decision
+    history; only the derived grid projection is recalculated. The input model
+    is not mutated, so callers can persist this as a distinct derived artifact.
+    """
+    if not reviewer_id.strip() or not note.strip():
+        raise ValueError("DRUM_TEMPO_CONFIRMATION_PROVENANCE_REQUIRED")
+    if not math.isfinite(tempo_bpm) or tempo_bpm <= 0:
+        raise ValueError("DRUM_TEMPO_CONFIRMATION_INVALID_BPM")
+    confirmed = event_set.model_copy(deep=True)
+    timestamp = recorded_at_utc or datetime.now(timezone.utc).isoformat()
+    confirmed.tempo_decisions.append(DrumTempoDecisionV1(
+        previous_tempo_bpm=event_set.tempo_bpm,
+        previous_tempo_source=event_set.tempo_source,
+        previous_tempo_status=event_set.tempo_status,
+        confirmed_tempo_bpm=tempo_bpm,
+        reviewer_id=reviewer_id,
+        note=note,
+        recorded_at_utc=timestamp,
+    ))
+    confirmed.tempo_bpm = tempo_bpm
+    confirmed.tempo_source = "HUMAN_CONFIRMED"
+    confirmed.tempo_status = "VERIFIED"
+    confirmed.limitations = [
+        limitation for limitation in confirmed.limitations
+        if limitation != "TEMPO_LABEL_HINT_CONFLICTS_WITH_SELECTED_TEMPO_HYPOTHESIS"
+    ]
+    confirmed.limitations.append("AUTOMATIC_TEMPO_HYPOTHESES_RETAINED_IN_TEMPO_DECISION_HISTORY")
+    for event in confirmed.events:
+        position = event.musical_position
+        event.musical_position = _grid_position(
+            event.onset_seconds,
+            tempo_bpm=tempo_bpm,
+            tempo_source="HUMAN_CONFIRMED",
+            tempo_status="VERIFIED",
+            alternate_tempos_bpm=list(event_set.alternate_tempos_bpm),
+            meter_numerator=position.meter_numerator,
+            meter_denominator=position.meter_denominator,
+            meter_status=position.meter_status,
+            grid_origin_seconds=position.grid_origin_seconds,
+        )
+    return confirmed
+
+
 def build_drum_event_set(
     audio_path: Path,
     *,
@@ -308,7 +374,7 @@ def build_drum_event_set(
     source_sha256: str,
     tempo_bpm: float,
     tempo_source: str,
-    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED"] = "PROVISIONAL",
+    tempo_status: Literal["PROVISIONAL", "SUPPORTED", "HUMAN_VERIFIED", "VERIFIED"] = "PROVISIONAL",
     alternate_tempos_bpm: list[float] | None = None,
     tempo_label_hint_bpm: float | None = None,
     meter_numerator: int = 4,
@@ -489,6 +555,8 @@ __all__ = [
     "DrumMusicalPosition",
     "DrumRoleHypothesis",
     "DrumSourceSliceRef",
+    "DrumTempoDecisionV1",
+    "apply_human_tempo_confirmation",
     "apply_human_role_correction",
     "build_drum_event_set",
 ]

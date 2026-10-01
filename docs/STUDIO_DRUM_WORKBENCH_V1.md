@@ -54,3 +54,13 @@ python -m copilot.cli sample-library index
 
 Do not replace this with a whole-drive scan. A real candidate shortlist has not
 yet been produced for the 32 reference events.
+
+An explicit user tempo confirmation is written as a separate derived event
+artifact through `apply_human_tempo_confirmation`; it updates the operating
+grid and records prior automatic tempo/source/status in `tempo_decisions`.
+The original event artifact and immutable audio remain unchanged. The Studio
+event inspector can play only the detector's bounded audition-context window
+for a source-verified event ID (`GET /api/drums/events/{event_id}/audio`) and
+submit a per-event human role label (`POST /api/drums/events/{event_id}/role`).
+Role changes are kept in a source-hash-bound review overlay under the Studio
+data directory and affect no Ableton state.

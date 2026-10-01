@@ -22,6 +22,14 @@ readback, capture, or A/B was performed. Root configuration instructions are
 in `docs/STUDIO_DRUM_WORKBENCH_V1.md`. Do not report the drum production slice
 as complete from this offline proposal.
 
+The user confirmed the operating tempo as 125 BPM. A separate derived event
+artifact now records `tempo_bpm=125.0`, `tempo_source=HUMAN_CONFIRMED`, and
+`tempo_status=VERIFIED`; the preceding automatic tempo/status, `206 BPM`
+filename hint, and alternate 61.86 BPM hypothesis are retained. The source
+audio and original event artifact are unchanged. Studio now provides bounded
+per-event source-context audition and source-hash-bound human role corrections;
+no such listening/relabeling has yet been completed by a human in this UI.
+
 ## Realtime platform baseline (2026-10-01, partial)
 
 The vendored Remote Script now exposes a push-only `events.transport.v1`

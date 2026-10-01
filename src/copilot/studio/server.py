@@ -71,6 +71,12 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return self._json(self.service.ableton_status())
             if path == "/api/drums/events":
                 return self._json(self.service.drum_workbench())
+            parts = [part for part in path.split("/") if part]
+            if len(parts) == 5 and parts[:3] == ["api", "drums", "events"] and parts[4] == "audio":
+                audio, _sample_rate = self.service.drum_event_preview(parts[3])
+                self._headers(200, "audio/wav", len(audio))
+                self.wfile.write(audio)
+                return
             if path == "/api/ableton/transport/stream":
                 return self._stream_transport_events()
             if path == "/api/produce/capabilities":
@@ -115,6 +121,12 @@ class StudioHandler(BaseHTTPRequestHandler):
                 project = self.service.create_project(str(body.get("name") or "Untitled project"))
                 return self._json(project.model_dump(mode="json"), 201)
             parts = [part for part in path.split("/") if part]
+            if len(parts) == 5 and parts[:3] == ["api", "drums", "events"] and parts[4] == "role":
+                body = self._body()
+                result = self.service.correct_drum_event_role(
+                    parts[3], str(body.get("role") or ""), body.get("note")
+                )
+                return self._json(result)
             if len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "generations":
                 body = self._body()
                 key = self.headers.get("Idempotency-Key") or body.get("idempotency_key")

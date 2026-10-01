@@ -127,7 +127,7 @@ def build_drum_reconstruction(event_set: DrumEventSetV1) -> DrumReconstructionV1
         blockers.append("SAMPLE_SELECTION_REQUIRED")
     if any(event.role_status != "HUMAN_VERIFIED" for event in mapped):
         blockers.append("ROLE_HYPOTHESES_NOT_HUMAN_VERIFIED")
-    if event_set.tempo_status != "HUMAN_VERIFIED" or event_set.meter_status != "HUMAN_VERIFIED":
+    if event_set.tempo_status not in {"HUMAN_VERIFIED", "VERIFIED"} or event_set.meter_status != "HUMAN_VERIFIED":
         blockers.append("MUSICAL_GRID_NOT_HUMAN_VERIFIED")
     blockers.append("MIDI_NOTE_DURATION_POLICY_NOT_DEFINED")
     if deferred:
