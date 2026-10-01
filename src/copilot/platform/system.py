@@ -59,6 +59,31 @@ def user_environment_value(name: str) -> str | None:
     return text or None
 
 
+def user_config_directory(
+    application_name: str,
+    *,
+    override_variable: str,
+    linux_directory_name: str | None = None,
+) -> Path:
+    """Resolve a per-user application config directory in the platform layer."""
+    override = os.environ.get(override_variable)
+    if override:
+        return Path(override).expanduser()
+
+    system = host_system()
+    if system == "Windows":
+        base = os.environ.get("APPDATA")
+        root = Path(base).expanduser() if base else Path.home() / "AppData" / "Roaming"
+        return root / application_name
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / application_name
+
+    directory_name = linux_directory_name or application_name.lower()
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(xdg).expanduser() if xdg else Path.home() / ".config"
+    return root / directory_name
+
+
 def control_surface_steps(system: str | None = None) -> list[str]:
     name = system or host_system()
     python_path = Path(".venv") / ("Scripts" if name == "Windows" else "bin") / ("python.exe" if name == "Windows" else "python")

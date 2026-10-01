@@ -37,26 +37,13 @@ class SampleLibraryConfig(BaseModel):
 
 def default_config_dir() -> Path:
     """Return a platform-native per-user config directory without repo paths."""
-    explicit = os.environ.get("MUSIC_PLATFORM_CONFIG_DIR")
-    if explicit:
-        return Path(explicit).expanduser()
+    from copilot.platform.system import user_config_directory
 
-    if os.name == "nt":
-        base = os.environ.get("APPDATA")
-        return (Path(base) if base else Path.home() / "AppData" / "Roaming") / "MusicPlatform"
-
-    if sys_platform_is_macos():
-        return Path.home() / "Library" / "Application Support" / "MusicPlatform"
-
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    return (Path(xdg).expanduser() if xdg else Path.home() / ".config") / "music-platform"
-
-
-def sys_platform_is_macos() -> bool:
-    # Keep platform detection local and dependency-free.
-    import sys
-
-    return sys.platform == "darwin"
+    return user_config_directory(
+        "MusicPlatform",
+        override_variable="MUSIC_PLATFORM_CONFIG_DIR",
+        linux_directory_name="music-platform",
+    )
 
 
 def config_path(config_dir: Path | None = None) -> Path:
