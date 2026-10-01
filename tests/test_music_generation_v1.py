@@ -10,7 +10,10 @@ from copilot.music_generation.ace_cloud import (
     ACE_CLOUD_MIN_VRAM_GIB,
     AceStepCloudProvider,
 )
-from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider, build_elevenlabs_composition_plan
+from copilot.music_generation.elevenlabs import (
+    ElevenLabsMusicProvider,
+    build_elevenlabs_prompt,
+)
 from copilot.music_generation.benchmark import (
     CandidateRecord,
     ProviderComparisonReport,
@@ -21,7 +24,6 @@ from copilot.music_generation.benchmark import (
     validate_generated_audio,
 )
 from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext
-from copilot.music_generation.generated_asset_import import stage_generated_asset
 from copilot.music_generation.schemas import GeneratedAsset, GenerationBatch, GenerationBrief, GeneratorHealth, GeneratorRequest, ModelManifest, PerformanceManifest, RightsManifest
 from copilot.music_generation.registry import MusicGeneratorRegistry
 from copilot.music_generation.resources import StorageVolume, WorkerResources, choose_execution_route
@@ -403,26 +405,6 @@ def test_executive_producer_boundary_does_not_invent_writes() -> None:
     assert decision.production_refinement_intents == []
 
 
-def test_elevenlabs_plan_preserves_brief_intent_and_exact_duration() -> None:
-    brief = GenerationBrief(
-        brief_id="eleven-plan",
-        user_intent="instrumental electronic groove with evolving texture",
-        target_duration_s=60,
-        tempo_bpm=127,
-        key_context="A minor",
-        structural_intent=["INTRO", "GROOVE", "DROP", "OUTRO"],
-        energy_intent="rising then peak",
-        groove_intent="four on the floor with syncopated hats",
-        density_intent="sparse intro, dense peak",
-    )
-    plan = build_elevenlabs_composition_plan(brief)
-    assert sum(chunk["duration_ms"] for chunk in plan["chunks"]) == 60_000
-    assert [chunk["text"] for chunk in plan["chunks"]] == ["[INTRO]", "[GROOVE]", "[DROP]", "[OUTRO]"]
-    assert "instrumental electronic groove with evolving texture" in plan["chunks"][0]["positive_styles"]
-    assert "127 BPM" in plan["chunks"][0]["positive_styles"]
-    assert "vocals" in plan["chunks"][0]["negative_styles"]
-
-
 def test_elevenlabs_provider_stops_at_real_credential_boundary(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     provider = ElevenLabsMusicProvider(api_key=None)
@@ -439,15 +421,218 @@ def test_elevenlabs_provider_stops_at_real_credential_boundary(tmp_path: Path, m
     assert batch.failures[0]["code"] == "CREDENTIAL_REQUIRED"
 
 
-def test_elevenlabs_detailed_multipart_parser_keeps_metadata_and_audio() -> None:
-    body = (
-        b"--demo\r\nContent-Type: application/json\r\n\r\n"
-        b'{"song_metadata":{"title":"test"}}\r\n'
-        b"--demo\r\nContent-Type: audio/mpeg\r\n\r\nMP3BYTES\r\n"
-        b"--demo--\r\n"
+def test_elevenlabs_simple_prompt_request_is_pinned_and_truthful_about_seed(tmp_path: Path, monkeypatch) -> None:
+    import json
+
+    import numpy as np
+    import soundfile as sf
+
+    provider = ElevenLabsMusicProvider(api_key="test-secret", api_url="https://unit.test")
+    brief = GenerationBrief(
+        brief_id="eleven-simple",
+        user_intent="Futuristic French house instrumental with warm syncopated bass",
+        target_duration_s=10,
+        tempo_bpm=124,
+        instrumental=True,
     )
-    metadata, audio = ElevenLabsMusicProvider._parse_detailed_response(
-        body, "multipart/mixed; boundary=demo"
+    request = GeneratorRequest(request_id="req-candidate-03", brief=brief, seed=1723, output_dir=tmp_path)
+    captured = {}
+
+    class Headers(dict):
+        def get(self, key, default=None):
+            return super().get(key.lower(), default)
+
+    class Response:
+        headers = Headers({"content-type": "audio/mpeg", "song-id": "song-abc", "x-request-id": "req-abc"})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, *_args):
+            return b"mock-mp3"
+
+    def fake_urlopen(http_request, timeout):
+        captured["url"] = http_request.full_url
+        captured["headers"] = dict(http_request.header_items())
+        captured["body"] = json.loads(http_request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    def fake_decode(_source, target):
+        audio = np.full((48000 * 10, 2), 0.05, dtype=np.float32)
+        sf.write(target, audio, 48000)
+
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.shutil.which", lambda _name: "ffmpeg")
+    monkeypatch.setattr(provider, "_decode_mp3_to_wav", fake_decode)
+    batch = provider.generate(request)
+
+    assert batch.status == "GENERATED"
+    asset = batch.assets[0]
+    assert captured["url"] == "https://unit.test/v1/music?output_format=auto"
+    assert captured["body"] == {
+        "prompt": build_elevenlabs_prompt(brief),
+        "music_length_ms": 10_000,
+        "model_id": "music_v2_5",
+        "force_instrumental": True,
+        "store_for_inpainting": False,
+        "sign_with_c2pa": False,
+    }
+    assert "xi-api-key" not in asset.provider_request
+    assert asset.provider_request["provider_seed_applied"] is False
+    assert asset.provider_request["internal_candidate_seed"] == 1723
+    assert asset.provider_metadata["song_id"] == "song-abc"
+    assert asset.provider_metadata["provider_seed_applied"] is False
+    assert asset.sha256 and asset.path.is_file()
+
+
+def test_elevenlabs_retries_transient_status_once_but_not_auth(tmp_path: Path, monkeypatch) -> None:
+    import io
+    import urllib.error
+
+    provider = ElevenLabsMusicProvider(api_key="test-secret")
+    request = GeneratorRequest(
+        request_id="retry-contract",
+        brief=GenerationBrief(brief_id="retry", user_intent="instrumental", target_duration_s=5),
+        seed=7,
+        output_dir=tmp_path,
     )
-    assert metadata["song_metadata"]["title"] == "test"
-    assert audio == b"MP3BYTES"
+    calls = []
+
+    def transient_then_auth(_request, timeout):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError("https://unit.test", 503, "unavailable", {}, io.BytesIO(b"retry"))
+        raise urllib.error.HTTPError("https://unit.test", 401, "unauthorized", {}, io.BytesIO(b"test-secret"))
+
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.urllib.request.urlopen", transient_then_auth)
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.shutil.which", lambda _name: "ffmpeg")
+    batch = provider.generate(request)
+    assert len(calls) == 2
+    failure = batch.failures[0]
+    assert failure["provider_error"] == "AUTHENTICATION_FAILED"
+    assert failure["http_status"] == 401
+    assert "test-secret" not in str(failure)
+
+
+def test_elevenlabs_prompt_rejects_oversize_without_call() -> None:
+    brief = GenerationBrief(brief_id="too-long", user_intent="x" * 4101, target_duration_s=10)
+    try:
+        build_elevenlabs_prompt(brief)
+    except ValueError as exc:
+        assert str(exc) == "PROMPT_TOO_LONG"
+    else:
+        raise AssertionError("oversize prompts must be rejected, not silently truncated")
+
+
+def test_elevenlabs_refuses_c2pa_when_normalizing_to_wav(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.shutil.which", lambda _name: "ffmpeg")
+    provider = ElevenLabsMusicProvider(api_key="test-secret")
+    request = GeneratorRequest(
+        request_id="c2pa-preservation",
+        brief=GenerationBrief(brief_id="c2pa", user_intent="instrumental", target_duration_s=5),
+        seed=1,
+        output_dir=tmp_path,
+        settings={"sign_with_c2pa": True},
+    )
+    monkeypatch.setattr(provider, "_post_audio", lambda *_args: (_ for _ in ()).throw(AssertionError("must not call provider")))
+    batch = provider.generate(request)
+    assert batch.failures[0]["code"] == "OUTPUT_INVALID"
+    assert batch.failures[0]["reason"] == "C2PA_SIGNED_MP3_PRESERVATION_NOT_SUPPORTED_BY_WAV_NORMALIZATION"
+
+
+def test_elevenlabs_stem_separation_validates_zip_and_preserves_opaque_names(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+    import io
+    import shutil
+    import zipfile
+
+    import numpy as np
+    import soundfile as sf
+    from copilot.music_generation.schemas import RightsClassification
+
+    source = tmp_path / "source.wav"
+    sf.write(source, np.full((48_000, 2), 0.05, dtype=np.float32), 48_000)
+    stem_buffer = io.BytesIO()
+    sf.write(stem_buffer, np.full((48_000, 2), 0.03, dtype=np.float32), 48_000, format="WAV")
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as archive:
+        archive.writestr("provider-folder/unspecified_01.wav", stem_buffer.getvalue())
+
+    class Headers(dict):
+        def get(self, key, default=None):
+            return super().get(key.lower(), default)
+
+    class Response:
+        headers = Headers({"content-type": "application/zip"})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, *_args):
+            return zip_buffer.getvalue()
+
+    captured = {}
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["content_type"] = dict(req.header_items()).get("Content-type")
+        captured["data"] = req.data
+        return Response()
+
+    provider = ElevenLabsMusicProvider(api_key="test-secret")
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("copilot.music_generation.elevenlabs.shutil.which", lambda _name: "ffmpeg")
+    monkeypatch.setattr(provider, "_decode_mp3_to_wav", lambda source_path, target: shutil.copyfile(source_path, target))
+    model = ModelManifest(provider="elevenlabs-music", model_id="music_v2_5")
+    source_asset = GeneratedAsset(
+        asset_id="elevenlabs-music:source-id", path=source,
+        sha256=hashlib.sha256(source.read_bytes()).hexdigest(), bytes=source.stat().st_size,
+        duration_s=1.0, sample_rate=48_000, non_silent=True, model=model, seed=42,
+        prompt="instrumental", performance=PerformanceManifest(device="elevenlabs-music"),
+        rights_manifest=RightsManifest(output_use=RightsClassification.COMMERCIAL_ALLOWED),
+    )
+    derived = provider.separate_stems(source_asset, output_dir=tmp_path / "stems")
+    assert len(derived) == 1
+    assert derived[0]["provider_member_name"] == "unspecified_01.wav"
+    assert derived[0]["provider_request"]["stem_variation_id"] == "six_stems_v1"
+    assert derived[0]["source_asset_id"] == source_asset.asset_id
+    assert Path(derived[0]["path"]).is_file()
+    assert "stem_variation_id=six_stems_v1" in captured["url"]
+    assert b"test-secret" not in captured["data"]
+
+
+def test_internal_seed_does_not_claim_eleven_provider_determinism(tmp_path: Path) -> None:
+    import hashlib
+
+    import numpy as np
+    import soundfile as sf
+
+    from copilot.music_generation.benchmark import CandidateRecord, TechnicalValidation, _relations
+
+    records = []
+    for ordinal, level in enumerate((0.05, 0.08), 1):
+        path = tmp_path / f"seed-{ordinal}.wav"
+        sf.write(path, np.full((4800, 1), level, dtype=np.float32), 48_000)
+        asset = GeneratedAsset(
+            asset_id=f"elevenlabs-music:seed-{ordinal}", path=path,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(), bytes=path.stat().st_size,
+            duration_s=0.1, sample_rate=48_000, non_silent=True,
+            model=ModelManifest(provider="elevenlabs-music", model_id="music_v2_5"),
+            seed=99, prompt="same prompt", performance=PerformanceManifest(device="elevenlabs-music"),
+            rights_manifest=RightsManifest(), provider_metadata={"provider_seed_applied": False},
+        )
+        records.append(CandidateRecord(
+            candidate_id=f"candidate-{ordinal}", attempt=ordinal, asset=asset,
+            bundle_path=tmp_path / f"bundle-{ordinal}", technical_validation=TechnicalValidation(status="VALID"),
+        ))
+    relation = _relations(records, {})[0]
+    assert relation.same_seed is False  # provider never received this bookkeeping seed
+    assert relation.effectively_duplicate is False
+    assert "same_provider_seed_and_model" not in relation.basis

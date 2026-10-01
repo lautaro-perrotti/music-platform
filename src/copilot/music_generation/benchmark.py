@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import shutil
 import random
 from pathlib import Path
@@ -202,13 +201,16 @@ def _relations(records: list[CandidateRecord], embeddings: dict[str, Embedding])
     for index, left in enumerate(records):
         for right in records[index + 1:]:
             exact_hash = left.asset.sha256 == right.asset.sha256
-            same_seed = left.asset.seed == right.asset.seed
+            same_internal_seed = left.asset.seed == right.asset.seed
+            left_seed_applied = (left.asset.provider_metadata or {}).get("provider_seed_applied", True)
+            right_seed_applied = (right.asset.provider_metadata or {}).get("provider_seed_applied", True)
+            same_seed = same_internal_seed and bool(left_seed_applied) and bool(right_seed_applied)
             similarity = _cosine(embeddings.get(left.candidate_id), embeddings.get(right.candidate_id))
             basis: list[str] = []
             if exact_hash:
                 basis.append("identical_sha256")
             if same_seed and left.asset.model.model_id == right.asset.model.model_id:
-                basis.append("same_seed_and_model")
+                basis.append("same_provider_seed_and_model")
             if similarity is not None and similarity >= 0.995:
                 basis.append("clap_cosine_ge_0.995")
             relations.append(DuplicateRelation(
