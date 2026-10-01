@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from copilot.audio.capture_capability import CaptureMode
@@ -16,6 +17,7 @@ from copilot.audio.live_capture import (
 )
 from copilot.audio.tap_trust import UDP_REMOVED_PROTOCOL
 from copilot.daw.ableton_tcp import AbletonTcpAdapter
+from copilot.daw.adapter import DawError
 
 
 class _DummyDaw:
@@ -95,6 +97,64 @@ def test_tcp_stats_count_commands() -> None:
     assert stats["total"] == 3
     assert stats["get_track_info"] == 3
     assert stats["full_session_snapshots"] == 1
+
+
+def test_tcp_stats_measure_bounded_bridge_round_trip_latency(monkeypatch) -> None:
+    import json
+
+    import copilot.daw.ableton_tcp as tcp_module
+
+    class SocketStub:
+        def __init__(self) -> None:
+            self.request = None
+
+        def sendall(self, payload: bytes) -> None:
+            self.request = json.loads(payload)
+
+        def settimeout(self, _timeout: float) -> None:
+            return None
+
+    adapter = AbletonTcpAdapter()
+    adapter.capabilities = {"health"}
+    adapter._sock = SocketStub()
+    adapter._recv_json = lambda: {
+        "request_id": adapter._sock.request["request_id"],
+        "result": {"status": "ok"},
+    }
+    clock = iter([10.0, 10.0125])
+    monkeypatch.setattr(tcp_module.time, "perf_counter", lambda: next(clock))
+
+    assert adapter._command("health_check") == {"status": "ok"}
+    stats = adapter.tcp_stats()["rpc_round_trip_ms"]
+    assert stats["scope"] == "CORE_BRIDGE_REQUEST_RESPONSE"
+    assert stats["all"] == {"count": 1, "p50": 12.5, "p95": 12.5, "max": 12.5}
+    assert stats["by_command"]["health_check"]["count"] == 1
+    assert stats["outcomes"] == {"RESPONSE": 1}
+
+
+def test_tcp_stats_record_timed_out_read_without_claiming_success(monkeypatch) -> None:
+    import copilot.daw.ableton_tcp as tcp_module
+
+    class SocketStub:
+        def sendall(self, _payload: bytes) -> None:
+            return None
+
+        def settimeout(self, _timeout: float) -> None:
+            return None
+
+    adapter = AbletonTcpAdapter()
+    adapter.capabilities = {"health"}
+    adapter._sock = SocketStub()
+    adapter._recv_json = lambda: (_ for _ in ()).throw(TimeoutError())
+    clock = iter([20.0, 20.025])
+    monkeypatch.setattr(tcp_module.time, "perf_counter", lambda: next(clock))
+
+    with pytest.raises(DawError, match="Timeout waiting for Ableton"):
+        adapter._command("health_check")
+
+    stats = adapter.tcp_stats()["rpc_round_trip_ms"]
+    assert stats["all"] == {"count": 1, "p50": 25.0, "p95": 25.0, "max": 25.0}
+    assert stats["outcomes"] == {"ERROR": 1}
 
 
 def test_runtime_protocol_expectation_matches_udp_removed() -> None:

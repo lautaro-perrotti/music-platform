@@ -1,6 +1,19 @@
 # CURRENT_STATE.md
 
-Date: 2026-09-27. Runtime > this file when they disagree.
+Date: 2026-10-01. Runtime > this file when they disagree.
+
+## Realtime platform baseline (2026-10-01, partial)
+
+Repository inspection found no Ableton-to-Core event stream. The vendored
+Remote Script serves request/response commands over its local TCP bridge;
+Studio SSE is limited to persisted generation-job events and polls the store.
+Existing SessionState, State Trust tokens, musical evidence, and SafeWrite
+journals remain the authorities; no parallel state or write path was added.
+`AbletonTcpAdapter.tcp_stats()` now includes a bounded (last 512 requests)
+Core-to-bridge round-trip latency summary with p50/p95/max and response/error
+counts. This timing does not isolate Live apply/readback phases and has not
+been measured against a live Ableton session. Realtime commands, Live event
+streaming, sequence-gap resync, and UI sync states remain unimplemented.
 
 ## Experimental new-project producer (offline only, 2026-09-29)
 

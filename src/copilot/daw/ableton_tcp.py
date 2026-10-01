@@ -5,7 +5,8 @@ import json
 import math
 import os
 import socket
-from collections import Counter
+import time
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -62,6 +63,38 @@ def _is_transport_failure(exc: BaseException) -> bool:
     )
 
 
+def _latency_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    def summarize(rows: list[dict[str, Any]]) -> dict[str, float | int]:
+        values = sorted(float(row["duration_ms"]) for row in rows)
+        if not values:
+            return {"count": 0, "p50": 0.0, "p95": 0.0, "max": 0.0}
+
+        def percentile(fraction: float) -> float:
+            index = max(0, math.ceil(fraction * len(values)) - 1)
+            return round(values[index], 3)
+
+        return {
+            "count": len(values),
+            "p50": percentile(0.50),
+            "p95": percentile(0.95),
+            "max": round(values[-1], 3),
+        }
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for sample in samples:
+        grouped.setdefault(str(sample["command_type"]), []).append(sample)
+    return {
+        "scope": "CORE_BRIDGE_REQUEST_RESPONSE",
+        "retained_sample_count": len(samples),
+        "retained_sample_limit": 512,
+        "all": summarize(samples),
+        "by_command": {
+            command: summarize(rows) for command, rows in sorted(grouped.items())
+        },
+        "outcomes": dict(Counter(str(row["outcome"]) for row in samples)),
+    }
+
+
 class AbletonTcpAdapter(DawAdapter):
     """Typed wrapper around the jpoindexter/ableton-mcp Remote Script protocol."""
 
@@ -85,6 +118,10 @@ class AbletonTcpAdapter(DawAdapter):
         self.strict_capabilities = True
         self._recv_buf = ""
         self.tcp_counts: Counter[str] = Counter()
+        # Keep only a bounded in-process sample of request/response latency.
+        # This measures the Core<->bridge round trip; it does not claim to
+        # isolate Ableton apply time or readback time within the bridge.
+        self._rpc_latency_samples: deque[dict[str, Any]] = deque(maxlen=512)
         self.snapshot_calls = 0
         self.last_track_infos: dict[int, dict[str, Any]] = {}
         self.last_master_info: dict[str, Any] | None = None
@@ -100,10 +137,12 @@ class AbletonTcpAdapter(DawAdapter):
 
     def reset_tcp_stats(self) -> None:
         self.tcp_counts = Counter()
+        self._rpc_latency_samples.clear()
         self.snapshot_calls = 0
         self.track_info_sites = Counter()
 
     def tcp_stats(self) -> dict[str, Any]:
+        samples = list(self._rpc_latency_samples)
         return {
             "total": int(sum(self.tcp_counts.values())),
             "by_type": dict(self.tcp_counts.most_common()),
@@ -113,6 +152,7 @@ class AbletonTcpAdapter(DawAdapter):
             "get_capture_topology": int(self.tcp_counts.get("get_capture_topology", 0)),
             "snapshot_source": self.snapshot_source,
             "get_track_info_sites": dict(self.track_info_sites.most_common()),
+            "rpc_round_trip_ms": _latency_summary(samples),
         }
 
     def connect(self) -> None:
@@ -1101,13 +1141,27 @@ class AbletonTcpAdapter(DawAdapter):
                 "request_id": request_id,
             }
         ).encode("utf-8")
+        started = time.perf_counter()
+        outcome = "ERROR"
+        io_stage = "send"
         try:
             self._sock.sendall(payload)
-        except OSError as exc:
-            raise DawError("socket disconnect while sending") from exc
-        self._sock.settimeout(timeout)
-        try:
+            io_stage = "receive"
+            self._sock.settimeout(timeout)
             response = self._recv_json()
+            if not isinstance(response, dict):
+                raise ProtocolError("unexpected response")
+            if "request_id" in response and response["request_id"] != request_id:
+                raise ProtocolError(
+                    f"wrong request id: expected {request_id} got {response['request_id']}"
+                )
+            if response.get("status") == "error":
+                raise DawError(response.get("message", "Unknown Ableton error"))
+            outcome = "RESPONSE"
+            result = response.get("result", {})
+            if not isinstance(result, dict):
+                return {"value": result}
+            return result
         except TimeoutError as exc:
             if side_effect:
                 raise WriteInDoubt(command_type, request_id) from exc
@@ -1115,19 +1169,21 @@ class AbletonTcpAdapter(DawAdapter):
         except OSError as exc:
             if side_effect:
                 raise WriteInDoubt(command_type, request_id) from exc
-            raise DawError("socket disconnect") from exc
-        if not isinstance(response, dict):
-            raise ProtocolError("unexpected response")
-        if "request_id" in response and response["request_id"] != request_id:
-            raise ProtocolError(
-                f"wrong request id: expected {request_id} got {response['request_id']}"
+            message = (
+                "socket disconnect while sending"
+                if io_stage == "send"
+                else "socket disconnect"
             )
-        if response.get("status") == "error":
-            raise DawError(response.get("message", "Unknown Ableton error"))
-        result = response.get("result", {})
-        if not isinstance(result, dict):
-            return {"value": result}
-        return result
+            raise DawError(message) from exc
+        finally:
+            elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+            self._rpc_latency_samples.append(
+                {
+                    "command_type": command_type,
+                    "duration_ms": elapsed_ms,
+                    "outcome": outcome,
+                }
+            )
 
     def _recv_json(self) -> dict[str, Any]:
         decoder = json.JSONDecoder()
