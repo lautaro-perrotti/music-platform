@@ -113,3 +113,31 @@ def test_capabilities_command_offline(capsys) -> None:
     assert "LIVE_SESSION_READINESS_V1" in blob
     assert "m4l_control_contract" in blob
     assert "onboard-project" in blob
+
+
+def test_capabilities_command_is_safe_for_legacy_windows_console(monkeypatch) -> None:
+    import json
+    import sys
+
+    class Cp1252Stdout:
+        encoding = "cp1252"
+
+        def __init__(self) -> None:
+            self.parts: list[str] = []
+
+        def write(self, value: str) -> int:
+            value.encode(self.encoding)
+            self.parts.append(value)
+            return len(value)
+
+        def flush(self) -> None:
+            pass
+
+    stdout = Cp1252Stdout()
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    from copilot.cli import _capabilities
+
+    assert _capabilities() == 0
+    payload = json.loads("".join(stdout.parts))
+    assert payload["LIVE_SESSION_READINESS_V1"] == "VERIFIED / FROZEN=True"

@@ -2614,7 +2614,9 @@ def _capabilities() -> int:
         "canonical_commands": list(CANONICAL_COMMANDS),
         "lab_commands_require_flag": sorted(LAB_COMMANDS),
     }
-    print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    # Keep machine-readable output safe for Windows consoles using legacy
+    # code pages (for example cp1252); JSON Unicode escapes are portable.
+    print(json.dumps(payload, indent=2, ensure_ascii=True, default=str))
     return 0
 
 
