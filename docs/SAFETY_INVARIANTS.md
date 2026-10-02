@@ -59,3 +59,4 @@ Detail for capture views: `docs/audio/SUPPORTED_CAPTURE_ENVELOPE.md`.
 30. Refuse original source sets and policy equivalents.
 31. Autonomous musical writes: development working copy only, after gate.
 32. External songs: read-only until `CROSS_PROJECT_MUSICAL_VALIDATION_V1`.
+33. The separate `SAFEWRITE_CONTROLLED_MIDI_V1` exception is limited to the fixed platform-owned drum proof track/clip, manifest-backed working copies, negotiated MIDI capabilities, <=512 bounded notes, exact authoritative readback, and exact prior-state rollback. A same-name object without a verified ownership journal is never writable. This does not authorize arbitrary MIDI clips, sample/device loading, or audio-quality claims.

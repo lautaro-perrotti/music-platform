@@ -9,6 +9,8 @@ AnalyzeProject stays read-only.
 from __future__ import annotations
 
 import json
+import math
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -19,6 +21,7 @@ from copilot.agent.recovery import classify_journal
 from copilot.agent.tools import AgentTools
 from copilot.agent.transactions import TransactionManager
 from copilot.audio.m4l_control_contract_v1 import APPLY_RESULTS, APPLY_VOCABULARY
+from copilot.importing.working_copy_manager_v1 import is_copilot_working_copy
 from copilot.daw.identities import fingerprint_track, fingerprints_equal
 from copilot.daw.mutation_protocol import KIND_TEMPORARY_CAPTURE_HOST
 from copilot.daw.object_ref import (
@@ -35,6 +38,9 @@ from copilot.schemas.safe_write import (
     CERTIFIED_PRODUCTION_ACTION,
     CERTIFIED_PRODUCTION_ACTIONS,
     KIND_PRODUCER_EXECUTION_V1,
+    KIND_SAFEWRITE_CONTROLLED_MIDI_V1,
+    CONTROLLED_MIDI_ACTION,
+    CONTROLLED_MIDI_REPLACE_ACTION,
     PRODUCER_CERTIFIED_ACTIONS,
     KIND_PRODUCTION_MUSICAL,
     MILESTONE,
@@ -100,6 +106,48 @@ def _sample_reference_matches(observed_uri: str | None, expected_uri: str) -> bo
     if observed == expected or observed.endswith("/" + expected):
         return True
     return Path(observed).name == Path(expected).name
+
+
+def _controlled_notes_match(expected: list[dict[str, Any]], actual: list[dict[str, Any]]) -> bool:
+    """Exact note identity fields; Live's QN floats tolerate only 0.001 QN."""
+    if len(expected) != len(actual):
+        return False
+    def key(note: dict[str, Any]) -> tuple:
+        return (int(note["pitch"]), float(note["start_time"]), int(note["velocity"]))
+    wanted = sorted(expected, key=key)
+    got = sorted(actual, key=key)
+    for left, right in zip(wanted, got, strict=True):
+        if int(left["pitch"]) != int(right["pitch"]):
+            return False
+        if int(left["velocity"]) != int(right["velocity"]):
+            return False
+        if bool(left.get("mute", False)) != bool(right.get("mute", False)):
+            return False
+        if abs(float(left["start_time"]) - float(right["start_time"])) > 0.001:
+            return False
+        if abs(float(left["duration"]) - float(right["duration"])) > 0.001:
+            return False
+    return True
+
+
+def _controlled_track_nonclip_state(track: TrackState) -> dict[str, Any]:
+    return {
+        "mixer": track.mixer.model_dump(mode="json"),
+        "routing": track.routing.model_dump(mode="json"),
+        "sends": [item.model_dump(mode="json") for item in track.sends],
+        "devices": [item.model_dump(mode="json") for item in track.devices],
+        "grouped": track.grouped,
+        "foldable": track.foldable,
+    }
+
+
+def _controlled_clip_structure(track: TrackState) -> list[dict[str, Any]]:
+    return [
+        {"stable_id": clip.stable_id, "slot_index": clip.slot_index, "name": clip.name,
+         "length_beats": clip.length_beats, "is_midi": clip.is_midi, "is_audio": clip.is_audio,
+         "sample_uri": clip.sample_uri}
+        for clip in track.clips
+    ]
 
 
 def _track_fingerprint_key(track: TrackState) -> str:
@@ -190,6 +238,8 @@ def action_is_certified(action_type: str) -> bool:
 
 
 def action_is_certified_for_intent(intent: MutationIntent, action_type: str) -> bool:
+    if intent.kind == KIND_SAFEWRITE_CONTROLLED_MIDI_V1:
+        return action_type in {CONTROLLED_MIDI_ACTION, CONTROLLED_MIDI_REPLACE_ACTION}
     if intent.kind == KIND_PRODUCER_EXECUTION_V1:
         return action_type in PRODUCER_CERTIFIED_ACTIONS
     return action_is_certified(action_type)
@@ -450,6 +500,33 @@ class SafeWriteExecutor:
                 result, project_error[0], MutationPhase.RECONCILE_PROJECT, project_error[1]
             )
 
+        if intent.kind == KIND_SAFEWRITE_CONTROLLED_MIDI_V1:
+            path = session.project_path or ""
+            if not path or not is_copilot_working_copy(path):
+                return self._fail(
+                    result,
+                    MutationFailure.PRECONDITION_FAILED,
+                    MutationPhase.RECONCILE_PROJECT,
+                    "CONTROLLED_WORKING_COPY_REQUIRED",
+                )
+            required = {
+                "track.create_midi", "track.delete", "clip.create", "clip.delete",
+                "clip.rename", "clip.write_notes", "clip.read_notes",
+            }
+            daw = self.tools.daw
+            if getattr(daw, "strict_capabilities", False):
+                missing = sorted(required - set(getattr(daw, "capabilities", set())))
+                if missing:
+                    return self._fail(
+                        result,
+                        MutationFailure.CAPABILITY_UNSUPPORTED,
+                        MutationPhase.PLAN,
+                        "missing negotiated capabilities: " + ",".join(missing),
+                    )
+            existing = self._controlled_midi_idempotent_replay(intent, session, result)
+            if existing is not None:
+                return existing
+
         if cancellation.requested:
             return self._cancel_before_write(intent, result, cancellation)
 
@@ -608,7 +685,7 @@ class SafeWriteExecutor:
                 if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
                     step.expected_after["arrangement_clip_ids"] = list(write_result["arrangement_clip_ids"])
                     step.rollback.inverse_params["arrangement_clip_ids"] = list(write_result["arrangement_clip_ids"])
-                if step.action_type == "CREATE_TRACK":
+                if step.action_type in {"CREATE_TRACK", CONTROLLED_MIDI_ACTION}:
                     created = self._created_track_from_result(write_result)
                     target = next(item for item in intent.targets if item.action_id == step.action_id)
                     target.stable_id = created.stable_id
@@ -723,6 +800,10 @@ class SafeWriteExecutor:
         result.phase = MutationPhase.RECONCILE
         result.lifecycle.append(MutationPhase.RECONCILE.value)
         for step in intent.executions:
+            if step.action_type in {CONTROLLED_MIDI_ACTION, CONTROLLED_MIDI_REPLACE_ACTION}:
+                # Exact typed readback above is the reconciliation authority
+                # for this bounded compound mutation.
+                continue
             outcome = self.transactions.reconcile(
                 operation=step.operation,
                 before=step.expected_before,
@@ -831,6 +912,11 @@ class SafeWriteExecutor:
     def _reconcile_project(
         self, intent: MutationIntent, session: SessionState
     ) -> tuple[MutationFailure, str] | None:
+        stale_failure = (
+            MutationFailure.STALE_STATE
+            if intent.kind == KIND_SAFEWRITE_CONTROLLED_MIDI_V1
+            else MutationFailure.STALE_PLAN
+        )
         if intent.project_identity and (session.project_identity or "") != intent.project_identity:
             return (
                 MutationFailure.PROJECT_MISMATCH,
@@ -842,7 +928,7 @@ class SafeWriteExecutor:
             and intent.expected_incarnation_id != session.session_incarnation_id
         ):
             return (
-                MutationFailure.STALE_PLAN,
+                stale_failure,
                 "session incarnation changed",
             )
         if (
@@ -850,19 +936,19 @@ class SafeWriteExecutor:
             and session.revision != intent.expected_revision
         ):
             return (
-                MutationFailure.STALE_PLAN,
+                stale_failure,
                 f"revision {session.revision} != {intent.expected_revision}",
             )
         if intent.expected_session_hash and session.state_hash != intent.expected_session_hash:
-            return (MutationFailure.STALE_PLAN, "session hash mismatch")
+            return (stale_failure, "session hash mismatch")
         if intent.expected_project_token and (
             (session.project_token or "") != intent.expected_project_token
         ):
-            return (MutationFailure.STALE_PLAN, "PROJECT_STATE_TOKEN mismatch")
+            return (stale_failure, "PROJECT_STATE_TOKEN mismatch")
         if intent.expected_audible_token and (
             (session.audible_token or "") != intent.expected_audible_token
         ):
-            return (MutationFailure.STALE_PLAN, "AUDIBLE_STATE_TOKEN mismatch")
+            return (stale_failure, "AUDIBLE_STATE_TOKEN mismatch")
         return None
 
     def _reconcile_targets(
@@ -871,7 +957,7 @@ class SafeWriteExecutor:
         resolved: dict[str, TrackState] = {}
         for target in intent.targets:
             step = next((item for item in intent.executions if item.action_id == target.action_id), None)
-            if step is not None and step.action_type == "CREATE_TRACK":
+            if step is not None and step.action_type in {"CREATE_TRACK", CONTROLLED_MIDI_ACTION}:
                 # CREATE_TRACK has no pre-existing track target. The project
                 # identity and session tokens are the preconditions; the
                 # created track receives its PersistentObjectRef after write.
@@ -916,6 +1002,22 @@ class SafeWriteExecutor:
             return {
                 "track_ids": [item.stable_id for item in session.tracks],
                 "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
+            }
+        if step.action_type == CONTROLLED_MIDI_ACTION:
+            return {
+                "track_ids": [item.stable_id for item in session.tracks],
+                "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
+            }
+        if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+            track = session.track_by_name(target_name)
+            if track is None:
+                return {"track_ids": [item.stable_id for item in session.tracks]}
+            return {
+                "track_ids": [item.stable_id for item in session.tracks],
+                "track_fingerprints": [_track_fingerprint_key(item) for item in session.tracks],
+                "track_fingerprints_by_id": {item.stable_id: _track_fingerprint_key(item) for item in session.tracks},
+                "target_nonclip": _controlled_track_nonclip_state(track),
+                "clip_structure": _controlled_clip_structure(track),
             }
         if (
             step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE", "DUPLICATE_CLIP_TO_ARRANGEMENT"}
@@ -979,7 +1081,122 @@ class SafeWriteExecutor:
             if not action_is_certified_for_intent(intent, step.action_type):
                 continue
             track = resolved[step.action_id]
-            if step.action_type == "CREATE_TRACK":
+            if step.action_type in {CONTROLLED_MIDI_ACTION, CONTROLLED_MIDI_REPLACE_ACTION}:
+                args = step.arguments
+                if (
+                    len(intent.executions) != 1
+                    or args.get("track_name") != "MP_DRUM_RECON_V1"
+                    or args.get("clip_name") != "MP_DRUM_RECON_4BAR_V1"
+                    or args.get("clip_index") != 0
+                    or args.get("clip_length_qn") != 16.0
+                    or args.get("tempo_bpm") != 125.0
+                    or args.get("meter") != [4, 4]
+                    or args.get("reconstruction_version") != "drum-reconstruction-v1"
+                ):
+                    return (MutationFailure.VALIDATION_FAILED, "controlled MIDI target/grid contract mismatch")
+                notes = args.get("notes")
+                if not isinstance(notes, list) or len(notes) != 32 or len(notes) > 512:
+                    return (MutationFailure.VALIDATION_FAILED, "this reconstruction proof requires exactly 32 notes (maximum 512)")
+                for digest_name in ("source_sha256", "reconstruction_sha256", "ownership_key"):
+                    if not re.fullmatch(r"[0-9a-f]{64}", str(args.get(digest_name, ""))):
+                        return (MutationFailure.VALIDATION_FAILED, f"invalid {digest_name}")
+                event_ids = args.get("source_event_ids")
+                authorities = args.get("role_authorities")
+                lineage = args.get("note_lineage")
+                if (
+                    not isinstance(event_ids, list)
+                    or len(event_ids) != len(notes)
+                    or any(not isinstance(event_id, str) or not event_id for event_id in event_ids)
+                    or len(set(event_ids)) != len(event_ids)
+                    or not isinstance(authorities, list)
+                    or len(authorities) != len(notes)
+                    or any(not isinstance(authority, str) for authority in authorities)
+                    or not isinstance(lineage, list)
+                    or len(lineage) != len(notes)
+                ):
+                    return (MutationFailure.VALIDATION_FAILED, "source-event lineage must be complete and unique")
+                if any(authority not in {"HUMAN_VERIFIED", "INFERRED_PROVISIONAL"} for authority in authorities):
+                    return (MutationFailure.VALIDATION_FAILED, "unsupported role authority")
+                if args.get("meter_authority") not in {"ASSUMED", "HUMAN_VERIFIED"}:
+                    return (MutationFailure.VALIDATION_FAILED, "meter authority must remain explicit")
+                region_start = float(args.get("region_start_seconds", float("nan")))
+                region_end = float(args.get("region_end_seconds", float("nan")))
+                if not (math.isfinite(region_start) and math.isfinite(region_end) and region_start >= 0 and region_end > region_start):
+                    return (MutationFailure.VALIDATION_FAILED, "source region is invalid")
+                for index, note in enumerate(notes):
+                    try:
+                        raw_pitch = note["pitch"]
+                        raw_velocity = note["velocity"]
+                        pitch = int(raw_pitch)
+                        start = float(note["start_time"])
+                        duration = float(note["duration"])
+                        velocity = int(raw_velocity)
+                    except (KeyError, TypeError, ValueError):
+                        return (MutationFailure.VALIDATION_FAILED, "invalid controlled MIDI note fields")
+                    if (isinstance(raw_pitch, bool) or pitch != raw_pitch or
+                            isinstance(raw_velocity, bool) or velocity != raw_velocity or
+                            pitch not in {36, 42} or not 1 <= velocity <= 127 or
+                            not math.isfinite(start) or not math.isfinite(duration) or
+                            start < 0 or abs(duration - (1.0 / 32.0)) > 1e-9 or start + duration > 16.001):
+                        return (MutationFailure.VALIDATION_FAILED, "controlled MIDI note outside bounded drum proof policy")
+                    row = lineage[index]
+                    if not isinstance(row, dict):
+                        return (MutationFailure.VALIDATION_FAILED, "MIDI note lineage does not match requested note")
+                    try:
+                        lineage_start = float(row.get("start_qn", float("nan")))
+                        lineage_duration = float(row.get("duration_qn", float("nan")))
+                    except (TypeError, ValueError):
+                        return (MutationFailure.VALIDATION_FAILED, "MIDI note lineage does not match requested note")
+                    source_role = row.get("source_role")
+                    if (
+                        row.get("source_event_id") != event_ids[index]
+                        or row.get("source_role_authority") != authorities[index]
+                        or source_role not in {"KICK", "CLOSED_HAT"}
+                        or (source_role == "KICK" and pitch != 36)
+                        or (source_role == "CLOSED_HAT" and pitch != 42)
+                        or row.get("pitch") != pitch
+                        or not math.isfinite(lineage_start)
+                        or abs(lineage_start - start) > 1e-9
+                        or not math.isfinite(lineage_duration)
+                        or abs(lineage_duration - duration) > 1e-9
+                        or row.get("velocity") != velocity
+                    ):
+                        return (MutationFailure.VALIDATION_FAILED, "MIDI note lineage does not match requested note")
+                if (_session.transport.tempo != 125.0 or
+                        (_session.transport.signature_numerator, _session.transport.signature_denominator) != (4, 4)):
+                    return (MutationFailure.STALE_STATE, "Live tempo or meter differs from controlled proof grid")
+                if step.action_type == CONTROLLED_MIDI_ACTION:
+                    if len(_session.tracks) != int(step.expected_before.get("track_count", len(_session.tracks))):
+                        return (MutationFailure.STALE_STATE, "track inventory changed before controlled MIDI write")
+                    if any(item.name == args["track_name"] for item in _session.tracks):
+                        return (MutationFailure.TARGET_NOT_PLATFORM_OWNED, "reserved controlled MIDI target already exists")
+                    if not step.rollback.prepared:
+                        return (MutationFailure.PRECONDITION_FAILED, "rollback not prepared for controlled MIDI")
+                    continue
+            if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+                if track is None or track.stable_id != step.expected_before.get("track_stable_id"):
+                    return (MutationFailure.STALE_STATE, "controlled MIDI target identity changed")
+                clip_index = int(step.arguments["clip_index"])
+                clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+                if (clip is None or clip.stable_id != step.expected_before.get("clip_stable_id")
+                        or clip.name != step.expected_before.get("clip_name")
+                        or abs(clip.length_beats - float(step.expected_before.get("clip_length_qn", -1))) > 1e-4):
+                    return (MutationFailure.STALE_STATE, "controlled MIDI clip state changed before replacement")
+                current_notes = [
+                    {"pitch": note.pitch, "start_time": note.start_time, "duration": note.duration,
+                     "velocity": note.velocity, "mute": note.mute}
+                    for note in clip.notes
+                ]
+                if not _controlled_notes_match(step.expected_before.get("notes", []), current_notes):
+                    return (MutationFailure.STALE_STATE, "controlled MIDI prior note set changed")
+                if not self._journal_proves_controlled_midi(
+                    str(step.arguments["ownership_key"]), track.stable_id, clip.stable_id
+                ):
+                    return (MutationFailure.TARGET_NOT_PLATFORM_OWNED, "prior verified SafeWrite ownership proof missing")
+                if not step.rollback.prepared or step.rollback.inverse_operation != "replace_clip_notes":
+                    return (MutationFailure.PRECONDITION_FAILED, "exact note-set rollback is not prepared")
+                continue
+            if step.action_type in {"CREATE_TRACK", CONTROLLED_MIDI_ACTION}:
                 expected_track_count = (
                     multi_create_count
                     if step.expected_after.get("multi_intent")
@@ -1134,6 +1351,10 @@ class SafeWriteExecutor:
         track: TrackState,
         session: SessionState,
     ) -> dict[str, Any]:
+        if step.action_type == CONTROLLED_MIDI_ACTION:
+            return self._execute_controlled_midi_pattern(step, session)
+        if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+            return self._execute_controlled_midi_replace(step, track, session)
         if step.action_type == "CREATE_TRACK":
             return self._execute_create_track(step, session)
         if step.action_type == "CREATE_PATTERN":
@@ -1493,20 +1714,41 @@ class SafeWriteExecutor:
         rows: list[MutationReadback] = []
         for step in intent.executions:
             planned = resolved[step.action_id]
+            if step.action_type in {CONTROLLED_MIDI_ACTION, CONTROLLED_MIDI_REPLACE_ACTION}:
+                target = next(item for item in intent.targets if item.action_id == step.action_id)
+                track = next((item for item in session.tracks if item.stable_id == target.stable_id), None)
+                if track is None or track.name != step.arguments["track_name"] or track.role != "midi":
+                    return rows, (MutationFailure.READBACK_MISMATCH, "controlled MIDI track identity mismatch")
+                try:
+                    observed = self.tools.daw.get_clip_notes(track.index, int(step.arguments["clip_index"]))
+                except Exception as exc:  # noqa: BLE001
+                    return rows, (MutationFailure.READBACK_FAILED, f"controlled MIDI note readback failed: {exc}")
+                actual_notes = observed.get("notes") or []
+                expected_notes = step.arguments["notes"]
+                exact = (
+                    observed.get("clip_name") == step.arguments["clip_name"]
+                    and abs(float(observed.get("length", -1)) - float(step.arguments["clip_length_qn"])) <= 1e-4
+                    and int(observed.get("note_count", -1)) == len(expected_notes)
+                    and _controlled_notes_match(expected_notes, actual_notes)
+                )
+                rows.append(MutationReadback(
+                    action_id=step.action_id, parameter="controlled_midi.clip_and_notes",
+                    expected={"track_stable_id": target.stable_id, "clip_name": step.arguments["clip_name"],
+                              "length_qn": step.arguments["clip_length_qn"], "notes": expected_notes},
+                    observed={"track_stable_id": track.stable_id, **observed},
+                    matched=exact, authoritative=True,
+                    detail="pitch/velocity/mute/count exact; start/duration tolerance 0.001 QN; clip length 0.0001 QN",
+                ))
+                if not exact:
+                    return rows, (MutationFailure.READBACK_MISMATCH, "controlled MIDI clip or note fields mismatch")
+                continue
             if step.action_type == "CREATE_TRACK":
                 target = next(item for item in intent.targets if item.action_id == step.action_id)
                 created = next((item for item in session.tracks if item.stable_id == target.stable_id), None)
                 matched = created is not None
-                rows.append(
-                    MutationReadback(
-                        action_id=step.action_id,
-                        parameter="session.track",
-                        expected=target.stable_id,
-                        observed=None if created is None else created.stable_id,
-                        matched=matched,
-                        authoritative=True,
-                    )
-                )
+                rows.append(MutationReadback(action_id=step.action_id, parameter="session.track",
+                    expected=target.stable_id, observed=None if created is None else created.stable_id,
+                    matched=matched, authoritative=True))
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "created track missing on readback")
                 continue
@@ -1624,7 +1866,7 @@ class SafeWriteExecutor:
             target.stable_id
             for target in intent.targets
             if any(
-                step.action_id == target.action_id and step.action_type == "CREATE_TRACK"
+                step.action_id == target.action_id and step.action_type in {"CREATE_TRACK", CONTROLLED_MIDI_ACTION}
                 for step in intent.executions
             )
         }
@@ -1641,6 +1883,33 @@ class SafeWriteExecutor:
                 after_ids = {item.stable_id for item in after.tracks}
                 if target.stable_id not in after_ids or (after_ids - before_ids - created_target_ids):
                     unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
+                continue
+            if step.action_type == CONTROLLED_MIDI_ACTION:
+                before_ids = set(guards[target.name_at_plan].get("track_ids", []))
+                after_ids = {item.stable_id for item in after.tracks}
+                track = next((item for item in after.tracks if item.stable_id == target.stable_id), None)
+                if track is None or track.role != "midi" or track.name != step.arguments["track_name"]:
+                    unexpected.append({"action_id": target.action_id, "kind": "controlled_track_identity_changed"})
+                if target.stable_id not in after_ids or (after_ids - before_ids - {target.stable_id}):
+                    unexpected.append({"action_id": target.action_id, "kind": "unexpected_track_state"})
+                continue
+            if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+                before_ids = set(guards[target.name_at_plan].get("track_ids", []))
+                after_ids = {item.stable_id for item in after.tracks}
+                track = next((item for item in after.tracks if item.stable_id == target.stable_id), None)
+                if track is None or track.name != step.arguments["track_name"] or track.role != "midi":
+                    unexpected.append({"action_id": target.action_id, "kind": "controlled_track_identity_changed"})
+                fingerprints = guards[target.name_at_plan].get("track_fingerprints_by_id", {})
+                for item in after.tracks:
+                    if item.stable_id != target.stable_id and fingerprints.get(item.stable_id) != _track_fingerprint_key(item):
+                        unexpected.append({"action_id": target.action_id, "kind": "unrelated_track_changed"})
+                if target.stable_id not in after_ids or after_ids != before_ids:
+                    unexpected.append({"action_id": target.action_id, "kind": "track_inventory_changed"})
+                if track is not None and (
+                    _controlled_track_nonclip_state(track) != guards[target.name_at_plan].get("target_nonclip")
+                    or _controlled_clip_structure(track) != guards[target.name_at_plan].get("clip_structure")
+                ):
+                    unexpected.append({"action_id": target.action_id, "kind": "unintended_track_or_clip_state_changed"})
                 continue
             if step.action_type == "CREATE_PATTERN":
                 target_track = after.track_by_id(target.stable_id)
@@ -1703,17 +1972,6 @@ class SafeWriteExecutor:
                     if expected_id not in after_ids or (after_ids - before_ids - {expected_id}) or device is None or not _sample_device_matches(device, str(step.arguments["sample_uri"])):
                         unexpected.append({"action_id": target.action_id, "kind": "unexpected_sample_state"})
                 continue
-            if step.action_type == "DUPLICATE_CLIP_TO_ARRANGEMENT":
-                expected_ids = set(str(item) for item in step.expected_after.get("arrangement_clip_ids", []))
-                actual_ids = {
-                    str(item.get("id", ""))
-                    for item in self.tools.daw.get_arrangement_clips().get("clips", [])
-                }
-                present = bool(expected_ids & actual_ids)
-                rows.append(MutationReadback(action_id=step.action_id, parameter="arrangement.clip", expected=False, observed=sorted(expected_ids & actual_ids), matched=not present, authoritative=True, detail="rollback"))
-                if present:
-                    return rows, (MutationFailure.ROLLBACK_FAILED, "arrangement clip still present after rollback")
-                continue
             if step.action_type == "SET_DEVICE_PARAMETER":
                 base = diff_guard_state(
                     guards[target.name_at_plan],
@@ -1758,7 +2016,7 @@ class SafeWriteExecutor:
         rows: list[MutationReadback] = []
         for step in intent.executions:
             target = next(item for item in intent.targets if item.action_id == step.action_id)
-            if step.action_type == "CREATE_TRACK":
+            if step.action_type in {"CREATE_TRACK", CONTROLLED_MIDI_ACTION}:
                 present = any(item.stable_id == target.stable_id for item in session.tracks)
                 rows.append(
                     MutationReadback(
@@ -1773,6 +2031,24 @@ class SafeWriteExecutor:
                 )
                 if present:
                     return rows, (MutationFailure.ROLLBACK_FAILED, "created track still present after rollback")
+                continue
+            if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+                track = session.track_by_id(target.stable_id)
+                clip_index = int(step.arguments["clip_index"])
+                try:
+                    observed = self.tools.daw.get_clip_notes(track.index, clip_index)
+                except Exception as exc:  # noqa: BLE001
+                    return rows, (MutationFailure.READBACK_FAILED, f"rollback MIDI readback failed: {exc}")
+                actual = observed.get("notes") or []
+                expected = step.expected_before.get("notes", [])
+                matched = _controlled_notes_match(expected, actual)
+                rows.append(MutationReadback(
+                    action_id=step.action_id, parameter="controlled_midi.rollback_notes",
+                    expected=expected, observed=actual, matched=matched, authoritative=True,
+                    detail="whole prior note set restored; start/duration tolerance 0.001 QN",
+                ))
+                if not matched:
+                    return rows, (MutationFailure.ROLLBACK_FAILED, "controlled MIDI note rollback mismatch")
                 continue
             if step.action_type == "CREATE_PATTERN":
                 # The dependent clip is checked indirectly by the CREATE_TRACK
@@ -1862,6 +2138,21 @@ class SafeWriteExecutor:
                     if before_fingerprints == after_fingerprints:
                         continue
                     unexpected.append({"action_id": target.action_id, "kind": "track_set_not_restored"})
+                continue
+            if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+                track = restored.track_by_id(target.stable_id)
+                if (_controlled_track_nonclip_state(track) != guards[target.name_at_plan].get("target_nonclip")
+                        or _controlled_clip_structure(track) != guards[target.name_at_plan].get("clip_structure")):
+                    unexpected.append({"action_id": target.action_id, "kind": "controlled_structure_not_restored"})
+                clip = next((item for item in track.clips if item.slot_index == int(step.arguments["clip_index"])), None)
+                expected = step.expected_before.get("notes", [])
+                actual = [] if clip is None else [
+                    {"pitch": note.pitch, "start_time": note.start_time, "duration": note.duration,
+                     "velocity": note.velocity, "mute": note.mute}
+                    for note in clip.notes
+                ]
+                if clip is None or not _controlled_notes_match(expected, actual):
+                    unexpected.append({"action_id": target.action_id, "kind": "controlled_notes_not_restored"})
                 continue
             if step.action_type in {"CREATE_PATTERN", "LOAD_DEVICE", "DUPLICATE_CLIP_TO_ARRANGEMENT"} and step.rollback.depends_on:
                 continue
@@ -1976,6 +2267,210 @@ class SafeWriteExecutor:
         result.open_transaction = self.transactions._open is not None
         result.lifecycle.append(MutationFailure.CANCELLED.value)
         return result
+
+    def _execute_controlled_midi_pattern(
+        self, step: MutationExecution, session: SessionState
+    ) -> dict[str, Any]:
+        """Create one fixed proof track/clip and journal every Live mutation."""
+        from copilot.schemas.session import MidiNote
+
+        args = step.arguments
+        track_name = str(args["track_name"])
+        clip_name = str(args["clip_name"])
+        clip_index = int(args["clip_index"])
+        length_qn = float(args["clip_length_qn"])
+        notes = [MidiNote.model_validate(item) for item in args["notes"]]
+        ownership_key = str(args["ownership_key"])
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, "create_midi_track")
+        before = self.tools.get_session_snapshot()
+        before_ids = {item.stable_id for item in before.tracks}
+        self.tools.daw.create_midi_track(track_name, -1)
+        after_track = self.tools.get_session_snapshot()
+        created = [item for item in after_track.tracks if item.stable_id not in before_ids]
+        if len(created) != 1 or created[0].name != track_name or created[0].role != "midi":
+            raise RuntimeError("controlled MIDI track creation readback ambiguous")
+        track = created[0]
+        self.transactions.record(
+            target_stable_id=track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=track.index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(track)),
+            target_name_at_apply=track.name,
+            operation="create_midi_track",
+            before={"track_ids": sorted(before_ids)},
+            after={"stable_id": track.stable_id, "ownership_key": ownership_key},
+            expected_after={"name": track_name, "role": "midi"},
+            inverse_operation="delete_track",
+            inverse_params={},
+            asset_id=track.stable_id,
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, "create_midi_clip")
+        self.tools.daw.create_midi_clip(track.index, clip_index, length_qn)
+        self.tools.daw.set_clip_name(track.index, clip_index, clip_name)
+        self.tools.daw.replace_clip_notes(track.index, clip_index, notes)
+        live = self.tools.get_session_snapshot()
+        live_track = live.track_by_id(track.stable_id)
+        clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+        if clip is None or clip.name != clip_name or abs(clip.length_beats - length_qn) > 1e-4:
+            raise RuntimeError("controlled MIDI clip creation readback mismatch")
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, clip_index=clip_index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)),
+            target_name_at_apply=live_track.name,
+            operation="create_midi_clip",
+            before={"clip_exists": False, "clip_index": clip_index},
+            after={
+                "clip_stable_id": clip.stable_id,
+                "clip_name": clip.name,
+                "clip_length_qn": clip.length_beats,
+                "note_count": len(clip.notes),
+                "ownership_key": ownership_key,
+                "reconstruction_sha256": args["reconstruction_sha256"],
+                "source_event_ids": args["source_event_ids"],
+                "role_authorities": args["role_authorities"],
+                "note_lineage": args["note_lineage"],
+            },
+            expected_after={"clip_name": clip_name, "note_count": len(notes)},
+            inverse_operation="delete_clip",
+            inverse_params={},
+            asset_id=clip.stable_id,
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        step.expected_after["track_stable_id"] = live_track.stable_id
+        step.expected_after["clip_stable_id"] = clip.stable_id
+        return {"track_stable_id": live_track.stable_id, "clip_stable_id": clip.stable_id}
+
+    def _execute_controlled_midi_replace(
+        self, step: MutationExecution, track: TrackState | None, session: SessionState
+    ) -> dict[str, Any]:
+        """Replace only the whole note set of a journal-proven owned clip."""
+        from copilot.schemas.session import MidiNote
+
+        if track is None:
+            raise RuntimeError("owned controlled MIDI track did not resolve")
+        args = step.arguments
+        clip_index = int(args["clip_index"])
+        expected_clip_id = str(args["clip_stable_id"])
+        before = [dict(item) for item in step.expected_before["notes"]]
+        after = [MidiNote.model_validate(item) for item in args["notes"]]
+        live_clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+        if live_clip is None or live_clip.stable_id != expected_clip_id:
+            raise RuntimeError("owned controlled clip changed before replacement")
+        command_id = f"cmd_{uuid4().hex[:12]}"
+        self.transactions.mark_sent(command_id, "replace_clip_notes")
+        self.tools.daw.replace_clip_notes(track.index, clip_index, after)
+        live = self.tools.get_session_snapshot()
+        live_track = live.track_by_id(track.stable_id)
+        clip = next((item for item in live_track.clips if item.slot_index == clip_index), None)
+        if clip is None or clip.stable_id != expected_clip_id:
+            raise RuntimeError("controlled clip identity changed during replacement")
+        observed = [
+            {"pitch": note.pitch, "start_time": note.start_time, "duration": note.duration,
+             "velocity": note.velocity, "mute": note.mute}
+            for note in clip.notes
+        ]
+        if not _controlled_notes_match(args["notes"], observed):
+            raise RuntimeError("replacement response did not reconcile to requested note set")
+        self.transactions.record(
+            target_stable_id=live_track.stable_id,
+            target_locator_at_apply=TargetLocator(track_index=live_track.index, clip_index=clip_index),
+            target_fingerprint=TargetFingerprint(**fingerprint_track(live_track)),
+            target_name_at_apply=live_track.name,
+            operation="replace_clip_notes",
+            before={"clip_stable_id": clip.stable_id, "notes": before},
+            after={"clip_stable_id": clip.stable_id, "notes": observed,
+                   "ownership_key": args["ownership_key"],
+                   "reconstruction_sha256": args["reconstruction_sha256"],
+                   "source_event_ids": args["source_event_ids"],
+                   "role_authorities": args["role_authorities"],
+                   "note_lineage": args["note_lineage"]},
+            expected_after={"clip_stable_id": clip.stable_id, "notes": args["notes"]},
+            inverse_operation="replace_clip_notes",
+            inverse_params={"notes": before},
+            command_id=command_id,
+            expected_revision=session.revision,
+        )
+        return {"clip_stable_id": clip.stable_id}
+
+    def _journal_proves_controlled_midi(
+        self, ownership_key: str, track_stable_id: str, clip_stable_id: str
+    ) -> bool:
+        if self.journal is None:
+            return False
+        records = self.journal.read_all()
+        ownership_txns = {
+            str(row.get("transaction_id")) for row in records
+            if row.get("kind") == "begin" and ownership_key in str(row.get("intent", ""))
+        }
+        verified = any(
+            row.get("kind") == "commit" and row.get("status") == TransactionStatus.VERIFIED.value
+            and str(row.get("transaction_id")) in ownership_txns
+            for row in records
+        )
+        proof = any(
+            row.get("kind") == "write" and row.get("status") == TransactionStatus.APPLIED.value
+            and row.get("target_stable_id") == track_stable_id
+            and (row.get("after") or {}).get("ownership_key") == ownership_key
+            and (row.get("after") or {}).get("clip_stable_id") == clip_stable_id
+            for row in records
+        )
+        return verified and proof
+
+    def _controlled_midi_idempotent_replay(
+        self, intent: MutationIntent, session: SessionState, result: MutationResult
+    ) -> MutationResult | None:
+        step = intent.executions[0]
+        name = str(step.arguments["track_name"])
+        matches = [track for track in session.tracks if track.name == name]
+        if not matches:
+            return None
+        if len(matches) != 1 or matches[0].role != "midi":
+            return self._fail(result, MutationFailure.TARGET_NOT_PLATFORM_OWNED,
+                              MutationPhase.RECONCILE_TARGETS, "reserved MIDI track is ambiguous or not MIDI")
+        track = matches[0]
+        clip = next((item for item in track.clips if item.slot_index == int(step.arguments["clip_index"])), None)
+        if clip is None:
+            return self._fail(result, MutationFailure.TARGET_NOT_PLATFORM_OWNED,
+                              MutationPhase.RECONCILE_TARGETS, "reserved track exists without its proof clip")
+        key = str(step.arguments["ownership_key"])
+        if not (self._journal_proves_controlled_midi(key, track.stable_id, clip.stable_id)
+                and clip.name == str(step.arguments["clip_name"])):
+            return self._fail(result, MutationFailure.TARGET_NOT_PLATFORM_OWNED,
+                              MutationPhase.RECONCILE_TARGETS, "reserved object has no verified matching SafeWrite ownership journal")
+        expected = [dict(item) for item in step.arguments["notes"]]
+        actual = [
+            {"pitch": note.pitch, "start_time": note.start_time, "duration": note.duration,
+             "velocity": note.velocity, "mute": note.mute}
+            for note in clip.notes
+        ]
+        if _controlled_notes_match(expected, actual) and abs(clip.length_beats - float(step.arguments["clip_length_qn"])) <= 1e-4:
+            result.ok = True
+            result.decision = ApplyDecision.KEEP
+            result.phase = MutationPhase.KEEP
+            result.journal_terminal_state = TransactionStatus.VERIFIED.value
+            result.recovery["IDEMPOTENT_REPLAY"] = True
+            result.musical_writes = 0
+            result.readbacks.append(MutationReadback(
+                action_id=step.action_id, parameter="clip.notes", expected=expected,
+                observed=actual, matched=True, authoritative=True,
+                detail="fresh session snapshot; verified ownership journal",
+            ))
+            result.lifecycle.extend([MutationPhase.READBACK.value, MutationPhase.VERIFY.value, MutationPhase.KEEP.value])
+            return result
+        if step.action_type == CONTROLLED_MIDI_REPLACE_ACTION:
+            before = step.expected_before.get("notes", [])
+            if not _controlled_notes_match(before, actual):
+                return self._fail(result, MutationFailure.STALE_STATE, MutationPhase.RECONCILE_TARGETS,
+                                  "owned controlled clip no longer matches replacement pre-state")
+            return None
+        return self._fail(result, MutationFailure.READBACK_MISMATCH, MutationPhase.READBACK,
+                          "owned controlled clip differs from requested note set")
 
     def _cancel_open(
         self, result: MutationResult, cancellation: WriteCancellation

@@ -3,7 +3,7 @@
 Machine source: `python -m copilot.cli capabilities`
 (`src/copilot/audio/capability_matrix_v1.py`). This file is the human map.
 
-Statuses: `VERIFIED` | `COMMAND_VERIFIED` | `IMPLEMENTED` | `IN_FLIGHT` |
+Statuses: `VERIFIED` | `VERIFIED_OFFLINE` | `COMMAND_VERIFIED` | `IMPLEMENTED` | `IN_FLIGHT` |
 `WAITING` | `DEFERRED` | `UNSUPPORTED`. Frozen means reopen only for a
 reproducible bug.
 
@@ -81,8 +81,9 @@ keystroke nor a changed file alone establishes a finished editable project.
 |---|---|---|
 | `PRODUCER_RUNTIME_V1` | VERIFIED / FROZEN | `producer.analyze_project`. Agent command count = 1. |
 | `EVIDENCE_SYSTEM_V2` | VERIFIED / FROZEN | Graph above immutable packs. Fusion keeps contradictions. Limitations propagate. |
-| `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. Analyze stays read-only. |
+| `SAFE_WRITE_FOUNDATION_V2` | VERIFIED / FROZEN | Generic PLAN→readback→KEEP/ROLLBACK. Its generic certified action remains `SET_TRACK_VOLUME`; the separately governed controlled-MIDI proof is listed below. Analyze stays read-only. |
 | `PRODUCER_EXECUTION_V1` | VERIFIED / FROZEN | `MusicPlan → ProductionCompiler → SafeWrite` six-action minimum passed Live readback/rollback on the controlled working copy. |
+| `SAFEWRITE_CONTROLLED_MIDI_V1` | VERIFIED_OFFLINE | Separate controlled proof-only intent: fixed MP_DRUM_RECON_V1 / MP_DRUM_RECON_4BAR_V1, complete note-set create/replace, ownership journal, rollback and exact readback. Uses already-advertised typed bridge capabilities. Ableton real validation is pending; no audio/sample claim. |
 | `REFERENCE_BASS_VARIATION_8_BAR` | VERIFIED / BOUNDED | One real `pista Project` run: reconciled MIDI pitches, 21-note rhythmic variant, new Operator track, Session + Arrangement clip at QN 160–192, isolated WAV `HAS_SIGNAL` at −21.14 dBFS, saved working copy. The earlier silent 32-bar preview was reclassified `FAILED`; human musical verdict is pending. Studio discard after process restart is not certified. |
 | `MUSICAL_UNDERSTANDING_COMPLETION_P0` | VERIFIED / BOUNDED | Existing bass MIDI, groove/relationship, motif/phrase, arrangement and harmony artifacts project through `CanonicalMusicModelViewV2`; `MusicalVariationIntent` is deterministic and NO_WRITE. One real revalidation passed through SafeWrite/readback/preview and was rolled back to the original final state. Melody remains explicitly `INSUFFICIENT_EVIDENCE`; musical quality is not auto-certified. |
 | `PRODUCT_CREATIVE_LOOP_V1` | VERIFIED / BOUNDED | Existing Rose Bass evidence projects through `CanonicalMusicModelViewV2` and `VariationIntent`; symbolic validation and per-event provenance are persisted before the existing ProductionCompiler/SafeWrite path. The inherited real Ableton revalidation verified readback, preview, KEEP/DISCARD mechanics, rollback, 0 model calls, and 0 unsafe writes. Human musical quality remains a review boundary. |

@@ -136,7 +136,16 @@ ROWS: tuple[dict[str, Any], ...] = (
         "status": "VERIFIED",
         "frozen": True,
         "writes": "development_working_copy_only",
-        "note": "Mock Live. AnalyzeProject stays MUSICAL WRITES=0. Not ABLETON_MUTATION_PROTOCOL_V1. No EQ/MIDI/arrangement.",
+        "note": "Generic authority remains SET_TRACK_VOLUME only. AnalyzeProject stays MUSICAL WRITES=0. Controlled MIDI is a separate bounded capability.",
+    },
+    {
+        "id": "SAFEWRITE_CONTROLLED_MIDI_V1",
+        "command": None,
+        "claim": "Fixed platform-owned four-bar drum MIDI proof; bounded full note-set create/replace, readback and journal rollback.",
+        "status": "VERIFIED_OFFLINE",
+        "frozen": False,
+        "writes": "development_working_copy_only",
+        "note": "Offline harness only. Negotiated existing bridge capabilities required. No real Ableton validation, sample loading, or audio claim.",
     },
     {
         "id": "FOUNDATION_INTEGRATION_CHECKPOINT_V1",

@@ -18,6 +18,7 @@ from copilot.daw.object_ref import (
 from copilot.daw.state_tokens import attach_tokens, target_token
 from copilot.human_eval.store import now_iso
 from copilot.reasoning.musicplan_gate import evaluate_musicplan_gate
+from copilot.musicplan.controlled_drum_pattern_v1 import build_controlled_drum_pattern_plan
 from copilot.schemas.musicplan import (
     SCHEMA_VERSION,
     ActionPrecondition,

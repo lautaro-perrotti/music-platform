@@ -1,8 +1,41 @@
 # CURRENT_STATE.md
 
-Date: 2026-10-01. Runtime > this file when they disagree.
+Date: 2026-10-02. Runtime > this file when they disagree.
 
-## Drum reconstruction vertical slice (2026-10-01, offline / not executable)
+## SAFEWRITE_CONTROLLED_MIDI_V1 (2026-10-02, offline verified)
+
+An additive SafeWrite intent now compiles the existing 32-event drum
+reconstruction through `MusicPlan -> ProductionCompiler -> SafeWriteExecutor`
+to one fixed platform-owned proof target: `MP_DRUM_RECON_V1` /
+`MP_DRUM_RECON_4BAR_V1`. The operation is restricted to a manifest-backed
+working copy, 125 BPM, 4/4, a four-bar (16 QN) clip, the existing role mapping
+KICK=36 / CLOSED_HAT=42, and at most 512 notes. Existing negotiated bridge
+capabilities are required; the Remote Script vocabulary was not expanded.
+
+The symbolic trigger gate is `1/32 QN` (0.015 s at 125 BPM). It represents a
+MIDI trigger duration only, not source-audio duration and not proof that a
+sample is loaded or audible. Each note retains its DrumEvent ID and the role
+authority (`HUMAN_VERIFIED` or `INFERRED_PROVISIONAL`) in the MusicPlan and
+durable prestate/journal evidence. Meter authority remains explicitly
+`ASSUMED` unless a human verifies it.
+
+The SafeWrite path creates the fixed proof track/clip or replaces the complete
+note set only after a matching verified SafeWrite journal proves platform
+ownership. A same-name user object fails closed. Repeating an identical plan
+returns authoritative readback with zero new writes; a changed plan performs
+whole-set replacement with exact prior-note rollback. Readback requires exact
+count/pitch/velocity/mute and allows 0.001 QN for start/duration and 0.0001 QN
+for clip length.
+
+Offline fixture: 16 pitch-36 + 16 pitch-42 notes, create/readback, idempotent
+replay, bounded replacement/rollback, ownership rejection, capability failure,
+State Trust rejection, and readback-mismatch rollback. This is
+`VERIFIED_OFFLINE` only. The current environment check found Ableton not
+running and port 9877 without a listener, so no real Live MIDI write/readback
+was attempted. Sample loading, audible output, capture/A-B, and musical quality
+remain out of scope.
+
+## Drum reconstruction vertical slice snapshot (2026-10-01, historical state)
 
 The Studio drum workbench now reads the configured sample-library index
 without scanning roots, returns explicit descriptor-delta candidate shortlists

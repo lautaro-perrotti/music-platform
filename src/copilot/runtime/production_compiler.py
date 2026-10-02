@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from copilot.daw.object_ref import require_resolved
+from copilot.daw.object_ref import ref_from_track, require_resolved
 from copilot.daw.identities import fingerprint_track
 from copilot.musicplan import (
     _as_ref,
@@ -21,7 +21,10 @@ from copilot.musicplan import (
 from copilot.runtime.safe_write import volume_intent
 from copilot.schemas.musicplan import MusicPlan, ProductionActionKind
 from copilot.schemas.safe_write import (
+    CONTROLLED_MIDI_ACTION,
+    CONTROLLED_MIDI_REPLACE_ACTION,
     KIND_PRODUCER_EXECUTION_V1,
+    KIND_SAFEWRITE_CONTROLLED_MIDI_V1,
     MutationExecution,
     MutationIntent,
     MutationRollback,
@@ -61,6 +64,8 @@ class ProductionCompiler:
     def compile(self, plan: MusicPlan, *, session: SessionState) -> ProductionCompileResult:
         if not plan.actions:
             return ProductionCompileResult(status="PLAN_REJECTED", reasons=("NO_ACTIONS",))
+        if any(action.action_type is ProductionActionKind.REALIZE_CONTROLLED_MIDI_PATTERN for action in plan.actions):
+            return self._compile_controlled_midi_pattern(plan, session=session)
         unsupported = tuple(
             action.action_id
             for action in plan.actions
@@ -227,6 +232,7 @@ class ProductionCompiler:
             if not audio_track:
                 intent.executions[0].rollback.inverse_operation = "delete_device"
             return ProductionCompileResult(status="COMPILED", intent=intent, certified_action_ids=(action_id,))
+
         if action.action_type is ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT:
             validated = validate_duplicate_clip_to_arrangement_plan(plan, session=session)
             if validated.status.value != "READY_FOR_EXECUTION":
@@ -289,6 +295,109 @@ class ProductionCompiler:
             intent=intent,
             certified_action_ids=(action.action_id,),
         )
+
+    def _compile_controlled_midi_pattern(
+        self, plan: MusicPlan, *, session: SessionState
+    ) -> ProductionCompileResult:
+        """Compile the one fixed drum proof request into SafeWrite authority."""
+        if len(plan.actions) != 1:
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_ACTION_MUST_BE_EXCLUSIVE",))
+        action = plan.actions[0]
+        if action.action_type is not ProductionActionKind.REALIZE_CONTROLLED_MIDI_PATTERN:
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_ACTION_MUST_BE_EXCLUSIVE",))
+        params = action.params
+        if getattr(params, "kind", None) != "controlled_drum_pattern":
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_PARAMS_REQUIRED",))
+        if session.transport.tempo != params.tempo_bpm or (
+            session.transport.signature_numerator != params.meter_numerator
+            or session.transport.signature_denominator != params.meter_denominator
+        ):
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("LIVE_GRID_MISMATCH",))
+        notes = [
+            {"pitch": note.pitch, "start_time": note.start_qn, "duration": note.duration_qn,
+             "velocity": note.velocity, "mute": False}
+            for note in params.notes
+        ]
+        action_id = action.action_id
+        reserved = [track for track in session.tracks if track.name == params.target_track_name]
+        if len(reserved) > 1:
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_TARGET_AMBIGUOUS",))
+        existing = reserved[0] if reserved else None
+        existing_clip = None
+        if existing is not None:
+            if existing.role != "midi":
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_TARGET_NOT_MIDI",))
+            existing_clip = next((clip for clip in existing.clips if clip.slot_index == params.clip_index), None)
+            if existing_clip is None or existing_clip.name != params.target_clip_name:
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("CONTROLLED_MIDI_CLIP_NOT_OWNED_OR_MISSING",))
+        target = MutationTarget(
+            action_id=action_id,
+            ref=(ref_from_track(existing, project_identity=session.project_identity or "").model_dump(mode="json")
+                 if existing is not None else {"object_type": "track", "project_identity": session.project_identity or "",
+                                               "role": "midi", "name": params.target_track_name}),
+            stable_id=existing.stable_id if existing is not None else "",
+            name_at_plan=params.target_track_name,
+            fingerprint=(TargetFingerprint(**fingerprint_track(existing)) if existing is not None else TargetFingerprint()),
+            locator=TargetLocator(track_index=existing.index) if existing is not None else None,
+            session_incarnation_id=session.session_incarnation_id or "",
+        )
+        prior_notes = [] if existing_clip is None else [note.model_dump(mode="json") for note in existing_clip.notes]
+        if existing_clip is not None:
+            prior_notes = [
+                {"pitch": note.pitch, "start_time": note.start_time, "duration": note.duration,
+                 "velocity": note.velocity, "mute": note.mute}
+                for note in existing_clip.notes
+            ]
+        action_type = CONTROLLED_MIDI_REPLACE_ACTION if existing_clip is not None else CONTROLLED_MIDI_ACTION
+        execution = MutationExecution(
+            action_id=action_id, action_type=action_type,
+            operation="replace_clip_notes" if existing_clip is not None else "create_controlled_midi_pattern",
+            arguments={
+                "track_name": params.target_track_name, "clip_name": params.target_clip_name,
+                "clip_index": params.clip_index, "clip_length_qn": params.clip_length_qn,
+                "tempo_bpm": params.tempo_bpm, "meter": [params.meter_numerator, params.meter_denominator],
+                "meter_authority": params.meter_authority,
+                "region_start_seconds": params.region_start_seconds,
+                "region_end_seconds": params.region_end_seconds,
+                "reconstruction_version": params.reconstruction_version,
+                "source_asset_id": params.source_asset_id, "source_sha256": params.source_sha256,
+                "reconstruction_sha256": params.reconstruction_sha256, "ownership_key": params.ownership_key,
+                "source_event_ids": [note.source_event_id for note in params.notes],
+                "role_authorities": [note.source_role_authority for note in params.notes], "notes": notes,
+                "note_lineage": [
+                    {"realized_note_index": index, "source_event_id": note.source_event_id,
+                     "source_role": note.source_role, "source_role_authority": note.source_role_authority,
+                     "pitch": note.pitch, "start_qn": note.start_qn,
+                     "duration_qn": note.duration_qn, "velocity": note.velocity}
+                    for index, note in enumerate(params.notes)
+                ],
+                "prior_notes": prior_notes,
+                "clip_stable_id": existing_clip.stable_id if existing_clip is not None else "",
+            },
+            expected_before=(
+                {"track_stable_id": existing.stable_id, "clip_stable_id": existing_clip.stable_id,
+                 "clip_name": existing_clip.name, "clip_length_qn": existing_clip.length_beats,
+                 "notes": prior_notes}
+                if existing_clip is not None else {"reserved_track_absent": True, "track_count": len(session.tracks)}
+            ),
+            expected_after={"track_name": params.target_track_name, "clip_name": params.target_clip_name,
+                            "clip_length_qn": params.clip_length_qn, "notes": notes},
+            certified=True,
+            rollback=MutationRollback(
+                inverse_operation="replace_clip_notes" if existing_clip is not None else "delete_track",
+                inverse_params={"notes": prior_notes} if existing_clip is not None else {},
+                reversibility=RollbackReversibility.INDEPENDENT, prepared=True,
+            ),
+        )
+        intent = MutationIntent(
+            plan_id=plan.plan_id, kind=KIND_SAFEWRITE_CONTROLLED_MIDI_V1,
+            user_intent=f"SAFEWRITE_CONTROLLED_MIDI_V1 ownership_key={params.ownership_key}",
+            project_identity=session.project_identity or "", expected_revision=session.revision,
+            expected_session_hash=session.state_hash, expected_project_token=session.project_token or "",
+            expected_audible_token=session.audible_token or "", expected_incarnation_id=session.session_incarnation_id or "",
+            targets=[target], executions=[execution],
+        )
+        return ProductionCompileResult(status="COMPILED", intent=intent, certified_action_ids=(action_id,))
 
     def _compile_midi_variation(
         self, plan: MusicPlan, *, session: SessionState

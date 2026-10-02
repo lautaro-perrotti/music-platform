@@ -11,7 +11,10 @@ from copilot.audio.drum_events_v1 import (
     apply_human_tempo_confirmation,
     build_drum_event_set,
 )
-from copilot.musicplan.drum_reconstruction_v1 import build_drum_reconstruction
+from copilot.musicplan.drum_reconstruction_v1 import (
+    DRUM_TRIGGER_DURATION_QN,
+    build_drum_reconstruction,
+)
 
 
 def _event_set(tmp_path: Path):
@@ -60,12 +63,12 @@ def test_symbolic_reconstruction_preserves_source_timing_and_is_not_executable(t
         assert realized.accent_rms_dbfs == source.accent_rms_dbfs
         assert 1 <= realized.velocity <= 127
         assert realized.ableton_status == "NOT_WRITTEN"
-        assert realized.note_duration_qn is None
-        assert realized.note_duration_status == "NOT_DERIVED_FROM_ONSET_EVIDENCE"
+        assert realized.note_duration_qn == DRUM_TRIGGER_DURATION_QN
+        assert realized.note_duration_status == "SYMBOLIC_TRIGGER_GATE_1_32_QN_NOT_SOURCE_DURATION"
     assert "ROLE_HYPOTHESES_NOT_HUMAN_VERIFIED" in result.blockers
     assert "MUSICAL_GRID_NOT_HUMAN_VERIFIED" in result.blockers
     assert "SAFEWRITE_AND_LIVE_READBACK_NOT_PERFORMED" in result.blockers
-    assert "MIDI_NOTE_DURATION_POLICY_NOT_DEFINED" in result.blockers
+    assert "MIDI_NOTE_DURATION_POLICY_NOT_DEFINED" not in result.blockers
 
 
 def test_unmapped_event_is_preserved_as_deferred_not_dropped(tmp_path: Path) -> None:

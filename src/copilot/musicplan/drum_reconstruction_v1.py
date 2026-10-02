@@ -18,6 +18,7 @@ from copilot.audio.drum_events_v1 import DrumEventSetV1, DrumEventV1
 DRUM_RECONSTRUCTION_VERSION = "drum-reconstruction-v1"
 PROOF_MAPPING_ID = "local-drum-proof-map-v1"
 MIDI_NOTE_BY_ROLE = {"KICK": 36, "CLOSED_HAT": 42}
+DRUM_TRIGGER_DURATION_QN = 1.0 / 32.0
 
 
 class DrumReconstructionEventV1(BaseModel):
@@ -117,8 +118,8 @@ def build_drum_reconstruction(event_set: DrumEventSetV1) -> DrumReconstructionV1
             accent_normalized=normalized,
             velocity=velocity,
             velocity_status=velocity_status,
-            note_duration_qn=None,
-            note_duration_status="NOT_DERIVED_FROM_ONSET_EVIDENCE",
+            note_duration_qn=DRUM_TRIGGER_DURATION_QN,
+            note_duration_status="SYMBOLIC_TRIGGER_GATE_1_32_QN_NOT_SOURCE_DURATION",
             selected_sample_asset_id=event.selected_sample_asset_id,
         ))
 
@@ -129,7 +130,6 @@ def build_drum_reconstruction(event_set: DrumEventSetV1) -> DrumReconstructionV1
         blockers.append("ROLE_HYPOTHESES_NOT_HUMAN_VERIFIED")
     if event_set.tempo_status not in {"HUMAN_VERIFIED", "VERIFIED"} or event_set.meter_status != "HUMAN_VERIFIED":
         blockers.append("MUSICAL_GRID_NOT_HUMAN_VERIFIED")
-    blockers.append("MIDI_NOTE_DURATION_POLICY_NOT_DEFINED")
     if deferred:
         blockers.append("UNMAPPED_SOURCE_EVENTS_PRESENT")
     blockers.append("SAFEWRITE_AND_LIVE_READBACK_NOT_PERFORMED")
@@ -153,6 +153,7 @@ def build_drum_reconstruction(event_set: DrumEventSetV1) -> DrumReconstructionV1
 
 __all__ = [
     "DRUM_RECONSTRUCTION_VERSION",
+    "DRUM_TRIGGER_DURATION_QN",
     "DrumReconstructionEventV1",
     "DrumReconstructionV1",
     "build_drum_reconstruction",
