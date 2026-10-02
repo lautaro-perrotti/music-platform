@@ -1,6 +1,113 @@
 # CURRENT_STATE.md
 
-Date: 2026-10-01. Runtime > this file when they disagree.
+Date: 2026-10-02. Runtime > this file when they disagree.
+
+## SAFEWRITE_MIDI_REAL_VALIDATION (2026-10-02, blocked at project identity)
+
+Ableton Live 12.4.6 is running and the Remote Script listener on localhost
+9877 completes handshake/snapshot and advertises the bounded MIDI capabilities.
+The active set has no persisted path or name, four tracks, and 120 BPM. The
+readiness probe therefore returns `SESSION_NOT_READY / PROJECT_IDENTITY_MISSING`
+and working-copy policy returns `PROJECT_UNIDENTIFIED`; no write or save was
+attempted. A full snapshot can calculate a structural identity hash, but that
+limited transient fingerprint is not persistent project identity (see
+`docs/core/STATE_TRUST.md`).
+
+The known workspace inventory contains two manifest-backed Groove Rider
+candidates; offline `.als` inspection reports 126 BPM for both, while this
+MIDI proof requires 125 BPM and does not authorize a tempo change. The newer
+candidate's recorded source hash no longer matches its source file. The
+established launcher refuses to switch away from a running set unless its
+current project is authoritatively identified and itself a Copilot working
+copy. Since the open set is unidentified and may contain unsaved user state,
+no copy was opened and the set was left untouched. Terminal status:
+`SAFEWRITE_MIDI_FOUNDATION_V1 = BLOCKED_CONTROLLED_WORKING_COPY_PROJECT_UNIDENTIFIED`.
+
+Subsequent read-only host check (2026-10-02): the Ableton process is no longer
+running and port 9877 is closed. The immutable `206-bpm-reference-v1` corpus
+exists locally with MASTER, DRUMS, BASS, GUITAR, PIANO, VOCALS, and OTHER
+assets; its rights status remains UNKNOWN and remote upload is forbidden. No
+`MP_206_BPM_V1` Live Set exists in the registered working-copy inventory. The
+six bundled Core Library templates were checked with the existing empty-
+template validator and all are rejected. No saved empty template exists in
+the user Templates folder. The current new-project workflow therefore cannot
+create `MP_206_BPM_V1`; no arbitrary `.als` was synthesized, no template was
+altered, and no Live process was launched. Creation is blocked on the missing
+supported Save-As/new-project boundary, not on MIDI SafeWrite.
+
+## SAFEWRITE_CONTROLLED_MIDI_V1 (2026-10-02, offline verified)
+
+An additive SafeWrite intent now compiles the existing 32-event drum
+reconstruction through `MusicPlan -> ProductionCompiler -> SafeWriteExecutor`
+to one fixed platform-owned proof target: `MP_DRUM_RECON_V1` /
+`MP_DRUM_RECON_4BAR_V1`. The operation is restricted to a manifest-backed
+working copy, 125 BPM, 4/4, a four-bar (16 QN) clip, the existing role mapping
+KICK=36 / CLOSED_HAT=42, and at most 512 notes. Existing negotiated bridge
+capabilities are required; the Remote Script vocabulary was not expanded.
+
+The symbolic trigger gate is `1/32 QN` (0.015 s at 125 BPM). It represents a
+MIDI trigger duration only, not source-audio duration and not proof that a
+sample is loaded or audible. Each note retains its DrumEvent ID and the role
+authority (`HUMAN_VERIFIED` or `INFERRED_PROVISIONAL`) in the MusicPlan and
+durable prestate/journal evidence. Meter authority remains explicitly
+`ASSUMED` unless a human verifies it.
+
+The SafeWrite path creates the fixed proof track/clip or replaces the complete
+note set only after a matching verified SafeWrite journal proves platform
+ownership. A same-name user object fails closed. Repeating an identical plan
+returns authoritative readback with zero new writes; a changed plan performs
+whole-set replacement with exact prior-note rollback. Readback requires exact
+count/pitch/velocity/mute and allows 0.001 QN for start/duration and 0.0001 QN
+for clip length.
+
+Offline fixture: 16 pitch-36 + 16 pitch-42 notes, create/readback, idempotent
+replay, bounded replacement/rollback, ownership rejection, capability failure,
+State Trust rejection, and readback-mismatch rollback. This is
+`VERIFIED_OFFLINE` only. The current environment check found Ableton not
+running and port 9877 without a listener, so no real Live MIDI write/readback
+was attempted. Sample loading, audible output, capture/A-B, and musical quality
+remain out of scope.
+
+## Drum reconstruction vertical slice snapshot (2026-10-01, historical state)
+
+The Studio drum workbench now reads the configured sample-library index
+without scanning roots, returns explicit descriptor-delta candidate shortlists
+for supported KICK/CLOSED_HAT hypotheses, and exposes a symbolic
+`DrumReconstructionV1` for the 32-event real reference artifact. The UI shows
+candidate evidence and the separate MIDI proposal; candidate ranks are not
+perceptual quality judgments or selections. The proof mapping is local
+KICK→MIDI 36 / CLOSED_HAT→MIDI 42. Source event timing and accent dBFS remain
+separate from projected musical timing and derived velocity; MIDI duration is
+not inferred.
+
+The current host has an explicitly configured CRATE sample root with 174 real
+WAV files indexed (174 indexed, 0 failed, 0 duplicates). The provider's own
+page lists 29 kicks and 36 hi-hats; those are candidate-pool labels only, not
+acoustic ground truth. Studio exposes top-five role-family shortlists and a
+deterministic provisional engineering selection, with bounded audition by
+trusted indexed asset ID. No candidate has been human-selected. Ableton Live
+was not running and port 9877 had no listener during this pass.
+`DrumReconstructionV1` remains `SYMBOLIC_PROPOSAL_NOT_EXECUTABLE`; no
+SafeWrite/MIDI/sample write, authoritative readback, capture, or A/B was
+performed. SafeWrite policy still certifies only `SET_TRACK_VOLUME`.
+Do not report the drum production slice as complete from this offline proposal.
+
+The selected pack is CRATE.hiphop's “Free drum samples”, downloaded from its
+official page as 174 individual WAVs to
+`D:\\MusicPlatform\\Samples\\CRATE_Free_Drum_Samples`. The official license
+permits use and processing in music, including commercial work, while
+prohibiting redistribution/repackaging of the samples. No AI/ML-specific clause
+appears on the license page; this run performed local factual DSP indexing and
+ranking only, with no model training or sample redistribution. Local
+provenance and per-file hashes are stored with the pack, not in git.
+
+The user confirmed the operating tempo as 125 BPM. A separate derived event
+artifact now records `tempo_bpm=125.0`, `tempo_source=HUMAN_CONFIRMED`, and
+`tempo_status=VERIFIED`; the preceding automatic tempo/status, `206 BPM`
+filename hint, and alternate 61.86 BPM hypothesis are retained. The source
+audio and original event artifact are unchanged. Studio now provides bounded
+per-event source-context audition and source-hash-bound human role corrections;
+no such listening/relabeling has yet been completed by a human in this UI.
 
 ## Realtime platform baseline (2026-10-01, partial)
 

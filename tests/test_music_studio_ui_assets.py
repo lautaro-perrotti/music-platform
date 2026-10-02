@@ -35,3 +35,16 @@ def test_claude_source_is_the_visual_source_of_truth() -> None:
 def test_static_entrypoints_are_present() -> None:
     for name in ("index.html", "catalog.html", "catalog.js", "app.js", "page.html", "page.js"):
         assert (UI.parent / name if name == "index.html" else UI / name).is_file()
+
+
+def test_real_drum_workbench_entrypoint_is_separate_from_mock_workspace() -> None:
+    page = (UI / "drums.html").read_text(encoding="utf-8")
+    script = (UI / "drums.js").read_text(encoding="utf-8")
+    assert 'src="/ui/drums.js"' in page
+    assert "REAL LOCAL ANALYSIS" in script
+    assert "READ ONLY" in script
+    assert "MOCK" not in script
+    assert "api/drums/events" in script
+    assert "api/ableton/status" in script
+    assert "Connect Live Play / Stop events" in script
+    assert "Drum workbench" in (UI / "organisms" / "ms-sidebar.js").read_text(encoding="utf-8")

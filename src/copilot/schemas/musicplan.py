@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from copilot.schemas.session import MidiNote
 
@@ -42,9 +42,11 @@ class ProductionActionKind(StrEnum):
     CREATE_TRACK = "CREATE_TRACK"
     SAMPLE_LOAD = "SAMPLE_LOAD"
     CREATE_PATTERN = "CREATE_PATTERN"
+    CREATE_MIDI_PHRASE = "CREATE_MIDI_PHRASE"
     SET_TRACK_MUTE = "SET_TRACK_MUTE"
     SET_TRACK_ROUTING = "SET_TRACK_ROUTING"
     SET_DEVICE_ROUTING = "SET_DEVICE_ROUTING"
+    REALIZE_CONTROLLED_MIDI_PATTERN = "REALIZE_CONTROLLED_MIDI_PATTERN"
 
 
 class VolumeOperation(StrEnum):
@@ -189,6 +191,58 @@ class PatternActionParams(BaseModel):
     notes: list[MidiNote] = Field(default_factory=list)
 
 
+class ControlledDrumMidiNote(BaseModel):
+    """One bounded drum-trigger note, retaining its source-event lineage."""
+
+    source_event_id: str = Field(min_length=1, max_length=160)
+    source_role: Literal["KICK", "CLOSED_HAT"]
+    source_role_authority: Literal["HUMAN_VERIFIED", "INFERRED_PROVISIONAL"]
+    pitch: int = Field(ge=0, le=127)
+    start_qn: float = Field(ge=0, lt=16, allow_inf_nan=False)
+    duration_qn: float = Field(gt=0, le=0.125, allow_inf_nan=False)
+    velocity: int = Field(ge=1, le=127)
+
+    @model_validator(mode="after")
+    def validate_role_pitch_and_clip_bounds(self) -> "ControlledDrumMidiNote":
+        expected_pitch = {"KICK": 36, "CLOSED_HAT": 42}[self.source_role]
+        if self.pitch != expected_pitch:
+            raise ValueError("pitch does not match the controlled drum-role mapping")
+        if self.start_qn + self.duration_qn > 16.0 + 1e-9:
+            raise ValueError("note exceeds the four-bar controlled clip")
+        return self
+
+
+class ControlledDrumPatternActionParams(BaseModel):
+    """Narrow proof-only request; target identities are not model-selectable."""
+
+    kind: Literal["controlled_drum_pattern"] = "controlled_drum_pattern"
+    target_track_name: Literal["MP_DRUM_RECON_V1"] = "MP_DRUM_RECON_V1"
+    target_clip_name: Literal["MP_DRUM_RECON_4BAR_V1"] = "MP_DRUM_RECON_4BAR_V1"
+    clip_index: Literal[0] = 0
+    clip_length_qn: Literal[16.0] = 16.0
+    tempo_bpm: Literal[125.0] = 125.0
+    meter_numerator: Literal[4] = 4
+    meter_denominator: Literal[4] = 4
+    meter_authority: Literal["HUMAN_VERIFIED", "ASSUMED"]
+    region_start_seconds: float = Field(ge=0, allow_inf_nan=False)
+    region_end_seconds: float = Field(gt=0, allow_inf_nan=False)
+    reconstruction_version: Literal["drum-reconstruction-v1"]
+    source_asset_id: str = Field(min_length=1, max_length=256)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reconstruction_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    ownership_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    notes: list[ControlledDrumMidiNote] = Field(min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def validate_unique_lineage(self) -> "ControlledDrumPatternActionParams":
+        event_ids = [note.source_event_id for note in self.notes]
+        if len(event_ids) != len(set(event_ids)):
+            raise ValueError("source event identities must be unique")
+        if self.region_end_seconds <= self.region_start_seconds:
+            raise ValueError("controlled MIDI source region must have positive duration")
+        return self
+
+
 class SetTrackMuteActionParams(BaseModel):
     kind: Literal["set_track_mute"] = "set_track_mute"
     mute: bool
@@ -217,6 +271,7 @@ ActionParams = Annotated[
         SampleLoadActionParams,
         ArrangementDuplicateActionParams,
         PatternActionParams,
+        ControlledDrumPatternActionParams,
         SetTrackMuteActionParams,
         SetTrackRoutingActionParams,
         SetDeviceRoutingActionParams,

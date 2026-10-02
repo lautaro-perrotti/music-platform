@@ -52,6 +52,16 @@ Prefer Live `get_session_path` (`kind=live_set_path`). Untitled/unsaved sets
 fall back to a structural fingerprint (`kind=structural_fingerprint`) which can
 collide across similar templates. Project mismatch → `PROJECT_MISMATCH`, no write.
 
+The structural fingerprint returned by `attach_tokens()` is useful as a
+limited in-session comparison token; it does **not** establish persistent set
+identity or working-copy authorization. `probe_session_ready()` deliberately
+requires a non-empty Live path or set name before it issues `SESSION_READY`.
+Therefore an unnamed set may yield a structural `SessionState.project_identity`
+from a full snapshot while the readiness probe correctly returns
+`PROJECT_IDENTITY_MISSING`. This is not an identity contradiction and must not
+be repaired by promoting the structural hash to durable identity. Writes still
+require the manifest-backed working-copy policy.
+
 ## Plan envelope
 
 Every future action carries `project_token`, `observed_state_token` (with

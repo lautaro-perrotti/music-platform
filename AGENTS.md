@@ -72,6 +72,7 @@ CLI: `python -m copilot.cli analyze-project "<folder>"`.
 | `SAFE_WRITE_FOUNDATION_V2` | Generic PLAN→readback→KEEP/ROLLBACK. `SET_TRACK_VOLUME` only certified musical action. |
 | `FOUNDATION_INTEGRATION_CHECKPOINT_V1` | DSP + Evidence + Safe Write in one repo state. AnalyzeProject stays read-only. |
 | `ASTRA_REASONING_V2` | Evidence-native diagnosis over EvidenceView. Astra interprets; it is never measurement authority. |
+| `SAFEWRITE_CONTROLLED_MIDI_V1` | Separate allowlist: fixed platform-owned drum proof track/clip, <=512 notes, verified ownership-journal replacement, authoritative readback and rollback. Real Ableton validation is separate. |
 | `PRE_ROLL_QN` | 16 quarter notes. |
 
 Deferred: `RUNTIME_LAUNCH_PATH_OPTIMIZATION`. Do not kill the user's Live session to measure it.
@@ -83,6 +84,7 @@ Deferred: `RUNTIME_LAUNCH_PATH_OPTIMIZATION`. Do not kill the user's Live sessio
 - `ProjectReadView` is operation-scoped. Do not share mutable authoritative views across unrelated analyses.
 - Timestamp is never freshness authority. Generations + project identity + tokens are.
 - Vendor Remote Script changes require handshake capability ads. Do not infer support from Live version. Keep sequential fallback.
+- `SAFEWRITE_CONTROLLED_MIDI_V1` is not general MIDI editing. It requires its fixed MP_DRUM_RECON_V1 / MP_DRUM_RECON_4BAR_V1 target, manifest-backed working copy, negotiated capabilities, exact readback and Core journal rollback.
 
 ## Testing
 

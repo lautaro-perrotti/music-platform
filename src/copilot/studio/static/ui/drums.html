@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Read-only drum event workbench from verified local source evidence">
+<title>Drum workbench · Music Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;min-height:100%;background:#0F1012;color:#EDEBE7;font:13px Geist,system-ui,sans-serif}*{box-sizing:border-box}button{font:inherit;color:inherit}button:focus-visible{outline:2px solid #5EC6D3;outline-offset:2px}#app{max-width:1440px;margin:auto;padding:24px;display:grid;gap:16px}.card{background:#17181B;border:1px solid #26292E;border-radius:9px;padding:16px}.muted{color:#8D8A85}.mono{font-family:'Geist Mono',monospace}.tag{border:1px solid #34373D;border-radius:5px;padding:3px 7px;font-size:11px}.bar-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.bar{position:relative;height:124px;background:#141518;border:1px solid #34373D;border-radius:6px;overflow:hidden}.bar-title{position:absolute;top:7px;left:9px;color:#8D8A85;font-size:11px}.beat-grid{position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,1fr);padding-top:29px}.beat{border-left:1px solid #26292E;position:relative}.beat:first-child{border-left:0}.event-dot{position:absolute;top:54px;transform:translateX(-50%);width:14px;height:14px;border-radius:50%;border:2px solid #EDEBE7;background:#5EC6D3;cursor:pointer;padding:0}.event-dot[data-role="KICK"]{background:#E2BE5A}.event-dot[data-role="CLOSED_HAT"]{background:#5EC6D3}.event-dot[data-role="UNKNOWN"]{background:#8D8A85}.event-dot.selected{box-shadow:0 0 0 4px #EDEBE733}.status{display:flex;align-items:center;gap:8px}.pill{border-radius:999px;background:#24262B;border:1px solid #34373D;padding:4px 9px}.facts{display:flex;gap:8px;flex-wrap:wrap}.two{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:16px}.event-list{display:flex;flex-wrap:wrap;gap:6px}.event-chip{background:#24262B;border:1px solid #34373D;border-radius:5px;padding:5px 7px;cursor:pointer}.event-chip.selected{border-color:#5EC6D3}.row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #26292E}.error{color:#F08A4B}@media(max-width:800px){#app{padding:12px}.two{grid-template-columns:1fr}.bar-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body><main id="app" aria-live="polite"><div class="card">Loading verified drum evidence…</div></main><script type="module" src="/ui/drums.js"></script></body>
+</html>

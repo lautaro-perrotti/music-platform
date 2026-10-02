@@ -301,6 +301,9 @@ def analyze_sample(path: Path, library_root: Path) -> SampleAsset:
         pitch=pitch,
         descriptors=descriptors,
         classification_confidence=confidence,
+        # Preserve folder path components as organizational tags only; the
+        # semantic classifier still treats names as weak, fallible evidence.
+        tags=[part for part in Path(folder).parts if part not in {"", "."}],
         provenance=provenance,
         status=AssetStatus.INDEXED,
     )

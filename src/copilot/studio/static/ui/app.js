@@ -409,6 +409,7 @@ async function renderRoute() {
     if (route === 'chat') return showChatClaude();
     if (route === 'studio') return showStudioClaude();
     if (route === 'stems') return showStemsClaude();
+    if (route === 'drums') { location.href = '/ui/drums.html'; return; }
     if (route === 'voice') return showVoiceClaude();
     if (route === 'jobs') return showJobsClaude();
     if (route === 'ableton') return showAbletonClaude();
