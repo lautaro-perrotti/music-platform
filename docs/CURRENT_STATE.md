@@ -23,6 +23,18 @@ copy. Since the open set is unidentified and may contain unsaved user state,
 no copy was opened and the set was left untouched. Terminal status:
 `SAFEWRITE_MIDI_FOUNDATION_V1 = BLOCKED_CONTROLLED_WORKING_COPY_PROJECT_UNIDENTIFIED`.
 
+Subsequent read-only host check (2026-10-02): the Ableton process is no longer
+running and port 9877 is closed. The immutable `206-bpm-reference-v1` corpus
+exists locally with MASTER, DRUMS, BASS, GUITAR, PIANO, VOCALS, and OTHER
+assets; its rights status remains UNKNOWN and remote upload is forbidden. No
+`MP_206_BPM_V1` Live Set exists in the registered working-copy inventory. The
+six bundled Core Library templates were checked with the existing empty-
+template validator and all are rejected. No saved empty template exists in
+the user Templates folder. The current new-project workflow therefore cannot
+create `MP_206_BPM_V1`; no arbitrary `.als` was synthesized, no template was
+altered, and no Live process was launched. Creation is blocked on the missing
+supported Save-As/new-project boundary, not on MIDI SafeWrite.
+
 ## SAFEWRITE_CONTROLLED_MIDI_V1 (2026-10-02, offline verified)
 
 An additive SafeWrite intent now compiles the existing 32-event drum
