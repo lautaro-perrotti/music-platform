@@ -2,6 +2,27 @@
 
 Date: 2026-10-02. Runtime > this file when they disagree.
 
+## SAFEWRITE_MIDI_REAL_VALIDATION (2026-10-02, blocked at project identity)
+
+Ableton Live 12.4.6 is running and the Remote Script listener on localhost
+9877 completes handshake/snapshot and advertises the bounded MIDI capabilities.
+The active set has no persisted path or name, four tracks, and 120 BPM. The
+readiness probe therefore returns `SESSION_NOT_READY / PROJECT_IDENTITY_MISSING`
+and working-copy policy returns `PROJECT_UNIDENTIFIED`; no write or save was
+attempted. A full snapshot can calculate a structural identity hash, but that
+limited transient fingerprint is not persistent project identity (see
+`docs/core/STATE_TRUST.md`).
+
+The known workspace inventory contains two manifest-backed Groove Rider
+candidates; offline `.als` inspection reports 126 BPM for both, while this
+MIDI proof requires 125 BPM and does not authorize a tempo change. The newer
+candidate's recorded source hash no longer matches its source file. The
+established launcher refuses to switch away from a running set unless its
+current project is authoritatively identified and itself a Copilot working
+copy. Since the open set is unidentified and may contain unsaved user state,
+no copy was opened and the set was left untouched. Terminal status:
+`SAFEWRITE_MIDI_FOUNDATION_V1 = BLOCKED_CONTROLLED_WORKING_COPY_PROJECT_UNIDENTIFIED`.
+
 ## SAFEWRITE_CONTROLLED_MIDI_V1 (2026-10-02, offline verified)
 
 An additive SafeWrite intent now compiles the existing 32-event drum
