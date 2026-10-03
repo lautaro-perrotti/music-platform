@@ -101,6 +101,34 @@ class OpenAICompatibleProvider(ReasoningProvider):
             return self._reason_responses(prompt, timeout_s=timeout_s)
         return self._reason_chat_json_object(prompt, timeout_s=timeout_s)
 
+    def reason_json_object(self, prompt: str, *, timeout_s: float = 30.0) -> str:
+        """JSON planning output, separate from the frozen diagnosis schema.
+
+        Producer callers already request this optional method. A Responses
+        model must not be forced through the diagnosis-only JSON schema.
+        The producer's strict domain parser remains the acceptance authority.
+        """
+        if not _uses_responses_api(self._model):
+            return self._reason_chat_json_object(prompt, timeout_s=timeout_s)
+        payload = {
+            "model": self._model,
+            "input": [
+                {"role": "system", "content": "Return only one JSON object. No Ableton operations."},
+                {"role": "user", "content": prompt},
+            ],
+            "text": {"format": {"type": "json_object"}},
+        }
+        self.last_request_contract = {
+            "api": "responses", "endpoint": "/v1/responses",
+            "text.format.type": "json_object", "json_schema": False,
+            "tools": False, "producer_planning": True,
+        }
+        raw = self._post("/responses", payload, timeout_s=timeout_s)
+        result = _extract_responses_text(raw)
+        if not result:
+            raise ProviderError(ReasoningFailure.MODEL_OUTPUT_INVALID, "missing producer output_text")
+        return result
+
     def _reason_responses(self, prompt: str, *, timeout_s: float) -> str:
         schema = reasoning_json_schema()
         payload: dict[str, Any] = {
