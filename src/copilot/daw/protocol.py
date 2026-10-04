@@ -109,6 +109,8 @@ COMMAND_CAPABILITY = {
     "create_group_track": "track.create_midi",
     "set_signature": "session.transport",
     "get_clip_warp_info": "session.read",
+    "get_warp_markers": "session.read",
+    "get_clip_start_end_markers": "session.read",
     "set_clip_warp_mode": "clip.write_notes",
     "create_audio_clip": "clip.create",
     "duplicate_clip_to_arrangement": "clip.create",

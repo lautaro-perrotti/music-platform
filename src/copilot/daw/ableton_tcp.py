@@ -883,6 +883,19 @@ class AbletonTcpAdapter(DawAdapter):
             {"track_index": track_index, "clip_index": clip_index},
         )
 
+    def get_warp_markers(self, track_index: int, clip_index: int) -> dict[str, Any]:
+        """Read the bridge's existing audio source-time/beat mapping."""
+        return self._command(
+            "get_warp_markers",
+            {"track_index": track_index, "clip_index": clip_index},
+        )
+
+    def get_clip_start_end_markers(self, track_index: int, clip_index: int) -> dict[str, Any]:
+        return self._command(
+            "get_clip_start_end_markers",
+            {"track_index": track_index, "clip_index": clip_index},
+        )
+
     def set_clip_warp_mode(
         self, track_index: int, clip_index: int, warp_mode: str
     ) -> dict[str, Any]:
