@@ -474,12 +474,9 @@ def _actualize_action(action: Any, current: Any) -> tuple[Any | None, str | None
     if action.action_type is ProductionActionKind.SAMPLE_LOAD:
         sample_uri = str(actual.params.sample_uri).replace("\\", "/")
         if track.role == "audio":
-            # Live's audio-track loader resolves a project-relative path through
-            # the browser path command.  The query URI form is for instruments
-            # and effects loaded on MIDI tracks; using it on an audio track
-            # leaves the clip absent on authoritative readback.
-            if sample_uri.startswith("Samples/"):
-                sample_uri = sample_uri[len("Samples/"):]
+            # Preserve the path relative to Live's Browser root. Generated
+            # assets are staged under User Library/Samples/Imported; stripping
+            # Samples/ makes browser.load fail to resolve the actual file.
             parts = [part for part in sample_uri.strip("/").split("/") if part]
             if (
                 not parts

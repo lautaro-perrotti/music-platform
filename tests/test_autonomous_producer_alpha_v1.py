@@ -9,11 +9,45 @@ from copilot.integration.autonomous_producer_alpha_v1 import (
     RealLucasRequired,
     run_alpha,
     _uncertified_phrase_variations,
+    _actualize_action,
 )
 from copilot.daw.mock import MockAbletonAdapter
 from copilot.producer.goal import ProducerGoal
 from copilot.producer.track_spec import TrackSpec
 from copilot.schemas.musicplan import ProductionActionKind
+
+
+def test_audio_sample_load_preserves_browser_root_relative_path():
+    from copilot.daw.object_ref import ref_from_track, runtime_from_track
+    from copilot.schemas.musicplan import ActionTarget, ExpectedEffect, PlanAction, SampleLoadActionParams
+
+    daw = MockAbletonAdapter()
+    daw.connect()
+    daw.create_audio_track("Generated")
+    session = daw.snapshot()
+    track = session.track_by_name("Generated")
+    action = PlanAction(
+        action_id="generated_asset_test",
+        action_type=ProductionActionKind.SAMPLE_LOAD,
+        target=ActionTarget(
+            ref=ref_from_track(track, project_identity=session.project_identity).model_dump(mode="json"),
+            runtime_id=runtime_from_track(track, session_incarnation_id=session.session_incarnation_id).model_dump(mode="json"),
+            track_index_locator=track.index,
+        ),
+        params=SampleLoadActionParams(
+            clip_index=0,
+            sample_uri="Samples/Imported/generated_abc.wav",
+        ),
+        reason="regression: preserve actual browser location",
+        expected_effect=ExpectedEffect(
+            affected_target="Generated.clip[0].sample",
+            direction="load",
+            description="load staged generated asset",
+        ),
+    )
+    actual, error = _actualize_action(action, session)
+    assert error is None
+    assert actual.params.sample_uri == "Samples/Imported/generated_abc.wav"
 
 
 def test_reasoning_candidate_strategies_are_unwrapped_without_core_choices():
