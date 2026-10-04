@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import threading
 import time
@@ -60,6 +61,7 @@ class FakeBackend:
             "X-Stable-Audio-Sample-Rate": "44100",
             "X-Stable-Audio-Worker-Id": self.worker_id,
             "X-Stable-Audio-Elapsed-S": "0.01",
+            "X-Stable-Audio-Sha256": hashlib.sha256(self.wav).hexdigest(),
         }
 
 
@@ -113,6 +115,7 @@ def test_exact_request_and_valid_asset(worker, tmp_path):
     assert asset.rights_manifest.output_use is RightsClassification.UNKNOWN
     assert asset.provider_request == backend.payloads[0]
     assert asset.provider_metadata["worker_id"] == "fixture-worker"
+    assert asset.provider_metadata["worker_sha256"] == asset.sha256
     assert asset.no_ableton_access is True
     from copilot.music_generation.benchmark import validate_generated_audio
 
@@ -209,6 +212,19 @@ def test_worker_attestation_mismatch_is_rejected(worker, tmp_path):
     assert batch.failures[0]["reason"] == "WORKER_ATTESTATION_MISMATCH"
 
 
+def test_worker_sha256_mismatch_is_rejected_before_persisting(worker, tmp_path):
+    class WrongHash(FakeBackend):
+        def render(self, payload):
+            wav, metadata = super().render(payload)
+            metadata["X-Stable-Audio-Sha256"] = "0" * 64
+            return wav, metadata
+
+    batch = StableAudio3Provider(api_url=worker(WrongHash())).generate(_request(tmp_path))
+    assert batch.assets == []
+    assert batch.failures[0]["reason"] == "WORKER_SHA256_MISMATCH"
+    assert list(tmp_path.glob("*.wav")) == []
+
+
 def test_unreachable_worker_is_not_a_fake_success(tmp_path):
     provider = StableAudio3Provider(api_url="http://127.0.0.1:1", timeout_s=0.1)
     batch = provider.generate(_request(tmp_path))
@@ -249,6 +265,7 @@ def test_official_worker_call_shape_without_loading_gpu():
     }]
     assert sf.info(io.BytesIO(wav)).samplerate == 44100
     assert metadata["X-Stable-Audio-Revision"] == REPOSITORY_REVISION
+    assert metadata["X-Stable-Audio-Sha256"] == hashlib.sha256(wav).hexdigest()
 
 
 def test_core_provider_has_no_daw_or_model_runtime_imports():

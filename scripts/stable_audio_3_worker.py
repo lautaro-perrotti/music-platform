@@ -7,6 +7,7 @@ host. Core does not import this module or its model dependencies.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import io
 import json
@@ -73,6 +74,7 @@ class OfficialBackend:
             "X-Stable-Audio-Sample-Rate": "44100",
             "X-Stable-Audio-Worker-Id": self.worker_id,
             "X-Stable-Audio-Elapsed-S": str(time.perf_counter() - started),
+            "X-Stable-Audio-Sha256": hashlib.sha256(result.getvalue()).hexdigest(),
         }
 
 

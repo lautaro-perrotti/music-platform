@@ -190,6 +190,7 @@ class StableAudio3Provider:
                     "sample_rate": response.headers.get("X-Stable-Audio-Sample-Rate"),
                     "worker_id": response.headers.get("X-Stable-Audio-Worker-Id"),
                     "worker_elapsed_s": response.headers.get("X-Stable-Audio-Elapsed-S"),
+                    "worker_sha256": response.headers.get("X-Stable-Audio-Sha256"),
                 }
                 if (metadata["model"] != MODEL_ID or metadata["revision"] != REPOSITORY_REVISION
                         or metadata["seed"] != str(request.seed) or metadata["steps"] != str(steps)
@@ -200,6 +201,8 @@ class StableAudio3Provider:
                 wav = response.read(MAX_RESPONSE_BYTES + 1)
             if len(wav) > MAX_RESPONSE_BYTES or wav[:4] != b"RIFF" or wav[8:12] != b"WAVE":
                 return self._failure(request, GeneratorFailureCode.OUTPUT_INVALID, "INVALID_WAV_BYTES")
+            if metadata["worker_sha256"] != hashlib.sha256(wav).hexdigest():
+                return self._failure(request, GeneratorFailureCode.OUTPUT_INVALID, "WORKER_SHA256_MISMATCH")
             output.mkdir(parents=True, exist_ok=True)
             with path.open("xb") as stream:
                 stream.write(wav)
