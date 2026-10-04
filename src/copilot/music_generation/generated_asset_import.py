@@ -40,41 +40,89 @@ class StagedGeneratedAsset(BaseModel):
     asset_id: str
     source_path: Path
     staged_path: Path
+    browser_staged_path: Path
     sample_uri: str
     sha256: str
     working_copy: Path
     original_project_untouched: bool = True
 
 
-def stage_generated_asset(asset: GeneratedAsset, *, working_als: Path) -> StagedGeneratedAsset:
-    """Copy generated audio into a protected working copy only."""
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _copy_verified(source: Path, target: Path, expected: str) -> None:
+    if target.is_file():
+        if _file_sha256(target) != expected:
+            raise ValueError("GENERATED_ASSET_EXISTING_STAGE_HASH_MISMATCH")
+        return
+    try:
+        with source.open("rb") as reader, target.open("xb") as writer:
+            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+    except FileExistsError:
+        if _file_sha256(target) != expected:
+            raise ValueError("GENERATED_ASSET_EXISTING_STAGE_HASH_MISMATCH") from None
+        return
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    if _file_sha256(target) != expected:
+        target.unlink(missing_ok=True)
+        raise ValueError("GENERATED_ASSET_STAGE_HASH_MISMATCH")
+
+
+def stage_generated_asset(
+    asset: GeneratedAsset, *, working_als: Path, user_library: Path | None = None
+) -> StagedGeneratedAsset:
+    """Stage verified bytes in the working copy and Live's discovered Browser root."""
     working_als = Path(working_als)
     if not is_copilot_working_copy(working_als):
         raise ValueError("GENERATED_ASSET_IMPORT_REQUIRES_MANIFEST_BACKED_WORKING_COPY")
     source = Path(asset.path)
+    if not source.is_absolute():
+        raise ValueError("GENERATED_ASSET_SOURCE_ABSOLUTE_PATH_REQUIRED")
     if not source.is_file():
         raise FileNotFoundError(source)
-    if hashlib.sha256(source.read_bytes()).hexdigest() != asset.sha256:
+    if _file_sha256(source) != asset.sha256:
         raise ValueError("GENERATED_ASSET_SOURCE_HASH_MISMATCH")
+    if user_library is None:
+        from copilot.importing.m4l_runtime_v1 import discover_user_library
+
+        discovery = discover_user_library()
+        if discovery.get("status") != "VERIFIED" or not discovery.get("user_library"):
+            raise ValueError("GENERATED_ASSET_USER_LIBRARY_UNRESOLVED")
+        user_library = Path(str(discovery["user_library"]))
+    library_root = Path(user_library).resolve()
+    if not library_root.is_dir():
+        raise ValueError("GENERATED_ASSET_USER_LIBRARY_UNRESOLVED")
     project_root = working_als.parent
     imported = project_root / "Samples" / "Imported"
+    browser_imported = library_root / "Samples" / "Imported"
+    if not imported.resolve().is_relative_to(project_root.resolve()):
+        raise ValueError("GENERATED_ASSET_STAGE_PATH_ESCAPE")
+    if not browser_imported.resolve().is_relative_to(library_root):
+        raise ValueError("GENERATED_ASSET_STAGE_PATH_ESCAPE")
     imported.mkdir(parents=True, exist_ok=True)
+    browser_imported.mkdir(parents=True, exist_ok=True)
     safe_name = "generated_" + asset.sha256[:16] + ".wav"
     staged = imported / safe_name
-    if staged.is_file():
-        if hashlib.sha256(staged.read_bytes()).hexdigest() != asset.sha256:
-            raise ValueError("GENERATED_ASSET_EXISTING_STAGE_HASH_MISMATCH")
-    else:
-        shutil.copy2(source, staged)
-    staged_hash = hashlib.sha256(staged.read_bytes()).hexdigest()
-    if staged_hash != asset.sha256:
-        raise ValueError("GENERATED_ASSET_STAGE_HASH_MISMATCH")
+    browser_staged = browser_imported / safe_name
+    if (not staged.resolve().is_relative_to(project_root.resolve())
+            or not browser_staged.resolve().is_relative_to(library_root)):
+        raise ValueError("GENERATED_ASSET_STAGE_PATH_ESCAPE")
+    _copy_verified(source, staged, asset.sha256)
+    _copy_verified(source, browser_staged, asset.sha256)
     return StagedGeneratedAsset(
         asset_id=asset.asset_id,
         source_path=source,
         staged_path=staged,
+        browser_staged_path=browser_staged,
         sample_uri=f"Samples/Imported/{safe_name}",
-        sha256=staged_hash,
+        sha256=asset.sha256,
         working_copy=working_als,
     )
 
