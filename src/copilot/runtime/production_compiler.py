@@ -723,6 +723,16 @@ class ProductionCompiler:
             }
             if any(action.action_type not in allowed for action in group):
                 return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_GROUP_ACTION_UNSUPPORTED",))
+            # Each group compiles at most one device load, one pattern and one
+            # placement. Extra actions used to be silently dropped while still
+            # being reported as certified, which invalidates readback.
+            device_kinds = {ProductionActionKind.LOAD_DEVICE, ProductionActionKind.DEVICE_LOAD}
+            if (
+                sum(action.action_type in device_kinds for action in group) > 1
+                or sum(action.action_type is ProductionActionKind.CREATE_PATTERN for action in group) > 1
+                or sum(action.action_type is ProductionActionKind.DUPLICATE_CLIP_TO_ARRANGEMENT for action in group) > 1
+            ):
+                return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_GROUP_DUPLICATE_ACTION",))
             create = group[0]
             if create.params.track_kind != "midi":
                 return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_TRACK_KIND_REQUIRED",))
@@ -823,6 +833,12 @@ class ProductionCompiler:
                     ),
                 ))
 
+        # Certify exactly what will execute; refuse any plan action left behind.
+        executed = {execution.action_id for execution in executions}
+        if any(action.action_id not in executed for action in plan.actions):
+            return ProductionCompileResult(status="PLAN_REJECTED", reasons=("MULTI_MIDI_ACTION_NOT_COMPILED",))
+        certified = tuple(action.action_id for action in plan.actions)
+
         return ProductionCompileResult(
             status="COMPILED",
             intent=MutationIntent(
@@ -833,5 +849,5 @@ class ProductionCompiler:
                 expected_project_token=session.project_token or "", expected_audible_token=session.audible_token or "",
                 expected_incarnation_id=session.session_incarnation_id or "", targets=targets, executions=executions,
             ),
-            certified_action_ids=tuple(action.action_id for action in plan.actions),
+            certified_action_ids=certified,
         )
