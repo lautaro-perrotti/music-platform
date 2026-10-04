@@ -17,6 +17,7 @@ import soundfile as sf
 
 from copilot.music_generation.ace_step import AceStepProvider
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider
+from copilot.music_generation.stable_audio import StableAudio3Provider
 from copilot.music_generation.schemas import (
     GeneratedAsset,
     GenerationBrief,
@@ -201,6 +202,8 @@ class StudioService:
             "ace-step": "ace-step",
             "acestep": "ace-step",
             "simulation": "simulated-music",
+            "stable-audio-3": "stable-audio-3",
+            "stable_audio_3": "stable-audio-3",
             "simulated": "simulated-music",
             "demo": "simulated-music",
         }
@@ -212,6 +215,8 @@ class StudioService:
             registry.register(ElevenLabsMusicProvider())
         elif canonical == "ace-step":
             registry.register(AceStepProvider())
+        elif canonical == "stable-audio-3":
+            registry.register(StableAudio3Provider())
         elif canonical == "simulated-music" and (requested or self.mode == "SIMULATION"):
             registry.register(SimulatedMusicProvider())
         elif canonical == "simulated-music":
@@ -301,7 +306,7 @@ class StudioService:
             provider = self.provider_factory(requested)
             if provider is None:
                 self.store.update_job(job_id, status=JobStatus.BLOCKED, current_stage="provider_required",
-                                      error={"code": "REAL_PROVIDER_REQUIRED", "detail": "No authorized ACE-Step or ElevenLabs provider is configured."})
+                                      error={"code": "REAL_PROVIDER_REQUIRED", "detail": "No configured real music generator worker or API is available."})
                 self.store.append_event(job_id, "job.blocked", {"code": "REAL_PROVIDER_REQUIRED"})
                 return
             descriptor = provider.describe()

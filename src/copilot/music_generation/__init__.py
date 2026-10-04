@@ -30,6 +30,7 @@ from copilot.music_generation.resources import ExecutionRoute, StorageVolume, Wo
 from copilot.music_generation.generated_asset_import import StagedGeneratedAsset, build_generated_asset_load_plan, stage_generated_asset
 from copilot.music_generation.elevenlabs import ElevenLabsMusicProvider
 from copilot.music_generation.ace_cloud import AceStepCloudProvider
+from copilot.music_generation.stable_audio import StableAudio3Provider
 from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext, ExecutiveProducerDecision, GeneratorEditIntent, ProductionRefinementIntent
 
 __all__ = [
@@ -65,6 +66,7 @@ __all__ = [
     "stage_generated_asset",
     "ElevenLabsMusicProvider",
     "AceStepCloudProvider",
+    "StableAudio3Provider",
     "ExecutiveProducerAdapter",
     "ExecutiveProducerContext",
     "ExecutiveProducerDecision",
