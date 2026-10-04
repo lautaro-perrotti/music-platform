@@ -41,6 +41,7 @@ from copilot.schemas.musicplan import (
     RollbackSpec,
     SampleLoadActionParams,
     ArrangementDuplicateActionParams,
+    AudioArrangementSingleActionParams,
     SetTrackMuteActionParams,
     SampleSwapActionParams,
     SetTrackRoutingActionParams,
@@ -1215,12 +1216,43 @@ def build_duplicate_clip_to_arrangement_action(
     )
 
 
+def build_place_audio_clip_once_action(
+    *,
+    track: TrackState,
+    project_identity: str,
+    clip_index: int,
+    destination_time: float,
+    reason: str,
+    evidence_refs: list[str],
+    session_incarnation_id: str = "",
+) -> PlanAction:
+    """Use Live's single-copy primitive; never convert audio duration to beats."""
+    clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+    if track.role != "audio" or clip is None or not clip.is_audio or not clip.sample_uri:
+        raise ValueError("single placement requires an existing audio source clip")
+    action = build_duplicate_clip_to_arrangement_action(
+        track=track,
+        project_identity=project_identity,
+        clip_index=clip_index,
+        destination_time=destination_time,
+        length=None,
+        reason=reason,
+        evidence_refs=evidence_refs,
+        session_incarnation_id=session_incarnation_id,
+    )
+    return action.model_copy(update={
+        "params": AudioArrangementSingleActionParams(
+            clip_index=clip_index, destination_time=destination_time,
+        ),
+    })
+
+
 def validate_duplicate_clip_to_arrangement_plan(plan: MusicPlan, *, session: SessionState) -> MusicPlan:
     plan, action, track = _resolve_plan_header(plan, session, ActionType.DUPLICATE_CLIP_TO_ARRANGEMENT)
     if action is None:
         return plan
     params = action.params
-    if not isinstance(params, ArrangementDuplicateActionParams):
+    if not isinstance(params, (ArrangementDuplicateActionParams, AudioArrangementSingleActionParams)):
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = "not_arrangement_duplicate_params"
         return plan
@@ -1228,10 +1260,19 @@ def validate_duplicate_clip_to_arrangement_plan(plan: MusicPlan, *, session: Ses
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = "SOURCE_CLIP_NOT_FOUND"
         return plan
-    if params.destination_time < 0 or (params.length is not None and params.length <= 0):
+    if params.destination_time < 0 or (
+        isinstance(params, ArrangementDuplicateActionParams)
+        and params.length is not None and params.length <= 0
+    ):
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = "ARRANGEMENT_RANGE_INVALID"
         return plan
+    if isinstance(params, AudioArrangementSingleActionParams):
+        source = next(item for item in track.clips if item.slot_index == params.clip_index)
+        if track.role != "audio" or not source.is_audio or not source.sample_uri:
+            plan.status = PlanStatus.REJECTED
+            plan.rejection_reason = "AUDIO_SOURCE_REQUIRED"
+            return plan
     if not action.rollback or not action.rollback.prepared:
         plan.status = PlanStatus.REJECTED
         plan.rejection_reason = "missing_rollback"

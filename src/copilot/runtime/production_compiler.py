@@ -20,7 +20,7 @@ from copilot.musicplan import (
     validate_sample_load_plan,
 )
 from copilot.runtime.safe_write import volume_intent
-from copilot.schemas.musicplan import MusicPlan, ProductionActionKind
+from copilot.schemas.musicplan import AudioArrangementSingleActionParams, MusicPlan, ProductionActionKind
 from copilot.schemas.safe_write import (
     CONTROLLED_MIDI_ACTION,
     CONTROLLED_MIDI_REPLACE_ACTION,
@@ -249,6 +249,7 @@ class ProductionCompiler:
                 return ProductionCompileResult(status="PLAN_REJECTED", reasons=(validated.rejection_reason or "ARRANGEMENT_PLAN_REJECTED",))
             track = require_resolved(session, _as_ref(action.target.ref))
             params = action.params
+            single_audio = isinstance(params, AudioArrangementSingleActionParams)
             action_id = action.action_id
             intent = MutationIntent(
                 plan_id=plan.plan_id, kind=KIND_PRODUCER_EXECUTION_V1, user_intent=action.reason,
@@ -260,7 +261,9 @@ class ProductionCompiler:
                     locator=TargetLocator(track_index=track.index, clip_index=params.clip_index), session_incarnation_id=session.session_incarnation_id or "")],
                 executions=[MutationExecution(action_id=action_id, action_type="DUPLICATE_CLIP_TO_ARRANGEMENT",
                     operation="duplicate_clip_to_arrangement",
-                    arguments={"clip_index": params.clip_index, "destination_time": params.destination_time, "length": params.length},
+                    arguments={"clip_index": params.clip_index, "destination_time": params.destination_time,
+                               "length": None if single_audio else params.length,
+                               "placement_mode": "SINGLE_AUDIO" if single_audio else "REPEAT_REGION"},
                     expected_before={}, expected_after={}, certified=True,
                     rollback=MutationRollback(inverse_operation="delete_arrangement_clips",
                         reversibility=RollbackReversibility.INDEPENDENT, prepared=True))],

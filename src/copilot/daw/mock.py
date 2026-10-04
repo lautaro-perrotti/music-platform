@@ -90,6 +90,7 @@ class MockAbletonAdapter(DawAdapter):
                         name=clip["name"],
                         length_beats=clip["length"],
                         is_midi=not is_audio,
+                        is_audio=is_audio,
                         notes=[] if is_audio else [MidiNote(**note) for note in clip["notes"]],
                         sample_uri=clip.get("sample_uri"),
                     )

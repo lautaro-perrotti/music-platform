@@ -1299,8 +1299,13 @@ class SafeWriteExecutor:
                         return (MutationFailure.TARGET_NOT_FOUND, "arrangement target track missing")
                 else:
                     clip_index = int(step.arguments["clip_index"])
-                    if not any(item.slot_index == clip_index for item in track.clips):
+                    source_clip = next((item for item in track.clips if item.slot_index == clip_index), None)
+                    if source_clip is None:
                         return (MutationFailure.PRECONDITION_FAILED, "source clip missing")
+                    if step.arguments.get("placement_mode") == "SINGLE_AUDIO" and (
+                        track.role != "audio" or not source_clip.is_audio or not source_clip.sample_uri
+                    ):
+                        return (MutationFailure.PRECONDITION_FAILED, "single placement requires audio source")
                 try:
                     self.tools.daw.get_arrangement_clips()
                 except Exception as exc:  # noqa: BLE001
@@ -1741,6 +1746,8 @@ class SafeWriteExecutor:
             command_id=command_id,
             expected_revision=session.revision,
         )
+        if step.arguments.get("placement_mode") == "SINGLE_AUDIO" and len(ids) != 1:
+            raise RuntimeError("single audio placement created more than one Arrangement clip")
         return {**result, "arrangement_clip_ids": ids}
 
     def _execute_load_device_preset(self, step: MutationExecution, track: TrackState | None, session: SessionState) -> dict[str, Any]:
@@ -1951,6 +1958,8 @@ class SafeWriteExecutor:
                     for item in self.tools.daw.get_arrangement_clips().get("clips", [])
                 }
                 matched = bool(expected_ids) and expected_ids.issubset(actual_ids)
+                if step.arguments.get("placement_mode") == "SINGLE_AUDIO":
+                    matched = matched and len(expected_ids) == 1
                 rows.append(MutationReadback(action_id=step.action_id, parameter="arrangement.clip", expected=sorted(expected_ids), observed=sorted(actual_ids & expected_ids), matched=matched, authoritative=True))
                 if not matched:
                     return rows, (MutationFailure.READBACK_MISMATCH, "arrangement clip missing on readback")

@@ -4,6 +4,7 @@ from copilot.musicplan import (
     build_device_load_action,
     build_device_tweak_action,
     build_duplicate_clip_to_arrangement_action,
+    build_place_audio_clip_once_action,
     build_sample_load_action,
     create_controlled_volume_plan,
 )
@@ -192,6 +193,80 @@ def test_duplicate_clip_to_arrangement_executes_and_rolls_back_through_safewrite
     assert result.readbacks[0].matched is True
     assert len(daw.get_arrangement_clips()["clips"]) == 1
     assert executor._rollback_applied(result, compiled.intent) == ""
+    assert daw.get_arrangement_clips()["clips"] == []
+
+
+def test_four_beat_loop_still_tiles_sixteen_beats(tmp_path):
+    daw, _ = _session()
+    daw.create_midi_clip(0, 0, 4.0)
+    session = daw.snapshot()
+    action = build_duplicate_clip_to_arrangement_action(
+        track=session.tracks[0], project_identity=session.project_identity,
+        clip_index=0, destination_time=0.0, length=16.0,
+        reason="repeat one-bar loop", evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    plan = _create_plan(session).model_copy(update={
+        "actions": [action],
+        "target_state_tokens": {session.tracks[0].stable_id: target_token(session.tracks[0])},
+    })
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED"
+    result = build_safe_write_executor(daw, journal_path=tmp_path / "loop.jsonl", persist_dir=tmp_path).run(compiled.intent)
+    assert result.ok, result.to_dict()
+    assert len(daw.get_arrangement_clips()["clips"]) == 4
+
+
+def _single_audio_plan(daw, *, source_length=4.0):
+    daw.create_audio_track("Generated Audio")
+    daw.load_browser_item(0, "Samples/Imported/generated.wav", clip_index=0)
+    daw.tracks[0]["clips"][0]["length"] = source_length
+    session = daw.snapshot()
+    action = build_place_audio_clip_once_action(
+        track=session.tracks[0], project_identity=session.project_identity,
+        clip_index=0, destination_time=0.0,
+        reason="place complete generated audio once", evidence_refs=[],
+        session_incarnation_id=session.session_incarnation_id,
+    )
+    return session, _create_plan(session).model_copy(update={
+        "actions": [action],
+        "target_state_tokens": {session.tracks[0].stable_id: target_token(session.tracks[0])},
+    })
+
+
+def test_long_audio_single_placement_readback_and_owned_rollback(tmp_path):
+    daw = MockAbletonAdapter()
+    daw.connect()
+    session, plan = _single_audio_plan(daw, source_length=64.0)
+    # A long audio source and an unusual loop marker must not become bar tiling.
+    plan = MusicPlan.model_validate(plan.model_dump(mode="json"))
+    compiled = ProductionCompiler().compile(plan, session=session)
+    assert compiled.status == "COMPILED"
+    assert compiled.intent.executions[0].arguments["length"] is None
+    assert compiled.intent.executions[0].arguments["placement_mode"] == "SINGLE_AUDIO"
+    executor = build_safe_write_executor(daw, journal_path=tmp_path / "single.jsonl", persist_dir=tmp_path)
+    result = executor.run(compiled.intent)
+    assert result.ok, result.to_dict()
+    assert result.readbacks[0].matched is True
+    assert len(result.readbacks[0].expected) == 1
+    clips = daw.get_arrangement_clips()["clips"]
+    assert len(clips) == 1
+    assert clips[0]["start_time"] == 0.0
+    assert executor._rollback_applied(result, compiled.intent) == ""
+    assert daw.get_arrangement_clips()["clips"] == []
+
+
+def test_single_audio_rejects_multi_clip_bridge_readback(tmp_path):
+    class TilingBridge(MockAbletonAdapter):
+        def duplicate_clip_to_arrangement(self, track_index, clip_index, destination_time, length=None):
+            return super().duplicate_clip_to_arrangement(track_index, clip_index, destination_time, 16.0)
+
+    daw = TilingBridge()
+    daw.connect()
+    session, plan = _single_audio_plan(daw)
+    compiled = ProductionCompiler().compile(plan, session=session)
+    result = build_safe_write_executor(daw, journal_path=tmp_path / "bad.jsonl", persist_dir=tmp_path).run(compiled.intent)
+    assert not result.ok
     assert daw.get_arrangement_clips()["clips"] == []
 
 

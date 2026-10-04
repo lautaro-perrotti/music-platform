@@ -184,6 +184,14 @@ class ArrangementDuplicateActionParams(BaseModel):
     length: float | None = None
 
 
+class AudioArrangementSingleActionParams(BaseModel):
+    """Place the whole existing audio Session clip once, without bar tiling."""
+
+    kind: Literal["place_audio_clip_once"] = "place_audio_clip_once"
+    clip_index: int
+    destination_time: float
+
+
 class PatternActionParams(BaseModel):
     kind: Literal["create_pattern"] = "create_pattern"
     clip_index: int
@@ -270,6 +278,7 @@ ActionParams = Annotated[
         CreateTrackActionParams,
         SampleLoadActionParams,
         ArrangementDuplicateActionParams,
+        AudioArrangementSingleActionParams,
         PatternActionParams,
         ControlledDrumPatternActionParams,
         SetTrackMuteActionParams,
