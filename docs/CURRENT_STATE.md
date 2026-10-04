@@ -2,6 +2,21 @@
 
 Date: 2026-10-02. Runtime > this file when they disagree.
 
+## FAST_DIRECT_EXECUTOR_V1 (2026-10-04, real Live verified)
+
+An isolated experimental path in `copilot.core_v2` now accepts a small typed
+`AbletonBatch` and calls `AbletonTcpAdapter` directly. It does not use
+SafeWrite, a template, manifest, project clone, or Save As. It only writes to
+an untitled disposable set; saved/unknown projects fail closed. Core V1 and
+existing callers are unchanged. This is a parallel prototype, not a migration.
+
+Real Live smoke: 126 BPM, FAST V2 Kick/Hat/Bass, Core Library sources,
+40 MIDI notes in three four-bar Arrangement clips, authoritative readback,
+play/stop, and stereo V5 capture. The delivered WAV and compact execution
+report are under `D:\music-platform-runtime\core-v2-smoke\`. Human musical
+quality is unassessed. The previous Tech House Kit attempt remains separate
+and blocked by its own IN_DOUBT journal; it was not resumed here.
+
 ## SAFEWRITE_MIDI_REAL_VALIDATION (2026-10-02, blocked at project identity)
 
 Ableton Live 12.4.6 is running and the Remote Script listener on localhost
