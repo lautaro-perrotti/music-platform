@@ -1,5 +1,8 @@
 import hashlib
+import json
 from pathlib import Path
+
+from copilot.audio.live_capture import tap_requires_refresh
 
 from copilot.importing.m4l_runtime_v1 import (
     DEVICE_NAME,
@@ -37,7 +40,7 @@ def test_ensure_m4l_runtime_installs_and_is_idempotent(tmp_path: Path) -> None:
     assert Path(second["installed"]) == dest
     copies = list(library.rglob("Copilot Audio Tap.amxd"))
     assert len(copies) == 1
-    alias = dest.with_name("Copilot Audio Tap 4.amxd")
+    alias = dest.with_name("Copilot Audio Tap 5.amxd")
     assert alias.is_file()
     assert hashlib.sha256(alias.read_bytes()).hexdigest() == hashlib.sha256(dest.read_bytes()).hexdigest()
 
@@ -71,6 +74,29 @@ def test_canonical_tap_match_is_exact() -> None:
     assert item_is_canonical_tap({"name": "Copilot Audio Tap", "is_loadable": True}) is True
     assert item_is_canonical_tap({"name": "Copilot Audio Tap.amxd", "is_loadable": True}) is True
     assert item_is_canonical_tap({"name": "Copilot Audio Tap 4", "is_loadable": True}) is True
+    assert item_is_canonical_tap({"name": "Copilot Audio Tap 5", "is_loadable": True}) is True
     assert item_is_canonical_tap({"name": "Copilot Audio Tap", "is_loadable": False}) is False
     assert item_is_canonical_tap({"name": "Not Copilot Audio Tap", "is_loadable": True}) is False
     assert item_is_canonical_tap({"name": "Audio Tap", "is_loadable": True}) is False
+
+
+def test_tap_patcher_routes_both_live_input_channels_to_recorder() -> None:
+    root = Path(__file__).resolve().parents[1]
+    patcher = json.loads((root / "devices" / "Copilot Audio Tap.maxpat").read_text(encoding="utf-8"))["patcher"]
+    boxes = {box["box"]["id"]: box["box"] for box in patcher["boxes"]}
+    assert boxes["obj-plugin"]["text"] == "plugin~ 1 2"
+    assert boxes["obj-plugin"]["numoutlets"] == 2
+    lines = {(tuple(line["patchline"]["source"]), tuple(line["patchline"]["destination"])) for line in patcher["lines"]}
+    assert boxes["obj-rec"]["text"] == "sfrecord~ 2"
+    assert (("obj-plugin", 0), ("obj-rec", 0)) in lines
+    assert (("obj-plugin", 1), ("obj-rec", 1)) in lines
+
+
+def test_compiled_v4_tap_requires_stereo_refresh() -> None:
+    class StubDaw:
+        def get_device_parameters(self, track_index, device_index):
+            return {"parameters": [{"name": "Slot", "max": 8}, {"name": "TapProtocol", "value": 4}]}
+
+    daw = StubDaw()
+    assert tap_requires_refresh(daw, 0, 0, device_name="Copilot Audio Tap 4")["stale"] is True
+    assert tap_requires_refresh(daw, 0, 0, device_name="Copilot Audio Tap 5")["stale"] is False

@@ -20,6 +20,7 @@ from devices.build_amxd import build_audio_effect_amxd_bytes
 MILESTONE = "M4L_RUNTIME_PROVISIONING_V1"
 DEVICE_NAME = "Copilot Audio Tap"
 DEVICE_ALIAS_V4 = "Copilot Audio Tap 4"
+DEVICE_ALIAS_V5 = "Copilot Audio Tap 5"
 EXPECTED_TAP_PROTOCOL = 3
 ARTIFACT = "m4l_runtime_provisioning_v1.json"
 MANIFEST_NAME = "copilot_m4l_runtime.json"
@@ -198,7 +199,7 @@ def ensure_m4l_runtime(
 
     paths = runtime_paths(library_root)
     dest = paths["device"]
-    alias = dest.with_name(f"{DEVICE_ALIAS_V4}.amxd")
+    alias = dest.with_name(f"{DEVICE_ALIAS_V5}.amxd")
     manifest_path = paths["manifest"]
     expected = str(asset["sha256"])
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -269,7 +270,7 @@ def _normalized_tap_name(item: dict[str, Any]) -> str:
 
 def item_is_canonical_tap(item: dict[str, Any]) -> bool:
     name = _normalized_tap_name(item)
-    return name in {DEVICE_NAME, DEVICE_ALIAS_V4} and bool(item.get("is_loadable"))
+    return name in {DEVICE_NAME, DEVICE_ALIAS_V4, DEVICE_ALIAS_V5} and bool(item.get("is_loadable"))
 
 
 def find_canonical_tap_uri(daw: AbletonTcpAdapter) -> str | None:
@@ -301,7 +302,7 @@ def find_canonical_tap_uri(daw: AbletonTcpAdapter) -> str | None:
     # Live caches compiled Max devices by browser URI.  Prefer the versioned
     # alias so an already-instantiated legacy URI cannot keep running an old
     # patcher after the User Library bytes were refreshed.
-    for preferred in (DEVICE_ALIAS_V4, DEVICE_NAME):
+    for preferred in (DEVICE_ALIAS_V5, DEVICE_ALIAS_V4, DEVICE_NAME):
         for name, uri in found:
             if name == preferred:
                 return uri

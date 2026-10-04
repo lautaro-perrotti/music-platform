@@ -84,7 +84,7 @@
 					"numoutlets" : 2,
 					"outlettype" : [ "signal", "signal" ],
 					"patching_rect" : [ 12.0, 200.0, 67.0, 22.0 ],
-					"text" : "plugin~ 2"
+					"text" : "plugin~ 1 2"
 				}
 
 			}

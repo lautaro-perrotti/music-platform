@@ -262,14 +262,13 @@ def tap_requires_refresh(
     daw: AbletonTcpAdapter,
     track_index: int,
     device_index: int,
+    *,
+    device_name: str | None = None,
 ) -> dict[str, object]:
     """Detect an instantiated legacy tap that cannot use the current writer.
 
-    The current checked-in artifact is the cache-busting V4 device: it exposes
-    source slots through 8 and advertises TapProtocol 4.  A Live set can keep
-    an older compiled V3 instance after the User Library has been provisioned;
-    parameter readback alone then looks healthy while its writer still points
-    at the old patcher/path.
+    V5 also fixes stereo input wiring. Protocol 4 alone cannot distinguish
+    a compiled V4 instance with a silent right channel from the corrected tap.
     """
     params = daw.get_device_parameters(track_index, int(device_index))
     slot_max: float | None = None
@@ -280,7 +279,10 @@ def tap_requires_refresh(
             slot_max = float(item["max"])
         elif name == "tapprotocol" and item.get("value") is not None:
             protocol = float(item["value"])
-    stale = (slot_max is not None and slot_max < 8.0) or (
+    if device_name is None:
+        device = find_tap(daw, track_index)
+        device_name = str((device or {}).get("name") or "")
+    stale = ("Copilot Audio Tap 5" not in device_name) or (slot_max is not None and slot_max < 8.0) or (
         protocol is not None and protocol < 4.0
     )
     return {
@@ -289,6 +291,7 @@ def tap_requires_refresh(
         "tap_protocol": protocol,
         "required_slot_max": 8,
         "required_tap_protocol": 4,
+        "device_name": device_name,
     }
 
 
@@ -668,7 +671,7 @@ def find_tap(
     daw: AbletonTcpAdapter, track_index: int = MASTER_INDEX
 ) -> dict[str, object] | None:
     taps = find_taps_on_track(daw, track_index)
-    return taps[0] if taps else None
+    return next((tap for tap in taps if "Copilot Audio Tap 5" in str(tap.get("name") or "")), None) or (taps[0] if taps else None)
 
 
 def wait_for_tap_readback(
@@ -760,7 +763,9 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
     existing = find_master_tap(daw)
     replaced_stale = False
     if existing is not None:
-        freshness = tap_requires_refresh(daw, MASTER_INDEX, int(existing["index"]))
+        freshness = tap_requires_refresh(
+            daw, MASTER_INDEX, int(existing["index"]), device_name=str(existing.get("name") or "")
+        )
         if not freshness["stale"]:
             return {"already_loaded": True, "device": existing, "freshness": freshness}
         replaced_stale = True
@@ -779,14 +784,30 @@ def ensure_master_tap(daw: AbletonTcpAdapter) -> dict[str, object]:
                 "Drop devices/Copilot Audio Tap.amxd onto Master once.",
             )
         return {"already_loaded": True, "device": find_master_tap(daw)}
-    if replaced_stale and existing is not None:
-        # Do not destroy a working tap until the replacement URI is known.
-        daw.delete_device(MASTER_INDEX, int(existing["index"]))
+    if replaced_stale and "Copilot%20Audio%20Tap%205.amxd" not in uri and "Copilot Audio Tap 5.amxd" not in uri:
+        raise AudioCaptureError("TAP_REFRESH_BLOCKED", "stereo-correct V5 browser URI is unavailable")
     loaded = daw.load_instrument_or_effect(MASTER_INDEX, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(MASTER_INDEX, uri)
-    devices = wait_for_tap_readback(daw, MASTER_INDEX)
-    device = devices[0]
+    if loaded.get("error"):
+        raise AudioCaptureError("TAP_REFRESH_BLOCKED", str(loaded.get("error")))
+    deadline = time.monotonic() + TAP_READBACK_TIMEOUT_S
+    device = None
+    while time.monotonic() < deadline:
+        devices = find_taps_on_track(daw, MASTER_INDEX, refresh=True)
+        device = next((row for row in devices if "Copilot Audio Tap 5" in str(row.get("name") or "")), None)
+        if device is not None:
+            break
+        time.sleep(TAP_READBACK_POLL_S)
+    if device is None:
+        raise AudioCaptureError("TAP_READBACK_TIMEOUT", "V5 tap did not appear; prior tap remains installed")
+    if replaced_stale and existing is not None:
+        prior = next((row for row in devices if row.get("name") == existing.get("name")), None)
+        if prior is not None:
+            daw.delete_device(MASTER_INDEX, int(prior["index"]))
+            device = next((row for row in find_taps_on_track(daw, MASTER_INDEX, refresh=True) if "Copilot Audio Tap 5" in str(row.get("name") or "")), None)
+            if device is None:
+                raise AudioCaptureError("TAP_REFRESH_BLOCKED", "V5 tap missing after legacy removal")
     return {
         "already_loaded": False,
         "device": device,

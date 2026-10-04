@@ -3,9 +3,8 @@
 Repeatable rule:
 
 ```
-git HEAD V3 .amxd ptch  (Cycling '74 dialect)
-  → devices/extend_tap_slots_v2.py   (surgical V4 slot edits only)
-  → devices/Copilot Audio Tap.maxpat
+devices/Copilot Audio Tap.maxpat (preserve Cycling '74 patcher dialect)
+  → plugin~ 1 2             (both Live audio input channels)
   → devices/build_amxd.py            (ampf/meta/ptch wrapper)
   → devices/Copilot Audio Tap.amxd
   → SHA256
@@ -17,13 +16,13 @@ git HEAD V3 .amxd ptch  (Cycling '74 dialect)
 ## Commands
 
 ```
-python devices/extend_tap_slots_v2.py
 python -c "from copilot.audio.live_capture import rebuild_audio_tap_device; print(rebuild_audio_tap_device())"
 ```
 
-`extend_tap_slots_v2.py` always starts from `HEAD:devices/Copilot Audio Tap.amxd`.
-Do not `json.dumps` the patcher. Live does not enumerate `live.numbox`
-parameters from a standard-JSON rewrite of this homemade `.amxd`.
+Do not rerun `extend_tap_slots_v2.py` for normal builds: it starts from a
+historical HEAD container and would overwrite the stereo fix. Do not
+`json.dumps` the patcher. Live does not enumerate `live.numbox` parameters
+from a standard-JSON rewrite of this homemade `.amxd`.
 
 The checked-in patcher uses the portable `__COPILOT_CAPTURE_DIR__` token. The
 runtime replaces that token with the discovered host capture directory while
@@ -37,7 +36,7 @@ Repo `devices/Copilot Audio Tap.amxd` and User Library
 
 Live compiles Max devices by browser URI. Overwriting the same filename
 does not update an already-compiled broken URI. Provision also writes
-identical bytes to `Copilot Audio Tap 4.amxd` (new URI). Core prefers
+identical bytes to `Copilot Audio Tap 5.amxd` (new URI). Core prefers
 that alias when inserting. Instantiated devices in a set do not pick up
 new bytes in place.
 

@@ -118,7 +118,9 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
     existing = find_tap(daw, track_index)
     replaced_stale = False
     if existing is not None and tap_has_slot(daw, track_index):
-        freshness = tap_requires_refresh(daw, track_index, int(existing["index"]))
+        freshness = tap_requires_refresh(
+            daw, track_index, int(existing["index"]), device_name=str(existing.get("name") or "")
+        )
         if not freshness["stale"]:
             return {
                 "already_loaded": True,
@@ -144,24 +146,36 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
             "cannot load it. Drop the updated devices/Copilot Audio Tap.amxd "
             "onto this audio track.",
         )
-    if replaced_stale and existing is not None:
-        # Do not destroy a working tap until the replacement URI is known.
-        daw.delete_device(track_index, int(existing["index"]))
+    if replaced_stale and "Copilot%20Audio%20Tap%205.amxd" not in uri and "Copilot Audio Tap 5.amxd" not in uri:
+        raise AudioCaptureError("TAP_REFRESH_BLOCKED", "stereo-correct V5 browser URI is unavailable")
     loaded = daw.load_instrument_or_effect(track_index, uri)
     if loaded.get("error"):
         loaded = daw.load_browser_item(track_index, uri)
+    if loaded.get("error"):
+        raise AudioCaptureError("TAP_REFRESH_BLOCKED", str(loaded.get("error")))
     from copilot.audio.live_capture import find_taps_on_track
 
     found = wait_for_tap_readback(daw, track_index)
+    if replaced_stale and existing is not None:
+        deadline = time.monotonic() + 8.0
+        while not any("Copilot Audio Tap 5" in str(row.get("name") or "") for row in found):
+            if time.monotonic() >= deadline:
+                raise AudioCaptureError("TAP_READBACK_TIMEOUT", "V5 tap did not appear; prior tap remains installed")
+            time.sleep(0.1)
+            found = find_taps_on_track(daw, track_index, refresh=True)
+        prior = next((row for row in found if row.get("name") == existing.get("name")), None)
+        if prior is not None:
+            daw.delete_device(track_index, int(prior["index"]))
+            found = find_taps_on_track(daw, track_index, refresh=True)
     slotted = None
-    for device in found:
+    for device in sorted(found, key=lambda row: "Copilot Audio Tap 5" not in str(row.get("name") or "")):
         params = daw.get_device_parameters(track_index, int(device["index"]))
         names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
         if "slot" in names:
             slotted = device
             break
     if slotted is None:
-        from copilot.importing.m4l_runtime_v1 import DEVICE_ALIAS_V4, find_canonical_tap_uri
+        from copilot.importing.m4l_runtime_v1 import DEVICE_ALIAS_V5, find_canonical_tap_uri
 
         alt = find_canonical_tap_uri(daw)
         if alt and alt != uri:
@@ -179,7 +193,7 @@ def load_tap_on_track(daw: AbletonTcpAdapter, track_index: int) -> dict[str, obj
                 names = [str(item.get("name") or "").lower() for item in params.get("parameters") or []]
                 if "slot" in names:
                     slotted = device
-                    loaded = {**loaded, "uncached_alias": DEVICE_ALIAS_V4, "uri": alt}
+                    loaded = {**loaded, "uncached_alias": DEVICE_ALIAS_V5, "uri": alt}
                     break
     if slotted is None:
         if existing is not None:
