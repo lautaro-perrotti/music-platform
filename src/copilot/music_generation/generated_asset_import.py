@@ -54,12 +54,18 @@ def stage_generated_asset(asset: GeneratedAsset, *, working_als: Path) -> Staged
     source = Path(asset.path)
     if not source.is_file():
         raise FileNotFoundError(source)
+    if hashlib.sha256(source.read_bytes()).hexdigest() != asset.sha256:
+        raise ValueError("GENERATED_ASSET_SOURCE_HASH_MISMATCH")
     project_root = working_als.parent
     imported = project_root / "Samples" / "Imported"
     imported.mkdir(parents=True, exist_ok=True)
     safe_name = "generated_" + asset.sha256[:16] + ".wav"
     staged = imported / safe_name
-    shutil.copy2(source, staged)
+    if staged.is_file():
+        if hashlib.sha256(staged.read_bytes()).hexdigest() != asset.sha256:
+            raise ValueError("GENERATED_ASSET_EXISTING_STAGE_HASH_MISMATCH")
+    else:
+        shutil.copy2(source, staged)
     staged_hash = hashlib.sha256(staged.read_bytes()).hexdigest()
     if staged_hash != asset.sha256:
         raise ValueError("GENERATED_ASSET_STAGE_HASH_MISMATCH")
@@ -67,7 +73,7 @@ def stage_generated_asset(asset: GeneratedAsset, *, working_als: Path) -> Staged
         asset_id=asset.asset_id,
         source_path=source,
         staged_path=staged,
-        sample_uri=f"Imported/{safe_name}",
+        sample_uri=f"Samples/Imported/{safe_name}",
         sha256=staged_hash,
         working_copy=working_als,
     )
