@@ -1,7 +1,7 @@
 """Small typed hot path to Live, deliberately parallel to SafeWrite V1.
 
-Only a disposable untitled set (or one explicitly owned by this process) may
-be mutated. No arbitrary LOM method names are accepted from callers.
+Only a pristine disposable set or an explicitly recognized prior direct smoke
+may be mutated. No arbitrary LOM method names are accepted from callers.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ class TrackBatch:
     source_kind: str  # sample | device
     notes: tuple[MidiNote, ...]
     volume: float
+    fallback_source_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ class AbletonBatch:
         if not 1 <= len(self.tracks) <= 8 or len({t.name for t in self.tracks}) != len(self.tracks):
             raise ValueError("invalid track set")
         for track in self.tracks:
-            if not track.name.startswith("FAST V2 - ") or not track.source_name:
+            if not track.name.startswith(("FAST V2 - ", "KIT DIRECT V1 - ")) or not track.source_name:
                 raise ValueError("unnamespaced track or missing source")
             if track.source_kind not in {"sample", "device"}:
                 raise ValueError("unknown source type")
@@ -70,14 +71,37 @@ def is_pristine_default_set(session: SessionState, arrangement: list[dict]) -> b
             and all(not t.clips and not t.devices for t in session.tracks))
 
 
+def is_owned_smoke_set(
+    session: SessionState, arrangement: list[dict], path: str, allowed_root: Path,
+) -> bool:
+    """Recognize only the three exact tracks made by our earlier direct smoke."""
+    if not path or not Path(path).resolve().is_relative_to(allowed_root.resolve()):
+        return False
+    if len(session.tracks) != 7 or not is_pristine_default_set(
+        SessionState(tracks=session.tracks[:4]), []
+    ):
+        return False
+    expected = ["FAST V2 - Kick", "FAST V2 - Hat", "FAST V2 - Bass"]
+    owned = session.tracks[4:]
+    return ([t.name for t in owned] == expected
+            and all(t.role == "midi" and len(t.devices) == 1 and len(t.clips) == 1 for t in owned)
+            and len(arrangement) == 3
+            and {c.get("track_index") for c in arrangement} == {t.index for t in owned})
+
+
 class DirectAbletonSession:
     def __init__(self) -> None:
         self.daw = AbletonTcpAdapter()
         self.process: subprocess.Popen[bytes] | None = None
         self.pid: int | None = None
         self.initial_path = ""
+        self.owned_smoke = False
+        self.allowed_smoke_root: Path | None = None
 
-    def connect(self, deadline_s: float = 180.0) -> "DirectAbletonSession":
+    def connect(
+        self, deadline_s: float = 180.0, *, allowed_smoke_root: Path | None = None,
+    ) -> "DirectAbletonSession":
+        self.allowed_smoke_root = allowed_smoke_root
         detected = detect_ableton()
         if not detected.exe_path:
             raise RuntimeError("ABLETON_NOT_INSTALLED")
@@ -110,8 +134,15 @@ class DirectAbletonSession:
                 time.sleep(0.5)
                 continue
             if self.initial_path:
-                self.daw.disconnect()
-                raise RuntimeError(f"UNKNOWN_SAVED_PROJECT: {self.initial_path}")
+                if allowed_smoke_root is not None and is_owned_smoke_set(
+                    self.daw.snapshot(include_notes=False),
+                    self.daw.get_arrangement_clips().get("clips") or [], self.initial_path,
+                    allowed_smoke_root,
+                ):
+                    self.owned_smoke = True
+                else:
+                    self.daw.disconnect()
+                    raise RuntimeError(f"UNKNOWN_SAVED_PROJECT: {self.initial_path}")
             return self
         raise RuntimeError(f"BRIDGE_TIMEOUT: {last_error}")
 
@@ -174,25 +205,58 @@ class DirectAbletonExecutor:
                 self.timeouts += 1
             raise
 
+    def _load_with_fallback(self, track_index: int, spec: TrackBatch) -> str:
+        names = [spec.source_name]
+        if spec.fallback_source_name:
+            names.append(spec.fallback_source_name)
+        for name in names:
+            try:
+                uri = self._source_uri(name)
+                self._load(track_index, spec, uri)
+                return name
+            except Exception:
+                # A timeout may have applied in Live. Never load another source
+                # until authoritative readback proves this track is still bare.
+                observed = self.daw.snapshot(include_notes=False)
+                track = next((t for t in observed.tracks if t.index == track_index), None)
+                if track is not None and track.devices:
+                    return name
+                if name == names[-1]:
+                    raise
+        raise RuntimeError("SOURCE_LOAD_FAILED")
+
     def apply(self, batch: AbletonBatch) -> dict:
         batch.validate()
         info = self.daw.get_session_info()
-        if self.session.initial_path or self.daw.get_session_path().get("path"):
+        if str(self.daw.get_session_path().get("path") or "") != self.session.initial_path:
+            raise RuntimeError("SESSION_CHANGED_BEFORE_DIRECT_WRITE")
+        if self.session.initial_path and not self.session.owned_smoke:
             raise RuntimeError("DIRECT_EXECUTOR_REQUIRES_DISPOSABLE_UNTITLED_SET")
         before = self.daw.snapshot(include_notes=False)
-        if not is_pristine_default_set(before, self.daw.get_arrangement_clips().get("clips") or []):
+        arrangement_before = self.daw.get_arrangement_clips().get("clips") or []
+        if not (is_pristine_default_set(before, arrangement_before) or
+                (self.session.owned_smoke and self.session.allowed_smoke_root is not None
+                 and is_owned_smoke_set(
+                    before, arrangement_before, self.session.initial_path,
+                    self.session.allowed_smoke_root))):
             raise RuntimeError("UNTITLED_SET_CONTAINS_UNKNOWN_WORK")
         requested = {t.name for t in batch.tracks}
         if requested.intersection(t.name for t in before.tracks):
             raise RuntimeError("DIRECT_TRACKS_ALREADY_EXIST")
         self.daw.stop_playback()
+        if self.session.owned_smoke:
+            for track in before.tracks[4:]:
+                self.daw.set_track_mute(track.index, True)
+            muted = self.daw.snapshot(include_notes=False)
+            if any(not track.mixer.mute for track in muted.tracks[4:7]):
+                raise RuntimeError("OWNED_SMOKE_MUTE_READBACK_FAILED")
         self.daw.set_tempo(batch.tempo)
         created: dict[str, int] = {}
+        chosen_sources: dict[str, str] = {}
         for spec in batch.tracks:
-            uri = self._source_uri(spec.source_name)
             created[spec.name] = int(self.daw.create_midi_track(spec.name)["index"])
             index = created[spec.name]
-            self._load(index, spec, uri)
+            chosen_sources[spec.name] = self._load_with_fallback(index, spec)
             self.daw.create_midi_clip(index, 0, batch.length_beats)
             self.daw.replace_clip_notes(index, 0, list(spec.notes))
             self.daw.duplicate_clip_to_arrangement(index, 0, 0.0)
@@ -206,9 +270,16 @@ class DirectAbletonExecutor:
                 raise RuntimeError(f"TRACK_OR_DEVICE_READBACK_FAILED: {spec.name}")
             notes = self.daw.get_clip_notes(track.index, 0).get("notes") or []
             placed = [c for c in arrangement if c.get("track_index") == track.index]
-            if len(notes) != len(spec.notes) or not placed:
+            expected_notes = sorted((n.pitch, round(n.start_time, 6), round(n.duration, 6), n.velocity)
+                                    for n in spec.notes)
+            actual_notes = sorted((int(n["pitch"]), round(float(n["start_time"]), 6),
+                                   round(float(n["duration"]), 6), int(n["velocity"])) for n in notes)
+            if (actual_notes != expected_notes or len(placed) != 1
+                    or abs(float(placed[0]["start_time"])) > 1e-6
+                    or abs(float(placed[0]["end_time"]) - batch.length_beats) > 1e-6):
                 raise RuntimeError(f"CLIP_OR_ARRANGEMENT_READBACK_FAILED: {spec.name}")
-            details[spec.name] = {"index": track.index, "devices": [d.name for d in track.devices],
+            details[spec.name] = {"index": track.index, "source": chosen_sources[spec.name],
+                                  "devices": [d.name for d in track.devices],
                                   "note_count": len(notes), "arrangement": placed,
                                   "volume": track.mixer.volume}
         if abs(final.transport.tempo - batch.tempo) > 0.01:
