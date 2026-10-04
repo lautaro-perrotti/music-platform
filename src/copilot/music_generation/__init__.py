@@ -1,6 +1,7 @@
 """Provider-neutral dense music generation domain."""
 
 from copilot.music_generation.schemas import (
+    BriefFieldOrigin,
     GeneratedAsset,
     GenerationBatch,
     GenerationBrief,
@@ -9,7 +10,13 @@ from copilot.music_generation.schemas import (
     GeneratorRequest,
     RightsManifest,
 )
-from copilot.music_generation.registry import MusicGeneratorRegistry
+from copilot.music_generation.registry import GeneratorRoute, MusicGeneratorRegistry
+from copilot.music_generation.lucas_nl_brief import (
+    LucasBriefHandoff,
+    LucasGenerationRequestPreparation,
+    lucas_nl_to_generation_brief,
+    prepare_lucas_generation_request,
+)
 from copilot.music_generation.benchmark import (
     BestOfNReport,
     BlindBenchmarkReport,
@@ -34,6 +41,7 @@ from copilot.music_generation.stable_audio import StableAudio3Provider
 from copilot.music_generation.executive_producer import ExecutiveProducerAdapter, ExecutiveProducerContext, ExecutiveProducerDecision, GeneratorEditIntent, ProductionRefinementIntent
 
 __all__ = [
+    "BriefFieldOrigin",
     "GeneratedAsset",
     "GenerationBatch",
     "GenerationBrief",
@@ -41,6 +49,11 @@ __all__ = [
     "GeneratorHealth",
     "GeneratorRequest",
     "MusicGeneratorRegistry",
+    "GeneratorRoute",
+    "LucasBriefHandoff",
+    "LucasGenerationRequestPreparation",
+    "lucas_nl_to_generation_brief",
+    "prepare_lucas_generation_request",
     "BestOfNReport",
     "BlindBenchmarkReport",
     "ProviderComparisonReport",

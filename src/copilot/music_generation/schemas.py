@@ -82,6 +82,13 @@ class ModelManifest(BaseModel):
     benchmark_role: str = "NOT_BENCHMARKED"
 
 
+class BriefFieldOrigin(StrEnum):
+    USER_EXPLICIT = "USER_EXPLICIT"
+    USER_INFERRED = "USER_INFERRED"
+    PRODUCT_DEFAULT = "PRODUCT_DEFAULT"
+    MODEL_INTERPRETATION = "MODEL_INTERPRETATION"
+
+
 class GenerationBrief(BaseModel):
     brief_id: str
     user_intent: str
@@ -109,6 +116,8 @@ class GenerationBrief(BaseModel):
     reference_conditioning_policy: str = "analysis_only_unless_rights_allow_upload"
     rights_manifest: RightsManifest = Field(default_factory=RightsManifest)
     no_write: bool = True
+    field_origins: dict[str, BriefFieldOrigin] = Field(default_factory=dict)
+    field_evidence_quotes: dict[str, str] = Field(default_factory=dict)
 
 
 class GeneratorRequest(BaseModel):
@@ -173,3 +182,5 @@ class GeneratorDescriptor(BaseModel):
     hardware_requirements: dict[str, Any] = Field(default_factory=dict)
     rights_classification: RightsClassification = RightsClassification.UNKNOWN
     runtime: str = "isolated"
+    duration_min_s: float | None = None
+    duration_max_s: float | None = None

@@ -96,6 +96,7 @@ class StableAudio3Provider:
             hardware_requirements={"worker": "CUDA with Flash Attention; exact fit measured on worker"},
             rights_classification=RightsClassification.UNKNOWN,
             runtime="official-stable-audio-3-worker",
+            duration_min_s=1.0, duration_max_s=380.0,
         )
 
     def _endpoint(self, path: str) -> str:
